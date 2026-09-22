@@ -1,6 +1,7 @@
 # 첫 vertical slice 구현 계획
 
-상태: integration gate에서 차단. 구현 완료 계획이 아닌 실행 기준이다.
+상태: write/observer integration gate에서 차단. 독립적인 읽기 전용 gateway와 진단은 구현했다.
+전체 vertical slice 구현 완료를 뜻하지 않는다.
 
 **Goal:** 기존 Herdr Claude를 발견하고 기존 transcript를 Chat으로 읽으며 같은 PTY/native session에
 prompt를 보내고 응답을 transcript에서 다시 관찰한다. 새 agent/session 생성은 허용하지 않는다.
@@ -29,6 +30,13 @@ Client는 normalized event만 소비한다.
 - [ ] verify: observer 2개 connect/disconnect, resize 변경 없음, resume/start 호출 없음, 기존 process 유지.
 
 ## 2. Bridge read path
+
+- [x] `mise.toml`, `go.mod`: 설치된 toolchain version 고정. 아직 외부 dependency가 없어 `go.sum`은 없다.
+- [x] `internal/herdr/gateway.go`: 실제 public API의 snapshot/process 조회, timeout/size/response identity 검증.
+- [x] `cmd/doctor/main.go`: 기존 server의 association과 구현되지 않은 capability를 읽기 전용으로 보고.
+- [x] 위 gateway/진단에 대해 `go test -race ./...`, `go vet ./...` 및 실제 Herdr 0.9.1 조회 검증.
+
+이 기반은 아래 read path 전체 완료를 의미하지 않는다. Herdr write/observer gate와 별개로 검증했다.
 
 예정 파일과 책임:
 
