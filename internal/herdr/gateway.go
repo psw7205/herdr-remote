@@ -65,6 +65,36 @@ type APIError struct {
 	Message string `json:"message"`
 }
 
+// TerminalSnapshot is a complete visible frame, not an append-only byte stream.
+// Consumers replace their frame instead of appending it to terminal history.
+type TerminalSnapshot struct {
+	PaneID    string `json:"pane_id"`
+	Source    string `json:"source"`
+	Format    string `json:"format"`
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated"`
+}
+
+func (g *Gateway) TerminalSnapshot(ctx context.Context, paneID string) (TerminalSnapshot, error) {
+	if paneID == "" {
+		return TerminalSnapshot{}, ErrEmptyTarget
+	}
+	var result struct {
+		Type string            `json:"type"`
+		Read *TerminalSnapshot `json:"read"`
+	}
+	// Visible ANSI cannot trigger Herdr's interactive alternate-screen history
+	// collection. Never switch to recent/recent_unwrapped to obtain more lines.
+	params := map[string]any{"pane_id": paneID, "source": "visible", "format": "ansi", "strip_ansi": false}
+	if err := g.read(ctx, "pane.read", params, &result); err != nil {
+		return TerminalSnapshot{}, err
+	}
+	if result.Type != "pane_read" || result.Read == nil || result.Read.PaneID != paneID || result.Read.Source != "visible" || result.Read.Format != "ansi" {
+		return TerminalSnapshot{}, errors.New("invalid visible ANSI terminal snapshot")
+	}
+	return *result.Read, nil
+}
+
 func (e *APIError) Error() string { return e.Code + ": " + e.Message }
 
 func (g *Gateway) Snapshot(ctx context.Context) (Snapshot, error) {

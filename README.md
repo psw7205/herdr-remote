@@ -33,9 +33,9 @@ JSON report의 `blockers`와 `write_enabled`를 확인한다. 종료 코드 0은
 vertical slice 완료나 write capability 지원을 의미하지 않는다. native association은 Herdr의
 보고 여부일 뿐 transcript resolution 완료를 뜻하지 않는다.
 
-`doctor`는 기존 session snapshot과 명시한 pane의 process 정보만 조회한다.
+`doctor`는 기존 session snapshot, 명시한 pane의 process 정보, visible ANSI terminal frame을 읽는다.
 prompt/interrupt/resize/attach/start/resume은 호출하지 않는다. transcript 내용과 native session ID를
-진단 출력에 포함하지 않는다. 각 socket 요청은 최대 5초, 응답은 최대 4 MiB로 제한한다.
+진단 출력에 포함하지 않는다. terminal frame은 성공 여부만 보고한다. 각 socket 요청은 최대 5초, 응답은 최대 4 MiB로 제한한다.
 
 ## 현재 확인한 상태
 
@@ -45,3 +45,6 @@ prompt/interrupt/resize/attach/start/resume은 호출하지 않는다. transcrip
 `go test -race ./...`는 socket framing, identity 보존, 누락 association, 잘못된 pane/response ID,
 malformed/oversized response, API error, cancellation, 진단 결과를 검증한다.
 이 테스트는 실제 prompt handoff 또는 stale write 차단을 증명하지 않는다.
+
+Terminal gateway는 `visible` + `ansi` frame만 읽는다. 기존 direct attach 및 interactive
+history collection을 호출하지 않는다. frame polling은 raw PTY byte stream과 다르다.
