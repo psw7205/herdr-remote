@@ -56,3 +56,21 @@ func TestDoctorReportsProcessFailurePerPane(t *testing.T) {
 		t.Fatal("process failure hidden")
 	}
 }
+
+func (f fixtureReader) TerminalSnapshot(_ context.Context, id string) (herdr.TerminalSnapshot, error) {
+	return herdr.TerminalSnapshot{PaneID: id, Source: "visible", Format: "ansi", Text: "private terminal output"}, nil
+}
+func TestDoctorReportsVisibleReadWithoutOutputDisclosure(t *testing.T) {
+	var out bytes.Buffer
+	if err := diagnose(context.Background(), fixtureReader{}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var got report
+	json.Unmarshal(out.Bytes(), &got)
+	if !got.Agents[0].VisibleSnapshotAvailable {
+		t.Fatal("visible snapshot not inspected")
+	}
+	if bytes.Contains(out.Bytes(), []byte("private terminal output")) {
+		t.Fatal("terminal text disclosed")
+	}
+}

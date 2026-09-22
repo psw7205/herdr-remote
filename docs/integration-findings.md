@@ -99,15 +99,25 @@ text 전달 후 Enter 이전에 binding이 바뀌면 후속 byte 전송을 멈�
 원자적 compare-and-write로 표현하지 않는다. 안전한 수신 대상 보장 수준을 actor 테스트와 실제
 process 교체 테스트로 입증하기 전에는 write capability를 활성화하지 않는다.
 
-### B2 — passive Terminal observer 없음
+### B2 — direct attach는 부적합하지만 passive snapshot은 지원됨
 
-기존 attach를 subprocess로 감싸는 것은 resize ownership, 단일 owner, implicit resume 문제를 숨긴다.
-공개 JSON API의 terminal snapshot과 실제 byte stream을 구분한다. snapshot을 지원하더라도
-raw interactive fallback은 B1의 binding 검증을 함께 적용해야 한다.
+후속 source/runtime 조사로 최초 결론을 수정했다. raw PTY byte stream observer는 없지만,
+첫 slice의 Terminal mirror에 raw stream이 반드시 필요한 것은 아니다.
 
-필요한 최소 capability는 기존 terminal의 관찰 전용 snapshot/stream, 여러 observer,
-desktop size 유지, no-resume/no-start, observer detach의 lifecycle 독립이다.
-wire 이름은 아직 **제안**이며 존재하는 Herdr API로 취급하지 않는다.
+`pane.read`에 `source: visible`, `format: ansi`, `strip_ansi: false`를 보내면 현재 화면을
+읽는다. 실제 Herdr 0.9.1에서 38줄 ANSI frame을 받았다. `src/app/api_helpers.rs`의
+`read_terminal_snapshot`은 이 조합을 `visible_ansi()`로 처리한다.
+`src/server/headless.rs`의 `alt_screen_read_spec`은 text+recent 계열에서만 interactive
+history collection을 수행하므로 visible+ansi는 자동 scroll input도 유발하지 않는다.
+
+Bridge는 frame을 주기적으로 읽어 client에 교체용 snapshot으로 전달할 수 있다.
+연결마다 attach owner를 잡지 않고 resize/resume/start를 호출하지 않는다. 이를 raw output
+stream 또는 historical scrollback 보장으로 표현하지 않는다. intermediate frame은 생략될 수
+있으며 semantic transcript event의 lossless replay와 별개다.
+
+따라서 별도 observer API 확장은 첫 slice의 선행 조건에서 제거한다. `TerminalSnapshot`
+gateway와 진단에 실제 read 경로를 구현했다. xterm.js renderer 및 input은 아직 구현 전이며,
+interactive fallback의 write는 여전히 B1을 해결해야 한다.
 
 ### B3 — 현재 native hook 미설치
 
@@ -119,9 +129,9 @@ Herdr에서 검증하여 연결하거나, 기존 process의 지원되는 session
 ### Gate 결론
 
 현재 설치 버전만으로 요청한 모든 invariant를 보장하는 write-enabled vertical slice는 만들 수 없다.
-UI를 먼저 만들어 성공한 것으로 보이게 하지 않는다. 세 blocker는 Herdr 변경 및 기존 runtime에 대한
-검증을 필요로 한다. 이 조사에서는 Herdr 수정·업데이트·재시작, agent prompt/interrupt,
+UI를 먼저 만들어 성공한 것으로 보이게 하지 않는다. B1과 B3는 Herdr 변경 및 기존 runtime에 대한
+검증을 필요로 한다. B2의 read path는 기존 API로 해결 가능하다고 확인했다. 이 조사에서는 Herdr 수정·업데이트·재시작, agent prompt/interrupt,
 integration 설치, 새 session 생성 모두 수행하지 않았다.
 
-추천: Herdr의 작은 명시적 capability 확장을 선행 — 이유는 runtime owner 안에서 입력과
+추천: Herdr의 조건부 입력 capability 확장을 선행 — 이유는 runtime owner 안에서 입력과
 관찰 경계를 바로잡는 것이 Bridge의 PID polling/mtime guessing/private attach 우회보다 요구사항에 맞기 때문이다.

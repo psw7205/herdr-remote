@@ -189,3 +189,48 @@ func TestCancellationClosesIdleSocket(t *testing.T) {
 		t.Fatal("socket remained open")
 	}
 }
+
+func TestTerminalSnapshotIsPassiveVisibleANSI(t *testing.T) {
+	path := socketServer(t, func(c net.Conn) {
+		var req struct {
+			ID     string `json:"id"`
+			Method string `json:"method"`
+			Params struct {
+				PaneID    string `json:"pane_id"`
+				Source    string `json:"source"`
+				Format    string `json:"format"`
+				StripANSI bool   `json:"strip_ansi"`
+				Lines     *int   `json:"lines"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(c).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		if req.Method != "pane.read" || req.Params.PaneID != "w1:p2" || req.Params.Source != "visible" || req.Params.Format != "ansi" || req.Params.StripANSI || req.Params.Lines != nil {
+			t.Errorf("unsafe read: %+v", req)
+		}
+		json.NewEncoder(c).Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "pane_read", "read": map[string]any{"pane_id": "w1:p2", "source": "visible", "format": "ansi", "text": "\x1b[32mReady\x1b[0m\r\n", "truncated": false}}})
+	})
+	got, err := NewGateway(path).TerminalSnapshot(context.Background(), "w1:p2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Text != "\x1b[32mReady\x1b[0m\r\n" {
+		t.Fatalf("lost ANSI: %q", got.Text)
+	}
+}
+
+func TestTerminalSnapshotRejectsWrongSourceOrTarget(t *testing.T) {
+	for _, wire := range []string{
+		`{"type":"pane_read","read":{"pane_id":"w1:p9","source":"visible","format":"ansi"}}`,
+		`{"type":"pane_read","read":{"pane_id":"w1:p2","source":"recent","format":"ansi"}}`,
+		`{"type":"pane_read","read":{"pane_id":"w1:p2","source":"visible","format":"text"}}`,
+		`{"type":"pane_read","read":null}`,
+	} {
+		path := socketServer(t, func(c net.Conn) { respond(t, c, "pane.read", wire) })
+		if _, err := NewGateway(path).TerminalSnapshot(context.Background(), "w1:p2"); err == nil {
+			t.Fatal("invalid terminal snapshot accepted")
+		}
+	}
+}

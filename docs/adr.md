@@ -2324,7 +2324,7 @@ process 종료와 OS PTY 수신 사이 race까지 무조건 해결했다고 가�
 
 ## Status
 
-Accepted (현재 direct attach는 이 contract를 충족하지 않음)
+Accepted (관찰은 기존 visible ANSI snapshot, 입력은 ADR-034 필요)
 
 ## Decision
 
@@ -2333,5 +2333,8 @@ Herdr/desktop이 PTY size owner다. mobile observer attach는 start, resume, res
 Raw terminal input에도 ADR-034 binding 보호와 ADR-033 retry 의미를 적용한다.
 
 현재 Herdr direct attach는 resize와 pending resume 경로를 포함하므로 그대로 proxy하지 않는다.
-지원되는 observer capability가 없을 때 xterm.js만 붙여 Terminal fallback이 구현되었다고
-표시하지 않는다. unsupported interaction의 안전한 fallback은 첫 slice의 acceptance 조건이다.
+첫 slice의 관찰은 공개 `pane.read`의 `visible` + `ansi` snapshot을 사용한다. 이는 raw PTY
+byte stream이 아니며 client는 frame을 교체 표시한다. intermediate frame/history를 보장하지 않는다.
+이 경로는 attach owner를 점유하거나 resize/resume/start하지 않는다. `recent` text read의
+interactive history collection으로 대체하지 않는다. renderer만 붙여 interactive fallback 완료로
+표시하지 않으며 ADR-034 조건부 입력까지 검증해야 한다.

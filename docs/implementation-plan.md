@@ -1,6 +1,6 @@
 # 첫 vertical slice 구현 계획
 
-상태: write/observer integration gate에서 차단. 독립적인 읽기 전용 gateway와 진단은 구현했다.
+상태: conditional write integration gate에서 차단. 독립적인 읽기 전용 gateway와 진단은 구현했다.
 전체 vertical slice 구현 완료를 뜻하지 않는다.
 
 **Goal:** 기존 Herdr Claude를 발견하고 기존 transcript를 Chat으로 읽으며 같은 PTY/native session에
@@ -22,12 +22,13 @@ Client는 normalized event만 소비한다.
 - [x] 실행 중 Claude process와 native transcript identity 읽기 검증.
 - [ ] Herdr `src/api/schema/agents.rs`, `src/app/api/agents.rs`, `src/terminal/state.rs`,
   `src/pty/actor/unix.rs`에서 authoritative binding, expected binding, queued write invalidation 구현.
-- [ ] Herdr terminal observer는 `src/server/headless.rs`의 owner attach와 별도 경로로 구현.
-  public API boundary를 유지하며 private TUI protocol 복제를 피한다.
+- [x] passive 관찰은 기존 `pane.read` visible+ansi로 가능함을 source/runtime에서 확인.
+  별도 observer API를 선행 구현하지 않는다. private attach와 interactive history read는 사용하지 않는다.
 - [ ] Claude PID/native session association을 Herdr에서 검증하고 노출. main/subagent 및 same-cwd 혼동 차단.
 - [ ] verify: A→shell, A→B, 동일 native session resume/new process, PID 재사용, queue 대기 중 종료,
   text/Enter 사이 교체 모두에서 successor가 stale input을 받지 않는다. 미보장 시 write는 비활성.
-- [ ] verify: observer 2개 connect/disconnect, resize 변경 없음, resume/start 호출 없음, 기존 process 유지.
+- [x] 실제 snapshot reader 2개 동시 조회/종료 후 agent identity, process info, layout 동일 확인.
+  source에서 해당 read 경로가 attach/resume/start를 호출하지 않음을 확인.
 
 ## 2. Bridge read path
 
@@ -36,7 +37,7 @@ Client는 normalized event만 소비한다.
 - [x] `cmd/doctor/main.go`: 기존 server의 association과 구현되지 않은 capability를 읽기 전용으로 보고.
 - [x] 위 gateway/진단에 대해 `go test -race ./...`, `go vet ./...` 및 실제 Herdr 0.9.1 조회 검증.
 
-이 기반은 아래 read path 전체 완료를 의미하지 않는다. Herdr write/observer gate와 별개로 검증했다.
+이 기반은 아래 read path 전체 완료를 의미하지 않는다. Herdr conditional write gate와 별개로 검증했다.
 
 예정 파일과 책임:
 
@@ -92,7 +93,8 @@ Client는 normalized event만 소비한다.
 - [ ] 선택 session/binding을 고정하고 바뀌면 composer를 잠근다. draft는 session별로 유지한다.
 - [ ] HTTP snapshot cursor로 WS subscribe. epoch가 바뀌면 snapshot으로 교체한다.
   reconnect와 background/foreground 전환에서 오래된 callback을 무시한다.
-- [ ] xterm.js는 같은 session의 observer만 사용하고 local viewport를 Herdr resize에 전달하지 않는다.
+- [ ] xterm.js는 같은 session의 visible ANSI frame을 교체 표시하고 local viewport를 Herdr resize에 전달하지 않는다.
+  polling 사이 intermediate frame은 생략 가능하며 raw byte stream/history라고 표시하지 않는다.
   unsupported 상태에서 Chat composer를 제한하고 Terminal로 전환한다.
 - [ ] verify: client tests로 late response/session switch/duplicate event/unknown event/reconnect 검증.
   `pnpm --dir web build` 및 browser에서 mobile viewport·IME·safe area·Markdown 표시 확인.

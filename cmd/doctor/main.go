@@ -16,15 +16,18 @@ import (
 type reader interface {
 	Snapshot(context.Context) (herdr.Snapshot, error)
 	ProcessInfo(context.Context, string) (herdr.ProcessInfo, error)
+	TerminalSnapshot(context.Context, string) (herdr.TerminalSnapshot, error)
 }
 
 type agentReport struct {
-	PaneID            string `json:"pane_id"`
-	Agent             string `json:"agent"`
-	Status            string `json:"herdr_status"`
-	NativeAssociation bool   `json:"native_association"`
-	ProcessCount      int    `json:"foreground_process_count"`
-	ProcessError      string `json:"process_error,omitempty"`
+	PaneID                   string `json:"pane_id"`
+	Agent                    string `json:"agent"`
+	Status                   string `json:"herdr_status"`
+	NativeAssociation        bool   `json:"native_association"`
+	ProcessCount             int    `json:"foreground_process_count"`
+	ProcessError             string `json:"process_error,omitempty"`
+	VisibleSnapshotAvailable bool   `json:"visible_snapshot_available"`
+	TerminalReadError        string `json:"terminal_read_error,omitempty"`
 }
 
 type report struct {
@@ -43,7 +46,7 @@ func diagnose(ctx context.Context, gateway reader, out io.Writer) error {
 	}
 	r := report{Version: s.Version, Protocol: s.Protocol, Agents: []agentReport{}, Blockers: []string{
 		"Conditional runtime binding input is not implemented; writes remain disabled.",
-		"Passive no-resize/no-resume terminal observation is not implemented.",
+		"Interactive Terminal fallback still requires conditional input and a client renderer.",
 	}}
 	for _, a := range s.Agents {
 		item := agentReport{PaneID: a.PaneID, Agent: a.Agent, Status: a.Status}
@@ -53,6 +56,12 @@ func diagnose(ctx context.Context, gateway reader, out io.Writer) error {
 			item.ProcessError = err.Error()
 		} else {
 			item.ProcessCount = len(p.ForegroundProcesses)
+		}
+		_, err = gateway.TerminalSnapshot(ctx, a.PaneID)
+		if err != nil {
+			item.TerminalReadError = err.Error()
+		} else {
+			item.VisibleSnapshotAvailable = true
 		}
 		r.Agents = append(r.Agents, item)
 	}
