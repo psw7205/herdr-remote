@@ -4,7 +4,8 @@
 **Product type:** Self-hosted mobile-first Herdr client
 **Primary client:** Web / PWA
 **Network scope:** Private Tailnet only
-**Initial agent support:** Claude Code, Codex
+**First vertical slice:** Claude Code (integration gate 통과 후)
+**Follow-up agent:** Codex
 **Target user:** Single user / developer
 
 ---
@@ -170,7 +171,7 @@ MVP의 목표는 다음 사용자 흐름을 안정적으로 지원하는 것이�
 
 * agent 종류
 * workspace
-* working / waiting / idle / finished 상태
+* `needs_attention` / `working` / `idle` / `completed` / `error` 상태
 * 마지막 activity
 * attention 필요 여부
 
@@ -354,7 +355,7 @@ background
 │ Codex 작업 완료
 │
 ▼
-notification
+notification (후속 optional)
 │
 ▼
 앱 재진입
@@ -367,7 +368,8 @@ notification
 
 # 7. Information Architecture
 
-MVP의 주요 화면 구조는 다음과 같다.
+전체 화면 구조는 다음과 같다. 첫 slice는 Sessions, Chat, Terminal에 한정하고
+Changes와 확장 Settings는 후속 단계다.
 
 ```text
 /
@@ -455,7 +457,16 @@ agent_session_id
 
 `agent_session_id`를 사용할 수 있는 경우 transcript 탐색의 primary key로 사용한다.
 
-cwd 기반 transcript guessing은 fallback으로만 고려한다.
+cwd/mtime 기반 transcript guessing은 첫 slice에서 사용하지 않는다.
+
+모든 write는 Herdr가 발급한 현재 `runtime_binding`을 조건으로 실행한다.
+`pane_id`, `terminal_id`, 일반 `revision`은 process/session incarnation을 대신하지 않는다.
+identity가 불명확하거나 조건부 입력을 지원하지 않으면 prompt/interrupt/raw input을 비활성화한다.
+
+목록은 현재 Herdr에서 발견한 active agent를 대상으로 한다. 열어 둔 session의 process가
+종료되면 `ended/unavailable`로 표시하고 입력과 Terminal 제어를 비활성화한다.
+`completed`는 turn 완료 상태이며 살아 있는 process에서 후속 prompt가 가능하다.
+historical transcript만 남은 session을 탐색하는 기능은 첫 slice에서 제외한다.
 
 ---
 
@@ -624,6 +635,14 @@ Existing Agent Process
 * agent context가 유지되며
 * CLI 자체의 state machine을 우회하지 않는다.
 
+Command는 `command_id`, `session_id`, `runtime_binding`, `command_type`, `payload`를 가진다.
+결과는 `accepted`, `rejected`, `delivery_unknown`으로 구분한다. 같은 ID의 retry는
+같은 결과를 반환하며 payload/target이 다르면 거부한다. 전송 전에 durable receipt를 기록하고
+timeout/crash 뒤 불확실한 command를 자동 재전송하지 않는다. receipt는 conversation DB가 아니다.
+
+Chat의 user message는 native transcript에서 관찰한 뒤 확정한다. 전송 중 표시는 별도의 pending UI다.
+Herdr 조건부 write가 없으면 조회 후 입력하는 workaround로 이 보장을 대체하지 않는다.
+
 ---
 
 # 14. Chat UI
@@ -733,7 +752,7 @@ Waiting for input
 * keyboard safe area 대응
 * 긴 prompt 작성 가능
 
-초기 attachment 지원:
+후속 optional attachment 지원 (첫 slice 및 핵심 MVP 필수 조건에서 제외):
 
 * image
 * 일반 file
@@ -827,7 +846,7 @@ Terminal은 동일 Herdr pane의 실제 PTY를 보여준다.
 필요 기능:
 
 * terminal rendering
-* resize
+* desktop/Herdr의 PTY 크기를 유지하는 mirror
 * scroll
 * text input
 * Esc
@@ -838,13 +857,19 @@ Terminal은 동일 Herdr pane의 실제 PTY를 보여준다.
 
 Terminal을 full IDE 수준으로 확장하지 않는다.
 
+Terminal observer는 기존 session만 관찰하며 resume/start/resize/takeover를 하지 않는다.
+raw input에도 동일한 runtime binding 보호를 적용한다. observer disconnect는 agent lifecycle을 바꾸지 않는다.
+현재 Herdr direct attach는 이 조건을 충족하지 않으므로 그대로 proxy하지 않는다.
+
 ---
 
 # 20. Changes View
 
-Agent가 수정한 파일을 모바일에서 빠르게 검토하는 기능이다.
+Git working tree의 변경 파일을 모바일에서 읽는 후속 optional 기능이다.
+사용자 변경이 섞일 수 있으므로 특정 agent의 변경이라고 단정하지 않는다.
+첫 slice 및 핵심 MVP 필수 조건에서 제외한다.
 
-MVP 요구사항:
+후속 요구사항:
 
 ```text
 changed files
@@ -891,7 +916,10 @@ Bridge를 public interface에 직접 bind하지 않는 구성을 기본으로 �
 
 MVP에는 별도의 회원가입 / login system을 도입하지 않는다.
 
-Tailnet 접근 제어를 security boundary로 사용한다.
+Tailnet network boundary + 최소 권한 ACL + browser Origin 검증을 security boundary로 사용한다.
+Bridge는 localhost에 bind하고 외부 노출은 Tailscale Serve로 한정한다.
+HTTP mutation과 WebSocket handshake에서 명시적인 exact Origin allowlist를 검증하며
+wildcard CORS, null Origin, 임의 Host를 허용하지 않는다. mutation에는 JSON 요청을 요구한다.
 
 필요할 경우 추가적인 lightweight application lock을 추후 제공할 수 있다.
 
@@ -937,7 +965,11 @@ Bridge
 153...current replay
 ```
 
-정확한 replay 구현은 adapter/source 특성에 따라 달라질 수 있다.
+Cursor는 `{epoch, sequence}`다. snapshot은 cursor C와 상태를 함께 반환한다.
+`subscribe(after=C)`는 같은 session lock에서 C 이후 replay를 확보하고 live subscriber를 등록한다.
+subscriber queue overflow는 drop 대신 재동기화를 요구한다.
+Bridge restart, transcript 교체, 복구 불가능한 resync는 epoch를 바꾼다.
+다른 epoch 또는 replay buffer 범위 밖 cursor에는 fresh snapshot을 반환한다.
 
 중요한 요구사항은:
 
@@ -967,7 +999,8 @@ update attention state
 
 # 25. Notifications
 
-MVP notification 대상은 두 종류로 제한한다.
+Notification은 후속 optional 기능이며 첫 slice 및 핵심 MVP 필수 조건에서 제외한다.
+구현 시 대상은 두 종류로 제한한다.
 
 ### Input required
 
@@ -1103,32 +1136,36 @@ Client connection loss가 agent process loss처럼 보이면 안 된다.
 
 # 30. MVP Scope
 
-MVP에는 다음 기능을 포함한다.
+아래 표는 핵심 MVP와 후속 optional capability를 구분한다.
+첫 구현은 Claude 하나의 discovery → transcript Chat → 동일 PTY prompt → transcript 응답이며,
+interrupt/reconnect/동일 Terminal fallback을 포함한다. Herdr integration gate를 통과하기 전에는
+write-enabled UI를 구현 완료로 간주하지 않는다. 세부 gate와 미지원 사항은
+`docs/integration-findings.md`, 실행 순서는 `docs/implementation-plan.md`에 기록한다.
 
 | Area                         | MVP   |
 | ---------------------------- | ----- |
 | Herdr integration            | Yes   |
 | Single host                  | Yes   |
 | Claude Code                  | Yes   |
-| Codex                        | Yes   |
+| Codex                        | 후속 adapter |
 | Running session discovery    | Yes   |
 | Session list                 | Yes   |
 | Attention status             | Yes   |
 | Transcript chat              | Yes   |
 | Markdown / code              | Yes   |
-| Tool cards                   | Basic |
+| Tool cards                   | 후속 optional |
 | Streaming / live updates     | Yes   |
 | Send prompt to existing pane | Yes   |
 | Interrupt                    | Yes   |
 | Reconnect                    | Yes   |
 | Terminal fallback            | Yes   |
-| File attachment              | Basic |
-| Changed files                | Yes   |
-| Diff viewer                  | Yes   |
+| File attachment | 후속 optional |
+| Changed files | 후속 optional |
+| Diff viewer | 후속 optional |
 | PWA                          | Yes   |
 | Tailscale deployment         | Yes   |
-| Completion notification      | Yes   |
-| Input-required notification  | Yes   |
+| Completion notification | 후속 optional |
+| Input-required notification | 후속 optional |
 
 ---
 
@@ -1316,7 +1353,7 @@ MVP의 핵심 질문은 항상 다음이어야 한다.
 | Primary UX                  | Chat-first                       |
 | Terminal                    | Fallback                         |
 | Conversation DB             | No independent source of truth   |
-| Initial agents              | Claude Code + Codex              |
+| Initial agents              | Claude Code, 이후 Codex           |
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Version:** v0.1
-**Related:** `docs/PRD.md`
+**Related:** `docs/prd.md`
 
 ---
 
@@ -223,6 +223,9 @@ agent type
 + transcript mtime
 ```
 
+첫 slice에서는 cwd/mtime guessing을 사용하지 않는다.
+실제 PID metadata와 OS process 시작 시간을 대조한 read-only resolution은 가능하지만
+write authority는 Herdr가 검증한 binding만 사용한다.
 fallback 결과가 ambiguous하면 임의 선택하지 않는다.
 
 사용자에게:
@@ -592,7 +595,13 @@ Bridge
    └ subscribe live
 ```
 
-history가 너무 오래되어 replay가 불가능한 경우 새로운 snapshot을 반환한다.
+Cursor는 `{epoch, sequence}`이며 snapshot과 cursor를 같은 session lock에서 읽는다.
+`subscribe(after=C)`는 같은 lock에서 replay C+1…current를 확보하고 live 등록을 완료한다.
+network 전송은 lock 밖에서 한다. queue overflow를 조용히 drop하지 않는다.
+
+Bridge restart, transcript identity replacement, 복구 불가능한 resync 시 epoch를 교체한다.
+다른 epoch, 미래 sequence, buffer miss는 fresh snapshot으로 복구한다.
+이 결정은 Accepted ADR-019의 bounded buffer를 사용한다.
 
 ## Why
 
@@ -932,6 +941,8 @@ repository browser IDE
 
 Proposed
 
+후속 optional capability. 첫 slice 및 핵심 MVP의 필수 전제가 아니다.
+
 ## Context
 
 모바일에서는 다음을 보내고 싶을 수 있다.
@@ -997,6 +1008,8 @@ MVP에서는 temporary attachment로 취급하며 retention 정책은 추후 확
 
 Proposed
 
+후속 optional capability. 첫 slice 및 핵심 MVP의 필수 전제가 아니다.
+
 ## Context
 
 Conversation transcript만으로는 agent가 실제 어떤 파일을 수정했는지 정확하게 알기 어렵다.
@@ -1046,6 +1059,8 @@ Herdr가 agent별 worktree isolation을 보장하는 경우 추후 더 정확한
 ## Status
 
 Proposed
+
+후속 optional capability. 첫 slice 및 핵심 MVP의 필수 전제가 아니다.
 
 ## Context
 
@@ -1138,7 +1153,7 @@ idle
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -1168,7 +1183,9 @@ or
 recent N minutes
 ```
 
-정확한 크기는 implementation 단계에서 정한다.
+첫 구현은 session별 최근 1,024 events 또는 payload 8 MiB 중 먼저 도달하는 한도를 사용한다.
+한 event가 한도를 초과하면 replay 대신 snapshot 재동기화를 사용한다.
+Subscriber queue는 128 events로 제한하며 overflow는 연결 종료/재동기화를 유발한다.
 
 buffer miss 시 transcript에서 새로운 snapshot을 만든다.
 
@@ -1389,9 +1406,11 @@ MVP에서는:
 
 ## Security Assumption
 
-Tailnet에 접근 가능한 device는 사용자가 관리하는 trusted device라고 가정한다.
-
-이 가정이 변경되면 인증 ADR을 다시 검토한다.
+Tailnet membership만으로 browser control API 호출을 신뢰하지 않는다.
+보안 경계는 Tailnet + 최소 권한 ACL + exact browser Origin 검증이다.
+localhost bind를 기본으로 하며 mutation과 WS handshake는 explicit Origin allowlist를 적용한다.
+wildcard CORS/null Origin을 허용하지 않는다. HTTP mutation은 JSON content type을 요구하고
+Host도 명시한 배포 origin과 대조한다. README 배포 절차에 Tailscale ACL 최소 권한 구성을 포함한다.
 
 ---
 
@@ -1740,16 +1759,16 @@ Accepted
 
 ## Decision
 
-MVP architecture가 성공했다고 판단하려면 다음 end-to-end scenario가 동작해야 한다.
+첫 vertical slice가 성공했다고 판단하려면 다음 end-to-end scenario가 동작해야 한다.
 
 ```text
-1. Desktop에서 Herdr 실행
+1. 이미 실행 중인 Desktop Herdr agent 사용
 
-2. Codex session에서 작업 시작
+2. Claude session에서 작업 시작
 
 3. Mobile PWA 실행
 
-4. 같은 Codex session 확인
+4. 같은 Claude session 확인
 
 5. 기존 conversation 확인
 
@@ -1757,13 +1776,13 @@ MVP architecture가 성공했다고 판단하려면 다음 end-to-end scenario�
    "테스트까지 진행해줘"
    입력
 
-7. 기존 Codex process가 입력 수신
+7. 기존 Claude process가 입력 수신
 
 8. Desktop terminal에서도 동일 conversation 확인
 
 9. Mobile screen lock
 
-10. Codex 작업 계속
+10. Claude 작업 계속
 
 11. 작업 완료
 
@@ -1771,7 +1790,7 @@ MVP architecture가 성공했다고 판단하려면 다음 end-to-end scenario�
 
 13. 결과 자동 복구
 
-14. Changed Files 확인
+14. conversation 복구 확인 (Changed Files는 후속 optional)
 
 15. 필요 시 Terminal View 진입
 ```
@@ -1779,7 +1798,7 @@ MVP architecture가 성공했다고 판단하려면 다음 end-to-end scenario�
 다음 중 하나라도 발생하면 핵심 architecture 결함으로 본다.
 
 ```text
-duplicate Codex process
+duplicate Claude process
 
 different conversation
 
@@ -2143,13 +2162,14 @@ Tailnet 밖에서 Bridge에 직접 접근하는 구성을 기본으로 지원하
 
 ---
 
-# Decisions Intentionally Left Open
+# 기술 선택과 남은 결정
 
-다음 사항은 구현 전에 benchmark 또는 prototype을 통해 결정한다.
+L1/L2/L4는 사용자 지정 stack으로 확정했다. L3 저장 형식과 L5 transport 세부사항은
+구현 검증으로 결정하며 L6 Web Push는 후속 optional capability다.
 
 ## L1 — Backend language/framework
 
-후보를 먼저 고정하지 않는다.
+Go로 확정한다. `net/http`, `coder/websocket`, `fsnotify`, `log/slog`를 사용한다.
 
 필요 조건:
 
@@ -2165,15 +2185,15 @@ low operational overhead
 
 ## L2 — Client framework
 
-Web/PWA라는 플랫폼까지만 결정한다.
-
-React, Svelte 등 구체적인 framework 선택은 별도 기술 결정으로 둔다.
+React + TypeScript + Vite로 확정한다. pnpm과 mise로 package/toolchain version을 관리한다.
+Terminal UI는 xterm.js를 사용한다.
 
 ---
 
 ## L3 — Embedded persistence
 
-필요하면 SQLite 등 embedded storage를 검토하지만 MVP 시작 전에 필수로 도입하지 않는다.
+conversation persistence는 추가하지 않는다. crash 뒤 command retry 중복을 막는 최소 durable receipt만
+허용한다. 정확한 embedded 저장 형식은 fsync/atomic reserve/recovery 검증을 기준으로 선택한다.
 
 ---
 
@@ -2187,7 +2207,8 @@ polling
 hybrid
 ```
 
-OS와 transcript writing behavior를 실제 측정한 뒤 결정한다.
+`fsnotify`를 주 경로로 하고 event 유실/rename 복구를 위한 제한적 reconciliation을 병행한다.
+읽기는 offset 이후 incremental 방식이며 전체 transcript를 polling마다 parse하지 않는다.
 
 ---
 
@@ -2253,3 +2274,64 @@ Client는 이를 메신저 형태로 표현한다.
 핵심 architecture 원칙은 다음 한 문장으로 요약한다.
 
 > **Do not recreate the agent session; project the existing session into a mobile-friendly interface.**
+
+
+---
+
+# ADR-033 — Command receipt로 retry 중복 실행을 방지한다
+
+## Status
+
+Accepted
+
+## Decision
+
+Command envelope는 `command_id`, `session_id`, `runtime_binding`, `command_type`,
+`payload`다. `prompt`, `interrupt`, `terminal_input`은 별도 command type이다.
+
+Bridge는 ID와 canonical request digest를 durable하게 reserve한 뒤 한 번만 dispatch한다.
+동일 ID/digest의 동시 요청과 retry는 동일 receipt를 반환한다. 다른 payload/target은 conflict다.
+저장 실패는 전송 전에 reject한다. pending receipt가 남은 채 restart하면 `delivery_unknown`으로
+복구하고 자동 재전송하지 않는다. 전송 후 timeout이나 partial failure도 unknown이다.
+만료 receipt를 삭제한 뒤 같은 ID를 새 command처럼 수락하지 않는다. retention을 적용할 때는
+만료 namespace 전체를 거부하는 규칙을 함께 둔다.
+
+결과는 `accepted`, `rejected`, `delivery_unknown`이다. accepted는 PTY 전달 결과이며
+agent turn 성공이나 conversation 저장 완료를 뜻하지 않는다. message 확정은 transcript에서만 한다.
+receipt는 conversation 본문을 저장하는 DB가 아니며 command digest와 최소 상태만 유지한다.
+이 설계는 at-most-once dispatch이며 원격 process의 exactly-once 실행을 주장하지 않는다.
+
+# ADR-034 — Herdr가 runtime binding을 검증한 command만 전달한다
+
+## Status
+
+Accepted (현재 Herdr 0.9.1에서는 미지원)
+
+## Decision
+
+Herdr가 native session, foreground process incarnation, terminal을 결합한 opaque binding을
+발급한다. 모든 semantic/raw write는 client가 본 binding을 전달하며 mismatch/ended는 reject한다.
+Bridge의 get-then-write만으로 검증을 대체하지 않는다. API handler뿐 아니라 queue에서 실제
+input을 처리할 때도 binding을 검증하고 종료·교체 시 queued input을 무효화한다.
+text/Enter 중 일부가 전달되었으면 `delivery_unknown`으로 반환한다.
+
+`pane_id`, `terminal_id`, `revision`, `state_change_seq`는 단독 binding이 아니다.
+Herdr capability가 없거나 native identity가 불명확하면 write를 fail closed한다.
+process 종료와 OS PTY 수신 사이 race까지 무조건 해결했다고 가정하지 않으며
+실제 process 교체 acceptance를 통과하기 전에는 write-enabled handoff 완료로 표시하지 않는다.
+
+# ADR-035 — Mobile Terminal은 기존 PTY의 passive mirror다
+
+## Status
+
+Accepted (현재 direct attach는 이 contract를 충족하지 않음)
+
+## Decision
+
+Herdr/desktop이 PTY size owner다. mobile observer attach는 start, resume, resize, takeover를
+수행하지 않고 여러 observer를 허용한다. detach는 observer만 제거한다.
+Raw terminal input에도 ADR-034 binding 보호와 ADR-033 retry 의미를 적용한다.
+
+현재 Herdr direct attach는 resize와 pending resume 경로를 포함하므로 그대로 proxy하지 않는다.
+지원되는 observer capability가 없을 때 xterm.js만 붙여 Terminal fallback이 구현되었다고
+표시하지 않는다. unsupported interaction의 안전한 fallback은 첫 slice의 acceptance 조건이다.
