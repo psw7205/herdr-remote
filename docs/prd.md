@@ -639,6 +639,9 @@ Command는 `command_id`, `session_id`, `runtime_binding`, `command_type`, `paylo
 결과는 `accepted`, `rejected`, `delivery_unknown`으로 구분한다. 같은 ID의 retry는
 같은 결과를 반환하며 payload/target이 다르면 거부한다. 전송 전에 durable receipt를 기록하고
 timeout/crash 뒤 불확실한 command를 자동 재전송하지 않는다. receipt는 conversation DB가 아니다.
+Client는 응답을 받기 전 브라우저가 reload되더라도 같은 초안과 binding에 같은
+`command_id`를 유지한다. 전달 여부가 불확실할 때 내용이나 binding이 바뀌면
+이전 command를 확인하거나 명시적으로 포기하기 전에는 새 ID로 보내지 않는다.
 
 Chat의 user message는 native transcript에서 관찰한 뒤 확정한다. 전송 중 표시는 별도의 pending UI다.
 Herdr 조건부 write가 없으면 조회 후 입력하는 workaround로 이 보장을 대체하지 않는다.

@@ -41,6 +41,8 @@ conversation 본문을 저장하지 않는다.
   record가 각각 한 번 생성됐고 Chat과 PC pane에서 응답을 확인했다. 새 Claude process는 없었다.
 - 같은 `command_id` retry가 추가 message를 만들지 않았다. Bridge 및 Herdr에서
   잘못된 binding을 거부했다.
+- Browser reload·timeout 뒤 같은 초안이 같은 `command_id`를 재사용하고, 다른
+  초안이나 binding은 불확실한 전송이 정리될 때까지 막도록 테스트했다.
 - Bridge 중단 중 Claude PID가 유지됐다. 재시작 후 transcript를 복구하고 이전 epoch
   cursor로 WS를 열었을 때 새 snapshot을 보냈다.
 - Terminal Esc를 기존 PTY에 전달했다. Chat↔Terminal 전환 전후 pane geometry가 같았다.
@@ -58,3 +60,5 @@ Tailnet 배포에서는 localhost Bridge를 Tailscale Serve에 연결하고, `Ta
 소유자 검증과 exact browser Origin을 모두 적용한다. 추가로
 network ACL/grant도 이후 최소 권한으로 좁히는 것이 좋다. 전역 tailnet policy 수정은 이
 vertical slice의 변경 범위가 아니다.
+Bridge는 사용자 `launchd` 서비스로 실행 중이며 재시작 후 native transcript를 복구했다.
+현재 tailnet에는 Serve 기능이 비활성화돼 있어 관리자 로그인·활성화가 남아 있다.
