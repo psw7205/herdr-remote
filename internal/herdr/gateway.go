@@ -37,6 +37,8 @@ type Agent struct {
 	TabID       string         `json:"tab_id"`
 	WorkspaceID string         `json:"workspace_id"`
 	Agent       string         `json:"agent"`
+	CWD         string         `json:"cwd"`
+	Title       string         `json:"terminal_title_stripped"`
 	Status      string         `json:"agent_status"`
 	Session     *NativeSession `json:"agent_session,omitempty"`
 }
@@ -73,6 +75,57 @@ type TerminalSnapshot struct {
 	Format    string `json:"format"`
 	Text      string `json:"text"`
 	Truncated bool   `json:"truncated"`
+}
+
+// Binding is issued by the Herdr server for one live native process/session.
+// A pane ID or terminal ID alone is never sufficient for a write.
+type Binding struct {
+	Token           string `json:"token"`
+	TerminalID      string `json:"terminal_id"`
+	NativeSessionID string `json:"native_session_id"`
+	ProcessID       uint32 `json:"process_id"`
+	Agent           string `json:"agent"`
+	CWD             string `json:"cwd"`
+}
+
+func (g *Gateway) Binding(ctx context.Context, paneID string) (Binding, error) {
+	if paneID == "" {
+		return Binding{}, ErrEmptyTarget
+	}
+	var result struct {
+		Type    string   `json:"type"`
+		Binding *Binding `json:"binding"`
+	}
+	if err := g.read(ctx, "agent.binding", map[string]string{"target": paneID}, &result); err != nil {
+		return Binding{}, err
+	}
+	if result.Type != "agent_binding" || result.Binding == nil || result.Binding.Token == "" || result.Binding.NativeSessionID == "" || result.Binding.ProcessID == 0 || result.Binding.TerminalID == "" {
+		return Binding{}, errors.New("invalid native runtime binding")
+	}
+	return *result.Binding, nil
+}
+
+func (g *Gateway) BoundInput(ctx context.Context, paneID, binding, kind, text string) error {
+	if paneID == "" {
+		return ErrEmptyTarget
+	}
+	if binding == "" {
+		return errors.New("native runtime binding required")
+	}
+	if kind != "prompt" && kind != "interrupt" && kind != "terminal_input" {
+		return errors.New("unsupported bound input type")
+	}
+	var result struct {
+		Type string `json:"type"`
+	}
+	params := map[string]any{"target": paneID, "binding": binding, "input": map[string]string{"type": kind, "text": text}}
+	if err := g.read(ctx, "agent.bound_input", params, &result); err != nil {
+		return err
+	}
+	if result.Type != "ok" {
+		return errors.New("invalid bound input response")
+	}
+	return nil
 }
 
 func (g *Gateway) TerminalSnapshot(ctx context.Context, paneID string) (TerminalSnapshot, error) {

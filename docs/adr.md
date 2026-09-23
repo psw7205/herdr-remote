@@ -1408,6 +1408,9 @@ MVP에서는:
 
 Tailnet membership만으로 browser control API 호출을 신뢰하지 않는다.
 보안 경계는 Tailnet + 최소 권한 ACL + exact browser Origin 검증이다.
+ACL이 넓은 배포에서는 Serve가 검증해 추가하는 `Tailscale-User-Login`을
+Bridge가 지정한 소유자와 대조한다. Serve는 클라이언트가 보낸 동일 header를 제거하며
+Bridge는 localhost에만 bind한다. 이 검증은 자체 login/password 시스템이 아니다.
 localhost bind를 기본으로 하며 mutation과 WS handshake는 explicit Origin allowlist를 적용한다.
 wildcard CORS/null Origin을 허용하지 않는다. HTTP mutation은 JSON content type을 요구하고
 Host도 명시한 배포 origin과 대조한다. README 배포 절차에 Tailscale ACL 최소 권한 구성을 포함한다.
