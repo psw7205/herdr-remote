@@ -33,6 +33,9 @@ go run ./cmd/bridge -herdr-socket "$HERDR_SOCKET_PATH"
 Bridge는 기본적으로 `127.0.0.1:8787`에만 bind하고 `web/dist`를 제공한다.
 브라우저에서 `http://127.0.0.1:8787`로 접속한다. server가 꺼져 있어도 agent는 계속 실행된다.
 Bridge 재시작 후 transcript에서 history를 재구성하고 cursor epoch를 교체한다.
+이 호스트에서는 Bridge가 사용자 `launchd` 서비스로 실행 중이다. 소스 변경 후에는
+`pnpm --dir web build`로 정적 파일을 다시 만들고, Go binary를 재빌드한 뒤 서비스를
+재시작해야 한다. 실행 설정은 사용자 LaunchAgent에만 있으며 Git에는 포함하지 않는다.
 
 모바일 Tailnet HTTPS에서는 Bridge를 다음처럼 실행한다. `<tailnet-host>`는
 `tailscale status --json`의 `Self.DNSName` 값이며 끝의 점을 제거한 host다.
@@ -53,6 +56,8 @@ Tailnet ACL이 넓을 수 있으므로 identity 검증이
 따라 대상 mobile device만 허용하도록 network 정책을 좁히는 것을 권장한다.
 정확한 Origin 값은 Bridge가 HTTP mutation과 WebSocket handshake 모두에서 검증한다.
 비밀번호/OAuth/JWT는 추가하지 않았다.
+Tailnet에서 Serve를 처음 켤 때 Tailscale 관리자 로그인이 필요할 수 있다. Serve가
+활성화되지 않은 동안 앱은 localhost에서만 접속 가능하다.
 
 ## 동작과 확인
 
@@ -64,6 +69,9 @@ native session ID로 transcript를 찾고, JSONL을 incremental하게 읽는다.
 Herdr의 조건부 입력 API를 한 번 호출한다. 같은 ID의 retry는 저장된 결과를 반환하고,
 timeout/crash 뒤 전달이 불확실한 command는 자동 재전송하지 않는다. `accepted`는 PTY
 전달 결과다. Chat 메시지는 native transcript에서 관찰된 뒤 표시된다.
+Browser도 초안과 `command_id`를 `sessionStorage`에 보관한다. timeout이나 reload 후 같은
+입력을 재시도하면 동일 ID를 사용한다. 사용자가 이전 입력을 확인하기 전에는 바뀐 내용으로
+새 command를 보내지 않는다.
 
 `GET /api/sessions/{id}`의 snapshot cursor와
 `WS /api/sessions/{id}/events?epoch=…&sequence=…`는 replay와 live 구독을 하나의 lock에서

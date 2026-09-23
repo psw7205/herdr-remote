@@ -2294,6 +2294,9 @@ Command envelope는 `command_id`, `session_id`, `runtime_binding`, `command_type
 
 Bridge는 ID와 canonical request digest를 durable하게 reserve한 뒤 한 번만 dispatch한다.
 동일 ID/digest의 동시 요청과 retry는 동일 receipt를 반환한다. 다른 payload/target은 conflict다.
+Browser는 전송 전에 ID를 session-scoped presentation state에 저장한다. timeout이나
+reload 후 같은 초안·binding을 다시 보낼 때 ID를 재사용하고, 내용이나 binding이 바뀌면
+전달 불확실 상태를 사용자가 확인할 때까지 새 command를 만들지 않는다.
 저장 실패는 전송 전에 reject한다. pending receipt가 남은 채 restart하면 `delivery_unknown`으로
 복구하고 자동 재전송하지 않는다. 전송 후 timeout이나 partial failure도 unknown이다.
 만료 receipt를 삭제한 뒤 같은 ID를 새 command처럼 수락하지 않는다. retention을 적용할 때는
