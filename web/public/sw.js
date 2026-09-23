@@ -1,6 +1,6 @@
 const shell = 'herdr-chat-shell-v1'
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(shell).then(cache => cache.addAll(['/', '/manifest.webmanifest', '/icon.svg'])))
+  event.waitUntil(caches.open(shell).then(cache => cache.addAll(['/', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-512-maskable.png'])))
 })
 self.addEventListener('activate', event => {
   event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== shell).map(key => caches.delete(key)))))
