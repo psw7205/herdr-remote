@@ -917,6 +917,8 @@ Bridge를 public interface에 직접 bind하지 않는 구성을 기본으로 �
 MVP에는 별도의 회원가입 / login system을 도입하지 않는다.
 
 Tailnet network boundary + 최소 권한 ACL + browser Origin 검증을 security boundary로 사용한다.
+ACL이 넓은 배포에서도 Tailscale Serve의 사용자 identity header를 Bridge에서
+소유자 로그인과 대조하여 다른 tailnet member의 읽기/제어를 모두 거부한다.
 Bridge는 localhost에 bind하고 외부 노출은 Tailscale Serve로 한정한다.
 HTTP mutation과 WebSocket handshake에서 명시적인 exact Origin allowlist를 검증하며
 wildcard CORS, null Origin, 임의 Host를 허용하지 않는다. mutation에는 JSON 요청을 요구한다.

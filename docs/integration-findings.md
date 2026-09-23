@@ -135,3 +135,30 @@ integration 설치, 새 session 생성 모두 수행하지 않았다.
 
 추천: Herdr의 조건부 입력 capability 확장을 선행 — 이유는 runtime owner 안에서 입력과
 관찰 경계를 바로잡는 것이 Bridge의 PID polling/mtime guessing/private attach 우회보다 요구사항에 맞기 때문이다.
+
+
+## 2026-09-23 — Herdr capability 확장과 실제 handoff
+
+첫 조사 시의 B1/B3는 stock Herdr `0.9.1`을 기준으로 한다. `herdr` repo의
+`codex/mobile-binding` branch에는 `agent.binding`과 `agent.bound_input`이 추가됐다.
+macOS Claude foreground process의 시작 시각과 PID별 native session metadata를 대조해
+session token을 발급한다. Herdr는 입력 queue에서 text 및 Enter byte를 쓰기 직전에도
+binding을 재검증한다. metadata와 process가 불명확한 경우 입력을 거부한다.
+
+`just ci`의 3,463개 테스트, release build와 API schema/문서 검증을 통과했다.
+실행 중 Herdr `0.9.1` server를 live handoff로 교체한 후 기존 두 Claude PID,
+native session ID, shell PID가 유지됐다. handoff는 새 terminal ID를 발급했다.
+모바일 Chat 요청 1건은 같은 native transcript에 user/assistant record로 각각 한 번 기록됐고
+PC pane에도 응답이 표시됐다. 동일 `command_id` 재전송은 파일 크기와 message 개수를
+변경하지 않았다. 잘못된 binding은 Bridge와 Herdr 양쪽에서 거부됐다.
+
+Bridge 재시작 후 두 PID가 살아 있었고 새 epoch의 snapshot에서 기존 메시지를 모두
+복구했다. 오래된 epoch로 재접속한 WS에는 새 snapshot이 전달됐다. Terminal Esc 입력도
+같은 Claude process로 전달됐다. Chat/Terminal 전환은 handoff 이후 pane geometry를
+변경하지 않았다. Herdr live handoff 자체는 desktop client가 끊긴 동안 전체 pane layout을
+기본 120×40으로 바꿨다. 재접속 시 desktop client가 크기 소유권을 다시 갖는다.
+
+`agent.get`의 `agent_session`은 hook 미설치로 비어 있었으나 새 binding API는 실제 PID
+metadata에서 native ID를 검증해 두 session을 서로 다른 transcript에 연결했다.
+현재 확장은 macOS Claude에 한정된다. Codex Desktop JSONL 조사 결과를 Codex CLI
+Herdr session adapter의 검증으로 간주하지 않는다.

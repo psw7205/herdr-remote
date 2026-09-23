@@ -1,0 +1,11 @@
+{
+  "name": "Herdr Chat",
+  "short_name": "Herdr",
+  "description": "기존 Herdr agent 세션을 모바일에서 이어갑니다.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#101827",
+  "theme_color": "#101827",
+  "icons": [{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}

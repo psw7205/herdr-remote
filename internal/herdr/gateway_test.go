@@ -234,3 +234,50 @@ func TestTerminalSnapshotRejectsWrongSourceOrTarget(t *testing.T) {
 		}
 	}
 }
+
+func TestBindingUsesNativeSessionAndRejectsWrongPane(t *testing.T) {
+	path := socketServer(t, func(c net.Conn) {
+		var req struct {
+			ID     string `json:"id"`
+			Method string `json:"method"`
+			Params struct {
+				Target string `json:"target"`
+			} `json:"params"`
+		}
+		json.NewDecoder(c).Decode(&req)
+		if req.Method != "agent.binding" || req.Params.Target != "w1:p2" {
+			t.Errorf("wrong lookup %+v", req)
+		}
+		json.NewEncoder(c).Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "agent_binding", "binding": map[string]any{"token": "verified", "terminal_id": "term_a", "native_session_id": "native-a", "process_id": 42, "agent": "claude", "cwd": "repo"}}})
+	})
+	b, e := NewGateway(path).Binding(context.Background(), "w1:p2")
+	if e != nil || b.NativeSessionID != "native-a" || b.Token != "verified" {
+		t.Fatalf("got %+v %v", b, e)
+	}
+}
+func TestBoundInputUsesSeparateMethodWithoutRetry(t *testing.T) {
+	path := socketServer(t, func(c net.Conn) {
+		var req struct {
+			ID     string `json:"id"`
+			Method string `json:"method"`
+			Params struct {
+				Target  string `json:"target"`
+				Binding string `json:"binding"`
+				Input   struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"input"`
+			} `json:"params"`
+		}
+		json.NewDecoder(c).Decode(&req)
+		if req.Method != "agent.bound_input" || req.Params.Target != "w1:p2" || req.Params.Binding != "verified" || req.Params.Input.Type != "prompt" || req.Params.Input.Text != "hello" {
+			t.Errorf("wrong command %+v", req)
+		}
+		json.NewEncoder(c).Encode(map[string]any{"id": req.ID, "result": map[string]string{"type": "ok"}})
+	})
+	g := NewGateway(path)
+	e := g.BoundInput(context.Background(), "w1:p2", "verified", "prompt", "hello")
+	if e != nil {
+		t.Fatal(e)
+	}
+}

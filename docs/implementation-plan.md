@@ -1,123 +1,60 @@
-# 첫 vertical slice 구현 계획
+# 첫 vertical slice 구현 및 검증 기록
 
-상태: conditional write integration gate에서 차단. 독립적인 읽기 전용 gateway와 진단은 구현했다.
-전체 vertical slice 구현 완료를 뜻하지 않는다.
+2026-09-23 기준. 설계 기준은 `docs/prd.md`와 `docs/adr.md`, 실제 Herdr 조사 결과는
+`docs/integration-findings.md`다. 최초 실행 계획은 이전 commit에 남아 있다.
 
-**Goal:** 기존 Herdr Claude를 발견하고 기존 transcript를 Chat으로 읽으며 같은 PTY/native session에
-prompt를 보내고 응답을 transcript에서 다시 관찰한다. 새 agent/session 생성은 허용하지 않는다.
+## 목표
 
-**Architecture:** Herdr는 runtime owner, transcript는 conversation source, PTY는 interactive source다.
-Go Bridge 한 process에서 discovery, incremental projection, command receipt, HTTP/WS를 처리한다.
-Client는 normalized event만 소비한다.
+기존 Herdr Claude 발견 → native transcript를 Chat에 표시 → 모바일 prompt를 동일 PTY/native
+session에 전달 → transcript 응답을 Chat에서 확인한다. Bridge는 agent를 생성하지 않는다.
 
-**Tech stack:** React + TypeScript + Vite, pnpm, Go `net/http`, `coder/websocket`, `fsnotify`,
-`log/slog`, xterm.js, mise. conversation DB/Redis/broker 없음. command receipt만 최소 embedded persistence.
+## 구현된 경계
 
-## 1. Herdr gate
-
-선행 근거: [조사 결과](integration-findings.md). 기존 Herdr checkout은 설치 버전과 다르므로
-그 checkout을 무조건 수정하거나 실행 중 server를 대체하지 않는다.
-
-- [x] 설치 버전과 source, API schema 대조.
-- [x] 실행 중 Claude process와 native transcript identity 읽기 검증.
-- [ ] Herdr `src/api/schema/agents.rs`, `src/app/api/agents.rs`, `src/terminal/state.rs`,
-  `src/pty/actor/unix.rs`에서 authoritative binding, expected binding, queued write invalidation 구현.
-- [x] passive 관찰은 기존 `pane.read` visible+ansi로 가능함을 source/runtime에서 확인.
-  별도 observer API를 선행 구현하지 않는다. private attach와 interactive history read는 사용하지 않는다.
-- [ ] Claude PID/native session association을 Herdr에서 검증하고 노출. main/subagent 및 same-cwd 혼동 차단.
-- [ ] verify: A→shell, A→B, 동일 native session resume/new process, PID 재사용, queue 대기 중 종료,
-  text/Enter 사이 교체 모두에서 successor가 stale input을 받지 않는다. 미보장 시 write는 비활성.
-- [x] 실제 snapshot reader 2개 동시 조회/종료 후 agent identity, process info, layout 동일 확인.
-  source에서 해당 read 경로가 attach/resume/start를 호출하지 않음을 확인.
-
-## 2. Bridge read path
-
-- [x] `mise.toml`, `go.mod`: 설치된 toolchain version 고정. 아직 외부 dependency가 없어 `go.sum`은 없다.
-- [x] `internal/herdr/gateway.go`: 실제 public API의 snapshot/process 조회, timeout/size/response identity 검증.
-- [x] `cmd/doctor/main.go`: 기존 server의 association과 구현되지 않은 capability를 읽기 전용으로 보고.
-- [x] 위 gateway/진단에 대해 `go test -race ./...`, `go vet ./...` 및 실제 Herdr 0.9.1 조회 검증.
-
-이 기반은 아래 read path 전체 완료를 의미하지 않는다. Herdr conditional write gate와 별개로 검증했다.
-
-예정 파일과 책임:
-
-| 파일 | 책임 |
+| 책임 | 파일 |
 | --- | --- |
-| `mise.toml`, `go.mod`, `go.sum` | 설치·검증한 runtime/library version 고정 |
-| `cmd/bridge/main.go` | localhost bind, 설정, shutdown, slog |
-| `internal/herdr/gateway.go` | 실제 공개 socket API codec, bounded timeout, capability 확인 |
-| `internal/session/registry.go` | identity/binding/lifecycle 관리, discovery reconciliation |
-| `internal/claude/resolve.go` | native session에서 transcript resolution, ambiguous/mismatch 거부 |
-| `internal/claude/transcript.go` | 검증된 JSONL text message normalization, sidechain/duplicate 처리 |
-| `internal/transcript/tailer.go` | file identity/offset/partial buffer, fsnotify 및 제한적 reconciliation |
-| `internal/stream/session.go` | session별 epoch, snapshot, bounded replay, atomic subscribe |
-| `internal/httpapi/server.go` | session list/snapshot/live HTTP/WS, Origin 검증 |
+| Herdr public socket 조회와 binding/조건부 입력 | `internal/herdr/gateway.go` |
+| Session discovery 및 lifecycle reconciliation | `internal/session/registry.go` |
+| Claude native session ID로 transcript resolution | `internal/claude/resolve.go` |
+| Claude JSONL의 현재 branch/message projection | `internal/claude/transcript.go`, `internal/claude/projection.go` |
+| fsnotify + offset/partial JSONL watcher | `internal/transcript/tailer.go`, `internal/transcript/watch.go` |
+| epoch/sequence, bounded replay, atomic subscribe | `internal/stream/session.go` |
+| durable command receipt와 retry 차단 | `internal/command/receipts.go` |
+| localhost HTTP/WS, Origin/Host/Tailscale owner 검증 | `internal/httpapi/server.go`, `cmd/bridge/main.go` |
+| Sessions/Chat/Terminal/PWA | `web/src/`, `web/public/` |
+| Herdr native process binding과 PTY queue 검증 | `herdr` repo의 `codex/mobile-binding` branch |
 
-- [ ] 실제 sample의 **구조만** 반영한 익명 fixture 작성. 사용자 transcript 원문을 commit하지 않는다.
-- [ ] parser test를 먼저 작성하고 실패를 확인한 뒤 구현한다. string user, text blocks,
-  tool_result 제외, unknown records, malformed complete record, mixed session ID, sidechain 포함.
-- [ ] watcher tests: partial record 완성, 여러 record 한 write, duplicate fs event,
-  truncate, inode replacement, rotation, missing file, same-size rewrite 감지/재동기화.
-  불확실한 rewrite를 append로 추측하지 않고 epoch를 바꿔 snapshot 재구성.
-- [ ] snapshot lock과 replay/live registration lock을 공유. network write는 lock 밖에서 수행.
-  subscriber overflow는 조용히 drop하지 않고 resync/close한다.
-- [ ] verify: snapshot C 이후 subscribe 전에 append한 event가 정확히 한 번 보인다.
-  buffer miss/old epoch/future cursor는 fresh snapshot으로 복구된다.
-- [ ] verify: `go test -race ./...`, `go vet ./...`. fsnotify 유실/재연결 시 전체 파일 반복 parse 없이
-  offset 기반 reconciliation으로 복구한다.
+Herdr patch는 stock `0.9.1`에 없는 `agent.binding` 및 `agent.bound_input`을 추가한다.
+macOS Claude process의 PID/start time/native metadata를 확인한다. text와 Enter를 PTY에
+쓰기 직전 binding을 다시 검증한다. mismatch는 입력을 취소한다. partial delivery는
+`delivery_unknown`으로 간주하며 자동 재전송하지 않는다. Bridge의 command receipt는
+conversation 본문을 저장하지 않는다.
 
-## 3. Command path
+## 검증 결과
 
-예정 파일: `internal/command/service.go`, `internal/command/receipts.go`, 각 `_test.go`.
+- `herdr` repo `just ci`: 3,463개 테스트 통과, macOS release binary 빌드 통과.
+- 이 repo `go test -race ./...`, `go vet ./...`, `pnpm --dir web test`,
+  `pnpm --dir web build` 통과.
+- Herdr live handoff 후 두 Claude PID, shell PID, native session ID가 같았다.
+  handoff는 새 terminal ID를 발급해 기존 binding을 무효화했다.
+- 동일 cwd의 두 Claude pane이 서로 다른 native transcript로 표시됐다.
+- 모바일 browser에서 한 prompt를 전송했다. 같은 native transcript에 user/assistant
+  record가 각각 한 번 생성됐고 Chat과 PC pane에서 응답을 확인했다. 새 Claude process는 없었다.
+- 같은 `command_id` retry가 추가 message를 만들지 않았다. Bridge 및 Herdr에서
+  잘못된 binding을 거부했다.
+- Bridge 중단 중 Claude PID가 유지됐다. 재시작 후 transcript를 복구하고 이전 epoch
+  cursor로 WS를 열었을 때 새 snapshot을 보냈다.
+- Terminal Esc를 기존 PTY에 전달했다. Chat↔Terminal 전환 전후 pane geometry가 같았다.
+- Herdr live handoff 자체는 desktop client 연결을 끊으면서 geometry를 기본 120×40으로
+  바꿨다. mobile Terminal은 resize를 호출하지 않는다.
 
-- [ ] request는 `command_id`, `session_id`, `runtime_binding`, `command_type`, `payload`를 가진다.
-  command 종류는 prompt/interrupt/terminal_input으로 분리한다.
-- [ ] validated command ID와 canonical request digest를 durable receipt로 reserve한 뒤 전송한다.
-  동일 ID/digest는 저장 결과, 다른 digest는 conflict. in-flight 중복도 한 번만 dispatch.
-- [ ] pending 상태에서 crash하면 unknown으로 복구하고 재전송하지 않는다. receipt 저장 실패는
-  전송 전에 fail closed. 보존 기간 뒤 ID를 새 command처럼 재수락하지 않도록 만료 namespace를 거부한다.
-- [ ] write-time expected binding은 Herdr가 검증한다. 지원하지 않는 버전에서 raw pane input으로 대체하지 않는다.
-- [ ] PTY 성공은 command accepted다. Chat user message는 transcript에서 관찰한 뒤 확정한다.
-  transcript record와 command의 상관관계가 없다면 동일 text만으로 pending을 확정하지 않는다.
-- [ ] verify: duplicate concurrent requests, response timeout, partial delivery, Bridge restart,
-  receipt corruption/storage failure, different payload reuse, old binding 모두 테스트한다.
+## 남은 범위
 
-## 4. Mobile client / Terminal fallback
+첫 vertical slice 이후의 Codex adapter는 Herdr 안에서 실행 중인 Codex의 실제 CLI transcript와
+native session association을 얻어 별도로 검증해야 한다. Desktop Codex JSONL sample을 CLI
+schema로 추측해 재사용하지 않는다. PRD의 Changed Files, attachments, notifications,
+structured permission/question은 optional 후속 기능이다.
 
-예정 파일: `web/package.json`, `pnpm-lock.yaml`, `web/vite.config.ts`, `web/tsconfig.json`,
-`web/index.html`, `web/src/main.tsx`, `web/src/App.tsx`, `web/src/api.ts`,
-`web/src/SessionChat.tsx`, `web/src/TerminalView.tsx`, `web/src/styles.css`.
-
-- [ ] Sessions → Chat, Markdown/code, composer, pending delivery state, connection state.
-  raw HTML을 허용하지 않는 Markdown renderer를 사용하고 unsafe URL을 허용하지 않는다.
-- [ ] 선택 session/binding을 고정하고 바뀌면 composer를 잠근다. draft는 session별로 유지한다.
-- [ ] HTTP snapshot cursor로 WS subscribe. epoch가 바뀌면 snapshot으로 교체한다.
-  reconnect와 background/foreground 전환에서 오래된 callback을 무시한다.
-- [ ] xterm.js는 같은 session의 visible ANSI frame을 교체 표시하고 local viewport를 Herdr resize에 전달하지 않는다.
-  polling 사이 intermediate frame은 생략 가능하며 raw byte stream/history라고 표시하지 않는다.
-  unsupported 상태에서 Chat composer를 제한하고 Terminal로 전환한다.
-- [ ] verify: client tests로 late response/session switch/duplicate event/unknown event/reconnect 검증.
-  `pnpm --dir web build` 및 browser에서 mobile viewport·IME·safe area·Markdown 표시 확인.
-
-## 5. 실제 handoff acceptance
-
-아래는 아직 실행하지 않았다. 테스트 mock 통과만으로 실제 완료라고 표시하지 않는다.
-
-| 시나리오 | 통과 조건 |
-| --- | --- |
-| 기존 session 발견 | 실제 Herdr native binding과 transcript identity 일치 |
-| 동일 cwd 여러 session | session ID 기준으로 각각 분리, ambiguous는 fail closed |
-| mobile prompt | 같은 PID/process start/native session 유지, transcript user 및 assistant 기록 관찰 |
-| no duplicate runtime | 요청 전후 process/session 집합에 새 agent 없음 |
-| stale pane | A→shell/B 이후 오래된 command가 successor에 한 byte도 입력하지 않음 |
-| retry | 같은 command ID의 동시·timeout retry가 한 번만 dispatch |
-| snapshot race | C 이후 발생한 모든 event를 replay/live 또는 snapshot으로 복구 |
-| disconnect | WS close가 pane/process/agent state를 종료시키지 않음 |
-| Bridge restart | 기존 agent 유지, epoch 변경, unknown command 재전송 없음 |
-| unsupported interaction | 임의 permission/question action 대신 동일 terminal fallback |
-| security | unknown/null Origin 및 잘못된 Host 거부, mutation은 JSON + exact Origin, WS도 동일 검증 |
-
-완료 후 실행 명령, 검증한 Herdr/Claude 버전, 실제 handoff 근거를 README에 기록한다.
-현재 위 command와 파일은 구현 예정이며 아직 실행 가능한 제품으로 제공하지 않는다.
-
-추천: gate 통과 후 이 순서로 구현 — 이유는 UI보다 session integrity를 먼저 증명해야 재작업과 잘못된 입력을 줄일 수 있기 때문이다.
+Tailnet 배포에서는 localhost Bridge를 Tailscale Serve에 연결하고, `Tailscale-User-Login`
+소유자 검증과 exact browser Origin을 모두 적용한다. 추가로
+network ACL/grant도 이후 최소 권한으로 좁히는 것이 좋다. 전역 tailnet policy 수정은 이
+vertical slice의 변경 범위가 아니다.

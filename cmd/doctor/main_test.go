@@ -9,7 +9,10 @@ import (
 	"testing"
 )
 
-type fixtureReader struct{ processErr error }
+type fixtureReader struct {
+	processErr error
+	binding    bool
+}
 
 func (f fixtureReader) Snapshot(context.Context) (herdr.Snapshot, error) {
 	return herdr.Snapshot{Version: "0.9.1", Protocol: 22, Agents: []herdr.Agent{
@@ -59,6 +62,28 @@ func TestDoctorReportsProcessFailurePerPane(t *testing.T) {
 
 func (f fixtureReader) TerminalSnapshot(_ context.Context, id string) (herdr.TerminalSnapshot, error) {
 	return herdr.TerminalSnapshot{PaneID: id, Source: "visible", Format: "ansi", Text: "private terminal output"}, nil
+}
+func (f fixtureReader) Binding(_ context.Context, id string) (herdr.Binding, error) {
+	if !f.binding || id != "w1:p2" {
+		return herdr.Binding{}, errors.New("binding unavailable")
+	}
+	return herdr.Binding{Token: "verified", TerminalID: "term_b", NativeSessionID: "native-b", ProcessID: 21, Agent: "claude"}, nil
+}
+func TestDoctorDetectsBoundInputWithoutPrintingToken(t *testing.T) {
+	var out bytes.Buffer
+	if err := diagnose(context.Background(), fixtureReader{binding: true}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var got report
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.WriteEnabled || !got.TerminalMirrorEnabled || !got.Agents[1].VerifiedBinding {
+		t.Fatalf("binding omitted: %+v", got)
+	}
+	if bytes.Contains(out.Bytes(), []byte(`"verified"`)) {
+		t.Fatal("binding token disclosed")
+	}
 }
 func TestDoctorReportsVisibleReadWithoutOutputDisclosure(t *testing.T) {
 	var out bytes.Buffer

@@ -17,6 +17,7 @@ type reader interface {
 	Snapshot(context.Context) (herdr.Snapshot, error)
 	ProcessInfo(context.Context, string) (herdr.ProcessInfo, error)
 	TerminalSnapshot(context.Context, string) (herdr.TerminalSnapshot, error)
+	Binding(context.Context, string) (herdr.Binding, error)
 }
 
 type agentReport struct {
@@ -28,6 +29,7 @@ type agentReport struct {
 	ProcessError             string `json:"process_error,omitempty"`
 	VisibleSnapshotAvailable bool   `json:"visible_snapshot_available"`
 	TerminalReadError        string `json:"terminal_read_error,omitempty"`
+	VerifiedBinding          bool   `json:"verified_binding"`
 }
 
 type report struct {
@@ -44,10 +46,7 @@ func diagnose(ctx context.Context, gateway reader, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("read Herdr snapshot: %w", err)
 	}
-	r := report{Version: s.Version, Protocol: s.Protocol, Agents: []agentReport{}, Blockers: []string{
-		"Conditional runtime binding input is not implemented; writes remain disabled.",
-		"Interactive Terminal fallback still requires conditional input and a client renderer.",
-	}}
+	r := report{Version: s.Version, Protocol: s.Protocol, Agents: []agentReport{}, Blockers: []string{}}
 	for _, a := range s.Agents {
 		item := agentReport{PaneID: a.PaneID, Agent: a.Agent, Status: a.Status}
 		item.NativeAssociation = a.Session != nil && a.Session.Value != "" && a.Session.Agent == a.Agent && a.Session.Kind == "id"
@@ -63,7 +62,25 @@ func diagnose(ctx context.Context, gateway reader, out io.Writer) error {
 		} else {
 			item.VisibleSnapshotAvailable = true
 		}
+		binding, bindingErr := gateway.Binding(ctx, a.PaneID)
+		if bindingErr == nil && binding.Token != "" && binding.NativeSessionID != "" && binding.TerminalID == a.TerminalID && binding.Agent == a.Agent {
+			for _, process := range p.ForegroundProcesses {
+				if process.PID == binding.ProcessID {
+					item.VerifiedBinding = true
+					break
+				}
+			}
+		}
+		if item.VerifiedBinding {
+			r.WriteEnabled = true
+			if item.VisibleSnapshotAvailable {
+				r.TerminalMirrorEnabled = true
+			}
+		}
 		r.Agents = append(r.Agents, item)
+	}
+	if !r.WriteEnabled {
+		r.Blockers = append(r.Blockers, "No verified native runtime binding; conditional input remains unavailable.")
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
