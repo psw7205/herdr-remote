@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { MessageMarkdown } from './MessageMarkdown'
+import { chooseCommand, readPending, type PendingCommand } from './commandDelivery'
 import { eventURL, getSession, sendCommand, type Cursor, type Event, type Message, type Session } from './api'
 
 const statusLabels: Record<Session['status'], string> = {
@@ -11,7 +12,8 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
   const [messages, setMessages] = useState<Message[]>([])
   const [connection, setConnection] = useState<'syncing' | 'connected' | 'disconnected'>('syncing')
   const [draft, setDraft] = useState(() => sessionStorage.getItem(`draft:${initial.id}`) ?? '')
-  const [delivery, setDelivery] = useState('')
+  const [pending, setPending] = useState<PendingCommand | null>(() => readPending(`command:${initial.id}`))
+  const [delivery, setDelivery] = useState(() => readPending(`command:${initial.id}`) ? '이전 입력의 전달 여부가 불확실합니다. 같은 초안은 기존 command ID로만 확인합니다.' : '')
   const [sending, setSending] = useState(false)
   const [unsupported, setUnsupported] = useState(false)
   const cursor = useRef<Cursor | null>(null)
@@ -84,18 +86,33 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
     return () => { alive = false; clearTimeout(reconnect); clearInterval(metadata); document.removeEventListener('visibilitychange', visible); ws?.close(); socket.current = null }
   }, [initial.id])
 
+  const clearPending = () => {
+    sessionStorage.removeItem(`command:${session.id}`)
+    setPending(null)
+  }
   const send = useCallback(async () => {
     const text = draft.trim()
     if (!text || sending || !session.active || !session.chat || !session.runtime_binding || !['idle', 'completed'].includes(session.status)) return
-    setSending(true); setDelivery('전달 중…')
+    const command = chooseCommand(pending, session.runtime_binding, text, () => crypto.randomUUID())
+    if (!command) { setDelivery('이전 입력의 전달 여부를 Terminal에서 확인한 뒤 새 입력을 작성하세요.'); return }
+    sessionStorage.setItem(`command:${session.id}`, JSON.stringify(command))
+    setPending(command)
+    setSending(true); setDelivery('전달 상태 확인 중…')
     try {
-      const result = await sendCommand(session, 'prompt', text, crypto.randomUUID())
-      if (result.status === 'accepted') { setDraft(''); setDelivery('입력 전달됨 · 대화는 native transcript 기준') }
-      else if (result.status === 'delivery_unknown') setDelivery('전달 여부를 확인할 수 없습니다. Terminal에서 확인하세요.')
-      else setDelivery(result.code === 'SESSION_CHANGED' || result.code === 'RUNTIME_BINDING_MISMATCH' ? '세션이 바뀌었습니다. 목록에서 다시 선택하세요.' : `전달 거부: ${result.code ?? '확인 필요'}`)
-    } catch { setDelivery('연결이 끊겼습니다. 자동 재전송하지 않았습니다. Terminal에서 확인하세요.') }
+      const result = await sendCommand(session, 'prompt', text, command.id)
+      if (result.status === 'accepted') {
+        sessionStorage.removeItem(`command:${session.id}`)
+        setPending(null); setDraft(''); setDelivery('입력 전달됨 · 대화는 native transcript 기준')
+      } else if (result.status === 'delivery_unknown') {
+        setDelivery('전달 여부가 불확실합니다. 같은 입력은 기존 command ID로만 확인합니다.')
+      } else {
+        sessionStorage.removeItem(`command:${session.id}`)
+        setPending(null)
+        setDelivery(result.code === 'SESSION_CHANGED' || result.code === 'RUNTIME_BINDING_MISMATCH' ? '세션이 바뀌었습니다. 목록에서 다시 선택하세요.' : `전달 거부: ${result.code ?? '확인 필요'}`)
+      }
+    } catch { setDelivery('연결이 끊겼습니다. 같은 입력은 기존 command ID로만 확인합니다.') }
     finally { setSending(false) }
-  }, [draft, sending, session])
+  }, [draft, sending, session, pending])
 
   const interrupt = async () => {
     if (!session.runtime_binding) return
@@ -123,6 +140,7 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
     </main>
     <form className="composer" onSubmit={event => { event.preventDefault(); void send() }}>
       {delivery && <p className="delivery" role="status">{delivery}</p>}
+      {pending && !sending && <button type="button" className="outline" onClick={() => { clearPending(); setDraft(''); setDelivery('Terminal에서 이전 입력을 확인한 후 새 입력을 작성할 수 있습니다.') }}>Terminal 확인 후 새 입력</button>}
       {!canPrompt && <p className="composer-hint">{session.active ? '이 상태의 입력은 Terminal에서 진행하세요.' : '종료된 세션에는 입력할 수 없습니다.'}</p>}
       <textarea aria-label="메시지" placeholder="이어서 요청하기" value={draft} onChange={event => setDraft(event.target.value)} disabled={!canPrompt || sending} rows={2} />
       <div className="composer-actions"><button type="button" className="outline" onClick={() => void interrupt()} disabled={!session.active || !session.runtime_binding}>중단</button><button type="submit" disabled={!canPrompt || sending || !draft.trim()}>{sending ? '전달 중…' : '보내기'}</button></div>
