@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { MessageMarkdown } from './MessageMarkdown'
 import { eventURL, getSession, sendCommand, type Cursor, type Event, type Message, type Session } from './api'
 
-const markdownPlugins = [remarkGfm]
 const statusLabels: Record<Session['status'], string> = {
   needs_attention: '입력 필요', working: '작업 중', idle: '대기 중', completed: '응답 완료', error: '상태 확인 필요',
 }
@@ -118,7 +116,7 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
       {unsupported && <div className="notice">Chat에서 표현할 수 없는 내용이 있습니다. Terminal을 열어 확인하세요.</div>}
       {messages.map(message => <article className={`message ${message.role}`} key={message.id}>
         <div className="message-label">{message.role === 'user' ? '나' : 'Claude'}</div>
-        <div className="markdown"><ReactMarkdown remarkPlugins={markdownPlugins} skipHtml>{message.text}</ReactMarkdown></div>
+        <div className="markdown"><MessageMarkdown text={message.text} /></div>
       </article>)}
       {messages.length === 0 && session.chat && <p className="empty-chat">아직 표시할 대화가 없습니다.</p>}
       <div ref={bottom} />
