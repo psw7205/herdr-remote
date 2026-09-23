@@ -284,12 +284,20 @@ func (r *Registry) Terminal(ctx context.Context, id, binding string) (herdr.Term
 	if !meta.Active || !meta.Terminal || binding == "" || binding != meta.Binding {
 		return herdr.TerminalSnapshot{}, errors.New("session binding changed")
 	}
+	current, err := r.gateway.Binding(ctx, meta.PaneID)
+	if err != nil || current.Token != binding {
+		return herdr.TerminalSnapshot{}, errors.New("session binding changed")
+	}
 	frame, err := r.gateway.TerminalSnapshot(ctx, meta.PaneID)
 	if err != nil {
 		return frame, err
 	}
 	if frame.PaneID != meta.PaneID {
 		return herdr.TerminalSnapshot{}, fmt.Errorf("terminal target changed")
+	}
+	current, err = r.gateway.Binding(ctx, meta.PaneID)
+	if err != nil || current.Token != binding {
+		return herdr.TerminalSnapshot{}, errors.New("session binding changed")
 	}
 	return frame, nil
 }

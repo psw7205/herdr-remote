@@ -24,8 +24,8 @@ func (f *fakeHerdr) Binding(_ context.Context, p string) (herdr.Binding, error) 
 	return f.bindings[p], nil
 }
 func (f *fakeHerdr) BoundInput(context.Context, string, string, string, string) error { return nil }
-func (f *fakeHerdr) TerminalSnapshot(context.Context, string) (herdr.TerminalSnapshot, error) {
-	return herdr.TerminalSnapshot{}, nil
+func (f *fakeHerdr) TerminalSnapshot(_ context.Context, paneID string) (herdr.TerminalSnapshot, error) {
+	return herdr.TerminalSnapshot{PaneID: paneID, Source: "visible", Format: "ansi"}, nil
 }
 func TestDiscoverExistingNativeTranscriptAndRejectOldBinding(t *testing.T) {
 	root := t.TempDir()
@@ -121,5 +121,14 @@ func TestVerifiedBindingKeepsTerminalWhenTranscriptIsMissing(t *testing.T) {
 	}
 	if err := r.BoundInput(context.Background(), item.ID, "bound", "prompt", "unsafe"); err == nil {
 		t.Fatal("Chat prompt enabled without transcript")
+	}
+}
+
+func TestTerminalRejectsPaneReplacedAfterClientOpened(t *testing.T) {
+	item := &Item{meta: Meta{ID: "claude:old", PaneID: "w1:p2", Binding: "A", Terminal: true, Active: true}}
+	f := &fakeHerdr{bindings: map[string]herdr.Binding{"w1:p2": {Token: "B", TerminalID: "term-b", NativeSessionID: "new", ProcessID: 22, Agent: "claude"}}}
+	r := &Registry{gateway: f, items: map[string]*Item{item.meta.ID: item}}
+	if _, err := r.Terminal(context.Background(), item.meta.ID, "A"); err == nil {
+		t.Fatal("old session displayed replacement pane")
 	}
 }
