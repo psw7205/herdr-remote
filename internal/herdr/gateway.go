@@ -1,6 +1,6 @@
-// Package herdr implements the inspected, public JSON socket read API.
-// It deliberately exposes no generic RPC or mutation method: protocol 22 does
-// not provide the conditional input contract required by the mobile bridge.
+// Package herdr implements the inspected Herdr JSON socket API. Stock Herdr
+// provides no conditional input; the mobile-binding patch adds agent.binding
+// and agent.bound_input, and ErrUnsupported tells the two builds apart.
 package herdr
 
 import (
