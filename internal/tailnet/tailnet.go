@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Runner executes the Tailscale CLI with args and returns its stdout.
@@ -78,22 +79,65 @@ func executable(path string) bool {
 	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
-// ExecRunner runs the CLI at bin.
+const (
+	// execWaitDelay bounds how long a canceled run waits for its I/O pipes.
+	// The macOS /usr/local/bin/tailscale wrapper is a shell script that runs
+	// the app binary without exec, so a context kill only hits the shell and
+	// the grandchild keeps stdout open.
+	execWaitDelay = time.Second
+	// maxOutputBytes caps stdout and stderr of a single CLI run.
+	maxOutputBytes = 4 << 20
+)
+
+// ExecRunner runs the CLI at bin. A canceled context returns within
+// execWaitDelay even if a grandchild still holds the output pipes.
 func ExecRunner(bin string) Runner {
+	return execRunner(bin, execWaitDelay, maxOutputBytes)
+}
+
+func execRunner(bin string, waitDelay time.Duration, limit int) Runner {
 	return func(ctx context.Context, args ...string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, bin, args...)
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		out, err := cmd.Output()
+		cmd.WaitDelay = waitDelay
+		stdout := &cappedBuffer{limit: limit}
+		stderr := &cappedBuffer{limit: limit}
+		cmd.Stdout, cmd.Stderr = stdout, stderr
+		err := cmd.Run()
+		if err == nil && stdout.exceeded {
+			err = fmt.Errorf("stdout exceeds %d bytes", limit)
+		}
 		if err != nil {
 			if msg := strings.TrimSpace(stderr.String()); msg != "" {
 				return nil, fmt.Errorf("%s %s: %w: %s", bin, strings.Join(args, " "), err, msg)
 			}
 			return nil, fmt.Errorf("%s %s: %w", bin, strings.Join(args, " "), err)
 		}
-		return out, nil
+		return stdout.Bytes(), nil
 	}
 }
+
+// cappedBuffer keeps at most limit bytes and discards the rest, so the child
+// never blocks on a full pipe; exceeded marks the output as unusable. It does
+// not embed bytes.Buffer: a promoted ReadFrom would let io.Copy bypass Write.
+type cappedBuffer struct {
+	buf      bytes.Buffer
+	limit    int
+	exceeded bool
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if room := b.limit - b.buf.Len(); len(p) > room {
+		b.exceeded = true
+		if room > 0 {
+			b.buf.Write(p[:room])
+		}
+		return len(p), nil
+	}
+	return b.buf.Write(p)
+}
+
+func (b *cappedBuffer) Bytes() []byte  { return b.buf.Bytes() }
+func (b *cappedBuffer) String() string { return b.buf.String() }
 
 // Status is the subset of `tailscale status --json` used here.
 type Status struct {
@@ -243,9 +287,10 @@ func WithOrigin(origins []string, host string) []string {
 	return out
 }
 
-// ServeConfig is the subset of Tailscale's ipn.ServeConfig used here. Only
-// background (`--bg`) config lives in Web; foreground sessions are ignored
-// because they do not outlive the CLI process.
+// ServeConfig is the subset of Tailscale's ipn.ServeConfig used here. The
+// top-level Web and AllowFunnel hold background (`--bg`) config. A foreground
+// `tailscale serve`/`funnel` run stores its own config in Foreground, keyed
+// by CLI session ID, for as long as that CLI process lives.
 type ServeConfig struct {
 	Web map[string]*struct {
 		Handlers map[string]*struct {
@@ -253,6 +298,7 @@ type ServeConfig struct {
 		}
 	}
 	AllowFunnel map[string]bool
+	Foreground  map[string]*ServeConfig
 }
 
 // ReadServeConfig runs `tailscale serve status --json`.
@@ -268,8 +314,9 @@ func ReadServeConfig(ctx context.Context, run Runner) (ServeConfig, error) {
 	return c, nil
 }
 
-// ProxiesTo reports whether https://host/ is proxied to the Bridge listen
-// address (host:port, e.g. 127.0.0.1:8787).
+// ProxiesTo reports whether background config proxies https://host/ to the
+// Bridge listen address (host:port, e.g. 127.0.0.1:8787). Foreground configs
+// are ignored: they end with the CLI session, so they are not a durable setup.
 func (c ServeConfig) ProxiesTo(host, listen string) bool {
 	web := c.Web[host+":443"]
 	if web == nil {
@@ -279,10 +326,16 @@ func (c ServeConfig) ProxiesTo(host, listen string) bool {
 	return handler != nil && proxyTargets(handler.Proxy, listen)
 }
 
-// FunnelEnabled reports whether Funnel is allowed on any port of host.
+// FunnelEnabled reports whether Funnel is allowed on any port of host, in
+// background or any foreground config, like upstream ServeConfig.IsFunnelOn.
 func (c ServeConfig) FunnelEnabled(host string) bool {
 	for hostPort, allowed := range c.AllowFunnel {
 		if h, _, err := net.SplitHostPort(hostPort); allowed && err == nil && strings.EqualFold(h, host) {
+			return true
+		}
+	}
+	for _, fg := range c.Foreground {
+		if fg != nil && fg.FunnelEnabled(host) {
 			return true
 		}
 	}
