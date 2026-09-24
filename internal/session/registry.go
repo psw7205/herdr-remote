@@ -168,6 +168,24 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		}
 		observed = append(observed, o)
 	}
+	// Two panes verified as one native session in one snapshot (e.g.
+	// `claude --resume X` on another pane while X still runs) cannot be told
+	// apart, so none of them may claim claude:<native> with a binding. They fall
+	// back to read-only continuity: a known item stays unverified on its own
+	// pane, the other panes list as unbound pane: items, and none supersedes.
+	claims := make(map[string]int)
+	panes := make(map[string]int)
+	for _, o := range observed {
+		panes[o.agent.PaneID]++
+		if o.verified {
+			claims[o.binding.NativeSessionID]++
+		}
+	}
+	for i := range observed {
+		if o := &observed[i]; o.verified && claims[o.binding.NativeSessionID] > 1 {
+			o.binding, o.verified, o.path, o.resolved = herdr.Binding{}, false, "", false
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.conditional = conditional
@@ -238,10 +256,11 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	}
 	// A pane: item is superseded, not ended, when its pane gained a verified
 	// claude: item that was not already active on that pane: same pane_id,
-	// newly verified there.
+	// newly verified there. A pane the snapshot listed twice, or shared by two
+	// active items, may yield several candidates, so it supersedes nothing.
 	successors := make(map[string]string)
 	for id, meta := range found {
-		if meta.Binding == "" || !strings.HasPrefix(id, "claude:") {
+		if meta.Binding == "" || !strings.HasPrefix(id, "claude:") || ambiguous[meta.PaneID] || panes[meta.PaneID] > 1 {
 			continue
 		}
 		if prev, ok := r.items[id]; ok && prev.meta.Active && prev.meta.PaneID == meta.PaneID {

@@ -2369,7 +2369,9 @@ Continuity 규칙: active `claude:<native-id>` item은 Herdr가 같은 `pane_id`
 때만 유지한다. terminal_id race 등으로 걸러진 binding도 다른 native ID를 가리키면 다른 session의
 증거다. 한 Refresh에서는 검증된 관찰이 먼저 ID를 차지하고, continuity 관찰은 아직 차지되지 않은
 ID만 이어받는다. 한 pane에 active item이 둘 이상이면(snapshot이 같은 pane을 중복 보고한 경우)
-continuity를 적용하지 않는다. `terminal_id`는 live handoff에서 재발급되고 cwd는 같은 repository의
+continuity를 적용하지 않는다. 한 Refresh에서 같은 native ID가 둘 이상의 pane에서 검증되면(예: 실행 중인
+session을 다른 pane에서 `claude --resume`) 어느 관찰도 binding과 함께 `claude:<native-id>`를 차지하지
+않고 read-only continuity 규칙으로만 처리하며, 그 관찰로는 supersession도 일어나지 않는다. `terminal_id`는 live handoff에서 재발급되고 cwd는 같은 repository의
 session끼리 공유하므로 continuity 신호로 쓰지 않는다.
 
 `ended`는 pane이 snapshot에서 사라졌거나, Herdr가 그 pane에서 claude를 더 이상 보고하지 않거나,
@@ -2381,7 +2383,8 @@ Supersession 규칙: `pane:<pane-id>` item이 목록에서 빠지는 Refresh에�
 `claude:<native-id>` item이 새로 active가 되면(신규, `ended`에서 복귀, 다른 pane에서 이동) `pane:` item은 `ended`
 대신 `superseded`가 되고 `Meta`와 `agent.status`에 `successor_id`를 싣는다. successor의 binding은 그
 관찰에서만 가져오며 `pane:` item의 binding은 비워 reject한다. client는 열린 Chat·Terminal을
-successor로 전환한다.
+successor로 전환한다. snapshot이 같은 pane을 중복 보고했거나 한 pane에 active item이 둘 이상이면 그 pane의
+`pane:` item은 supersede되지 않는다.
 
 알려진 한계:
 

@@ -631,6 +631,126 @@ func TestAmbiguousPaneGetsNoContinuity(t *testing.T) {
 	}
 }
 
+// `claude --resume X` on pane B while X still runs on pane A: one Refresh
+// verifies X on two panes, so neither observation may claim claude:X.
+func TestSameNativeVerifiedOnTwoPanesIsAmbiguous(t *testing.T) {
+	p2 := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle", CWD: "repo"}
+	p3 := herdr.Agent{PaneID: "w1:p3", TerminalID: "term_c", Agent: "claude", Status: "idle", CWD: "repo"}
+	for name, agents := range map[string][]herdr.Agent{"known pane first": {p2, p3}, "known pane last": {p3, p2}} {
+		t.Run(name, func(t *testing.T) {
+			r, f, _ := boundRegistry(t)
+			id := "claude:" + nativeA
+			f.agents = []herdr.Agent{p2, p3}
+			f.bindings[p3.PaneID] = herdr.Binding{}
+			if err := r.Refresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			events := statusEvents(t, r, id)
+			paneEvents := statusEvents(t, r, "pane:w1:p3")
+			f.agents = agents
+			f.bindings[p2.PaneID] = herdr.Binding{Token: "A2", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"}
+			f.bindings[p3.PaneID] = herdr.Binding{Token: "B", TerminalID: "term_c", NativeSessionID: nativeA, ProcessID: 13, Agent: "claude", CWD: "repo"}
+			if err := r.Refresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			_, meta, err := r.Get(id)
+			if err != nil || !meta.Active || meta.Lifecycle != LifecycleUnverified || meta.PaneID != p2.PaneID || meta.Binding != "" || meta.Terminal {
+				t.Fatalf("ambiguous native session not fail closed: %+v %v", meta, err)
+			}
+			_, pane, err := r.Get("pane:w1:p3")
+			if err != nil || !pane.Active || pane.Lifecycle != LifecycleUnbound || pane.SuccessorID != "" || pane.Binding != "" {
+				t.Fatalf("pane item superseded or bound: %+v %v", pane, err)
+			}
+			if e := events(); !slices.Equal(e, []string{LifecycleUnverified}) {
+				t.Fatalf("agent.status lifecycles %v", e)
+			}
+			if e := paneEvents(); len(e) != 0 {
+				t.Fatalf("pane agent.status lifecycles %v", e)
+			}
+			assertTokenRejected(t, r, id, "A", "A2", "B", "")
+			assertTokenRejected(t, r, "pane:w1:p3", "B", "")
+			if f.inputs != 0 {
+				t.Fatalf("Herdr received %d writes", f.inputs)
+			}
+		})
+	}
+	t.Run("new native session", func(t *testing.T) {
+		root := t.TempDir()
+		writeTranscript(t, root, "repo", nativeA)
+		f := &fakeHerdr{agents: []herdr.Agent{p2, p3}, bindings: map[string]herdr.Binding{
+			p2.PaneID: {Token: "A", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"},
+			p3.PaneID: {Token: "B", TerminalID: "term_c", NativeSessionID: nativeA, ProcessID: 13, Agent: "claude", CWD: "repo"},
+		}}
+		r := NewRegistry(context.Background(), f, root)
+		if err := r.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, item := range r.List() {
+			ids = append(ids, item.ID)
+			if item.Lifecycle != LifecycleUnbound || item.Binding != "" {
+				t.Fatalf("ambiguous pane item not fail closed: %+v", item)
+			}
+		}
+		if !slices.Equal(ids, []string{"pane:w1:p2", "pane:w1:p3"}) {
+			t.Fatalf("listed %v", ids)
+		}
+		if _, _, err := r.Get("claude:" + nativeA); err == nil {
+			t.Fatal("ambiguous native session claimed")
+		}
+	})
+}
+
+// sequenceHerdr answers successive agent.binding calls for one pane from a
+// queue, so one snapshot can list a pane twice with different bindings.
+type sequenceHerdr struct {
+	fakeHerdr
+	queue []herdr.Binding
+}
+
+func (f *sequenceHerdr) Binding(ctx context.Context, p string) (herdr.Binding, error) {
+	if len(f.queue) == 0 {
+		return f.fakeHerdr.Binding(ctx, p)
+	}
+	next := f.queue[0]
+	f.queue = f.queue[1:]
+	return next, nil
+}
+
+// A pane listed twice with two verified native sessions has no single
+// successor, so its pane: item ends instead of picking one.
+func TestDuplicatedPaneSupersedesNothing(t *testing.T) {
+	root := t.TempDir()
+	writeTranscript(t, root, "repo", nativeA)
+	writeTranscript(t, root, "repo", nativeB)
+	a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle", CWD: "repo"}
+	b := a
+	b.TerminalID = "term_b"
+	f := &sequenceHerdr{fakeHerdr: fakeHerdr{agents: []herdr.Agent{a}, bindingErr: fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := NewRegistry(ctx, f, root)
+	if err := r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	events := statusEvents(t, r, "pane:w1:p2")
+	f.agents = []herdr.Agent{a, b}
+	f.bindingErr = nil
+	f.queue = []herdr.Binding{
+		{Token: "A", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"},
+		{Token: "B", TerminalID: "term_b", NativeSessionID: nativeB, ProcessID: 13, Agent: "claude", CWD: "repo"},
+	}
+	if err := r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, meta, _ := r.Get("pane:w1:p2"); meta.Active || meta.Lifecycle != LifecycleEnded || meta.SuccessorID != "" {
+		t.Fatalf("duplicated pane superseded: %+v", meta)
+	}
+	if e := events(); !slices.Equal(e, []string{LifecycleEnded}) {
+		t.Fatalf("agent.status lifecycles %v", e)
+	}
+}
+
 // flappingHerdr alternates binding success and capability loss, so every
 // Refresh mutates item meta and streams; it is safe for concurrent use.
 type flappingHerdr struct {
