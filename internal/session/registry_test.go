@@ -356,7 +356,7 @@ func TestBindingLossEndsOnlyOnConfirmedEnd(t *testing.T) {
 			var ids []string
 			for _, item := range r.List() {
 				ids = append(ids, item.ID)
-				if item.Lifecycle != LifecycleUnverified || item.Binding != "" {
+				if item.Lifecycle != LifecycleUnbound || item.Binding != "" {
 					t.Fatalf("replacement item not fail closed: %+v", item)
 				}
 			}
@@ -481,7 +481,7 @@ func TestRejectedBindingForAnotherNativeEndsContinuity(t *testing.T) {
 	if err := r.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if items := r.List(); len(items) != 1 || items[0].ID != "pane:w1:p2" || items[0].Lifecycle != LifecycleUnverified {
+	if items := r.List(); len(items) != 1 || items[0].ID != "pane:w1:p2" || items[0].Lifecycle != LifecycleUnbound {
 		t.Fatalf("listed %+v", items)
 	}
 	if _, meta, _ := r.Get(id); meta.Active || meta.Lifecycle != LifecycleEnded {
@@ -493,6 +493,60 @@ func TestRejectedBindingForAnotherNativeEndsContinuity(t *testing.T) {
 	assertNoWrites(t, r, f, id)
 }
 
+func TestPaneItemSupersededByVerifiedNativeSession(t *testing.T) {
+	cases := []struct {
+		name    string
+		binding herdr.Binding
+		err     error
+		want    string
+	}{
+		{"verified before the transcript exists", herdr.Binding{Token: "T", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"}, nil, LifecycleActive},
+		{"never bound", herdr.Binding{}, &herdr.APIError{Code: "binding_unavailable", Message: "no native session"}, LifecycleUnbound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle", CWD: "repo"}
+			f := &fakeHerdr{agents: []herdr.Agent{a}, bindings: map[string]herdr.Binding{a.PaneID: tc.binding}, bindingErr: tc.err}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			r := NewRegistry(ctx, f, root)
+			if err := r.Refresh(ctx); err != nil {
+				t.Fatal(err)
+			}
+			old, next := "pane:w1:p2", "claude:"+nativeA
+			if items := r.List(); len(items) != 1 || items[0].ID != old || items[0].Lifecycle != tc.want {
+				t.Fatalf("pane item %+v", items)
+			}
+			events := statusEvents(t, r, old)
+			writeTranscript(t, root, "repo", nativeA)
+			f.bindingErr = nil
+			f.bindings[a.PaneID] = herdr.Binding{Token: "B", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"}
+			if err := r.Refresh(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if items := r.List(); len(items) != 1 || items[0].ID != next || items[0].Lifecycle != LifecycleActive || items[0].Binding != "B" || !items[0].Chat {
+				t.Fatalf("successor %+v", items)
+			}
+			_, meta, err := r.Get(old)
+			if err != nil || meta.Active || meta.Lifecycle != LifecycleSuperseded || meta.SuccessorID != next || meta.Binding != "" || meta.Status != "idle" {
+				t.Fatalf("pane item not superseded: %+v %v", meta, err)
+			}
+			if e := events(); !slices.Equal(e, []string{LifecycleSuperseded + ">" + next}) {
+				t.Fatalf("agent.status lifecycles %v", e)
+			}
+			assertTokenRejected(t, r, old, "T", "B", "")
+			assertTokenRejected(t, r, next, "T", "")
+			if err := r.BoundInput(ctx, next, "B", "terminal_input", "x"); err != nil {
+				t.Fatalf("successor binding rejected: %v", err)
+			}
+			if f.inputs != 1 {
+				t.Fatalf("Herdr received %d writes", f.inputs)
+			}
+		})
+	}
+}
+
 func TestEndedSessionRevivesOnVerifiedBinding(t *testing.T) {
 	r, f, _ := boundRegistry(t)
 	id := "claude:" + nativeA
@@ -502,13 +556,13 @@ func TestEndedSessionRevivesOnVerifiedBinding(t *testing.T) {
 	if err := r.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// Ended items get no continuity, so the pane is re-listed as a pane: item.
+	// Ended items get no continuity, so the pane is re-listed as unbound.
 	f.agents = []herdr.Agent{a}
 	f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
 	if err := r.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if items := r.List(); len(items) != 1 || items[0].ID != "pane:w1:p2" || items[0].Lifecycle != LifecycleUnverified {
+	if items := r.List(); len(items) != 1 || items[0].ID != "pane:w1:p2" || items[0].Lifecycle != LifecycleUnbound {
 		t.Fatalf("listed %+v", items)
 	}
 	f.bindingErr = nil
@@ -518,6 +572,9 @@ func TestEndedSessionRevivesOnVerifiedBinding(t *testing.T) {
 	}
 	if items := r.List(); len(items) != 1 || items[0].ID != id || !items[0].Active || items[0].Lifecycle != LifecycleActive || items[0].Binding != "C" || !items[0].Chat || !items[0].Terminal {
 		t.Fatalf("not revived %+v", items)
+	}
+	if _, meta, _ := r.Get("pane:w1:p2"); meta.Lifecycle != LifecycleSuperseded || meta.SuccessorID != id {
+		t.Fatalf("pane item %+v", meta)
 	}
 	if e := events(); !slices.Equal(e, []string{LifecycleEnded, LifecycleActive}) {
 		t.Fatalf("agent.status lifecycles %v", e)
@@ -540,7 +597,7 @@ func TestAmbiguousPaneGetsNoContinuity(t *testing.T) {
 	if err := r.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if items := r.List(); len(items) != 1 || items[0].ID != "pane:w1:p2" || items[0].Lifecycle != LifecycleUnverified {
+	if items := r.List(); len(items) != 1 || items[0].ID != "pane:w1:p2" || items[0].Lifecycle != LifecycleUnbound {
 		t.Fatalf("listed %+v", items)
 	}
 	for _, native := range []string{nativeA, nativeB} {
