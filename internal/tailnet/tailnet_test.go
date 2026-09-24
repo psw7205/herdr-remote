@@ -274,6 +274,29 @@ func TestFindCLI(t *testing.T) {
 	}
 }
 
+func TestDropUnverifiedOrigins(t *testing.T) {
+	const host = "node.example-tailnet.ts.net"
+	origins := []string{"http://127.0.0.1:8787", "https://" + host, "https://other.example-tailnet.ts.net", "https://*.ts.net", "null", "https://localhost:8443"}
+	cases := []struct {
+		name          string
+		id            Identity
+		kept, dropped []string
+	}{
+		{"owner resolved", Identity{Host: host, HostSource: SourceAuto, Login: "owner@example.com", LoginSource: SourceAuto}, origins, nil},
+		{"login unresolved", Identity{Host: host, HostSource: SourceExplicit, LoginSource: SourceUnavailable},
+			[]string{"http://127.0.0.1:8787", "https://other.example-tailnet.ts.net", "https://*.ts.net", "null", "https://localhost:8443"}, []string{"https://" + host}},
+		{"auto host unresolved", Identity{HostSource: SourceUnavailable, LoginSource: SourceUnavailable},
+			[]string{"http://127.0.0.1:8787", "https://*.ts.net", "null", "https://localhost:8443"}, []string{"https://" + host, "https://other.example-tailnet.ts.net"}},
+		{"off", Identity{HostSource: SourceOff, LoginSource: SourceOff}, origins, nil},
+	}
+	for _, tc := range cases {
+		kept, dropped := tc.id.DropUnverifiedOrigins(origins)
+		if !reflect.DeepEqual(kept, tc.kept) || !reflect.DeepEqual(dropped, tc.dropped) {
+			t.Errorf("%s: kept %v dropped %v", tc.name, kept, dropped)
+		}
+	}
+}
+
 // The macOS /usr/local/bin/tailscale wrapper runs the app binary without
 // exec (the trailing command keeps sh from exec-ing sleep as a tail call). A
 // context kill then only hits the shell while the grandchild keeps

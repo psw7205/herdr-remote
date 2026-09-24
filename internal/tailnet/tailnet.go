@@ -287,6 +287,38 @@ func WithOrigin(origins []string, host string) []string {
 	return out
 }
 
+// DropUnverifiedOrigins splits origins into those kept and the tailnet HTTPS
+// Origins removed because the owner login (or, for an auto host, the host)
+// could not be resolved. Keeping them would make Origin validation stop
+// Bridge, while a tailnet setup failure must only leave tailnet requests
+// rejected. Malformed, wildcard, loopback, and mismatched-host Origins are
+// kept so validation still reports them.
+func (id Identity) DropUnverifiedOrigins(origins []string) (kept, dropped []string) {
+	for _, origin := range origins {
+		if id.Login == "" && id.unverifiedTailnetOrigin(strings.TrimSpace(origin)) {
+			dropped = append(dropped, origin)
+		} else {
+			kept = append(kept, origin)
+		}
+	}
+	return kept, dropped
+}
+
+func (id Identity) unverifiedTailnetOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return false
+	}
+	name := u.Hostname()
+	if name == "localhost" || name == "127.0.0.1" || strings.Contains(name, "*") {
+		return false
+	}
+	if id.Host != "" {
+		return strings.EqualFold(name, id.Host)
+	}
+	return id.HostSource == SourceUnavailable
+}
+
 // ServeConfig is the subset of Tailscale's ipn.ServeConfig used here. The
 // top-level Web and AllowFunnel hold background (`--bg`) config. A foreground
 // `tailscale serve`/`funnel` run stores its own config in Foreground, keyed
