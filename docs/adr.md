@@ -226,8 +226,8 @@ agent type
 첫 slice에서는 cwd/mtime guessing을 사용하지 않는다.
 실제 PID metadata와 OS process 시작 시간을 대조한 read-only resolution은 가능하지만
 write authority는 Herdr가 검증한 binding만 사용한다.
-binding을 잃은 기존 session을 같은 pane에 유지할 때 쓰는 `pane_id`와 Herdr `agent_session`도
-read-only continuity 신호일 뿐 write authority가 아니다(ADR-034).
+binding을 잃은 기존 session을 같은 pane에 유지할 때 쓰는 `pane_id`, Herdr `agent_session`,
+걸러진 `agent.binding` 결과의 native ID도 read-only continuity 신호일 뿐 write authority가 아니다(ADR-034).
 fallback 결과가 ambiguous하면 임의 선택하지 않는다.
 
 사용자에게:
@@ -2378,7 +2378,7 @@ binding이 다시 검증되면 새 binding으로 `active`에 복귀하며, 이�
 복귀한다. `ended` item에는 `unverified` continuity를 적용하지 않는다.
 
 Supersession 규칙: `pane:<pane-id>` item이 목록에서 빠지는 Refresh에서 같은 `pane_id`에 검증된
-`claude:<native-id>` item이 새로 active가 되면(신규 또는 `ended`에서 복귀) `pane:` item은 `ended`
+`claude:<native-id>` item이 새로 active가 되면(신규, `ended`에서 복귀, 다른 pane에서 이동) `pane:` item은 `ended`
 대신 `superseded`가 되고 `Meta`와 `agent.status`에 `successor_id`를 싣는다. successor의 binding은 그
 관찰에서만 가져오며 `pane:` item의 binding은 비워 reject한다. client는 열린 Chat·Terminal을
 successor로 전환한다.
