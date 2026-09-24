@@ -1,6 +1,6 @@
 # 첫 vertical slice 구현 및 검증 기록
 
-2026-09-23 기준. 설계 기준은 `docs/prd.md`와 `docs/adr.md`, 실제 Herdr 조사 결과는
+2026-09-24 기준. 설계 기준은 `docs/prd.md`와 `docs/adr.md`, 실제 Herdr 조사 결과는
 `docs/integration-findings.md`다. 최초 실행 계획은 이전 commit에 남아 있다.
 
 ## 목표
@@ -49,6 +49,29 @@ conversation 본문을 저장하지 않는다.
 - Herdr live handoff 자체는 desktop client 연결을 끊으면서 geometry를 기본 120×40으로
   바꿨다. mobile Terminal은 resize를 호출하지 않는다.
 
+### Tailnet·mobile 경로 (2026-09-24)
+
+실측으로 확인한 것:
+
+- 소유자가 HTTPS Certificates를 켜고 `tailscale serve --bg 8787`을 실행했다. `doctor`의
+  `tailnet`은 `https_certificates: true`, `serve_proxy: true`, `funnel: false`, `issues: []`,
+  `blockers: []`였고 `tailscale funnel status`는 tailnet only였다.
+- `https://<tailnet-host>/api/sessions`가 200과 `herdr.conditional_input: supported`를 반환했다.
+- 소유자 phone에서 Tailnet HTTPS로 기존 session과 대화를 열었다. phone에서 보낸 prompt는 같은
+  Herdr pane의 기존 Claude Code session에 한 번 도착했고 같은 native session에서 응답했다.
+  그 시점 새 command receipt는 `accepted` 하나였고 새 agent process는 없었다.
+- phone의 Terminal에 같은 pane 화면이 표시됐다.
+- Serve 경유 `Origin: https://evil.example`과 `Origin: null`은 403이었다. 올바른 Origin은
+  Origin 검사를 통과했고, 이후 request body 검증의 400으로 dispatch 없이 끝나 receipt 수가
+  변하지 않았다.
+- client가 넣은 `Tailscale-User-Login` header는 Serve가 실제 identity로 덮어썼고, 소유자
+  device의 요청은 수락됐다.
+
+unit test로만 확인한 것: 다른 tailnet 사용자 identity 거부(단일 사용자 tailnet이라 실측 불가).
+확인하지 않은 것: 화면 잠금·네트워크 전환 후 WebSocket reconnect, PWA 홈 화면 설치. phone
+화면이 full screen이 아니었던 관찰은 원인을 진단하지 않았으며 [backlog](backlog.md)
+P1-05/P1-06에 남겼다.
+
 ## 남은 범위
 
 첫 vertical slice 이후의 Codex adapter는 Herdr 안에서 실행 중인 Codex의 실제 CLI transcript와
@@ -64,6 +87,6 @@ incarnation에 결합하고 세션 교체 중 조건부 PTY input을 검증하�
 Tailnet 배포에서는 localhost Bridge를 Tailscale Serve에 연결하고, `Tailscale-User-Login`
 소유자 검증과 exact browser Origin을 모두 적용한다. 추가로
 network ACL/grant도 이후 최소 권한으로 좁히는 것이 좋다. 전역 tailnet policy 수정은 이
-vertical slice의 변경 범위가 아니다.
-Bridge는 사용자 `launchd` 서비스로 실행 중이며 재시작 후 native transcript를 복구했다.
-현재 tailnet에는 Serve 기능이 비활성화돼 있어 관리자 로그인·활성화가 남아 있다.
+vertical slice의 변경 범위가 아니다. Serve는 2026-09-24에 Funnel 없이 활성화했다.
+Bridge 재시작 복구는 사용자 `launchd` job으로 실행하던 때 확인했다. 이 job은 이후 상시 실행이
+아니라 필요할 때만 시작하도록 바꿨으며, 실행 방식은 Git 밖의 host 설정이다.
