@@ -37,6 +37,7 @@ type report struct {
 	Protocol              int           `json:"herdr_protocol"`
 	WriteEnabled          bool          `json:"write_enabled"`
 	TerminalMirrorEnabled bool          `json:"terminal_mirror_enabled"`
+	ConditionalInput      string        `json:"conditional_input"`
 	Blockers              []string      `json:"blockers"`
 	Agents                []agentReport `json:"agents"`
 }
@@ -46,7 +47,7 @@ func diagnose(ctx context.Context, gateway reader, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("read Herdr snapshot: %w", err)
 	}
-	r := report{Version: s.Version, Protocol: s.Protocol, Agents: []agentReport{}, Blockers: []string{}}
+	r := report{Version: s.Version, Protocol: s.Protocol, ConditionalInput: herdr.ConditionalInputUnknown, Agents: []agentReport{}, Blockers: []string{}}
 	for _, a := range s.Agents {
 		item := agentReport{PaneID: a.PaneID, Agent: a.Agent, Status: a.Status}
 		item.NativeAssociation = a.Session != nil && a.Session.Value != "" && a.Session.Agent == a.Agent && a.Session.Kind == "id"
@@ -63,6 +64,7 @@ func diagnose(ctx context.Context, gateway reader, out io.Writer) error {
 			item.VisibleSnapshotAvailable = true
 		}
 		binding, bindingErr := gateway.Binding(ctx, a.PaneID)
+		r.ConditionalInput = herdr.ObserveConditionalInput(r.ConditionalInput, bindingErr)
 		if bindingErr == nil && binding.Token != "" && binding.NativeSessionID != "" && binding.TerminalID == a.TerminalID && binding.Agent == a.Agent {
 			for _, process := range p.ForegroundProcesses {
 				if process.PID == binding.ProcessID {
@@ -79,7 +81,9 @@ func diagnose(ctx context.Context, gateway reader, out io.Writer) error {
 		}
 		r.Agents = append(r.Agents, item)
 	}
-	if !r.WriteEnabled {
+	if r.ConditionalInput == herdr.ConditionalInputUnsupported {
+		r.Blockers = append(r.Blockers, "Herdr server lacks agent.binding/agent.bound_input (likely a stock build); conditional input remains unavailable. See docs/herdr-patch.md.")
+	} else if !r.WriteEnabled {
 		r.Blockers = append(r.Blockers, "No verified native runtime binding; conditional input remains unavailable.")
 	}
 	enc := json.NewEncoder(out)
