@@ -14,6 +14,7 @@ export function App() {
   const [error, setError] = useState('')
   const [conditionalInput, setConditionalInput] = useState<ConditionalInput>('unknown')
   const open = useRef<string | null>(null)
+  const ended = useRef(new Set<string>())
   open.current = terminal?.id ?? selected
   useEffect(() => {
     let alive = true
@@ -21,7 +22,7 @@ export function App() {
       try {
         const list = await listSessions()
         const from = open.current
-        const successor = await supersededBy(from, list.sessions)
+        const successor = await supersededBy(from, list.sessions, ended.current)
         if (!alive) return
         setSessions(list.sessions); setConditionalInput(list.conditionalInput); setError('')
         if (successor) {

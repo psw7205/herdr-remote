@@ -60,9 +60,16 @@ export function successorOf(session: Pick<Session, 'lifecycle' | 'successor_id'>
 // supersededBy returns the listed successor of an open session that left the
 // list because it was superseded, or null. The successor's own
 // runtime_binding comes from the list, never from the superseded item.
-export async function supersededBy(id: string | null, sessions: Session[]): Promise<Session | null> {
-  if (!id || sessions.some(item => item.id === id)) return null
-  const next = await getSession(id).then(data => successorOf(data.session), () => null)
+// An ended item is never superseded (it can only revive, which lists it
+// again), so its id is kept in ended and not fetched until it is listed again.
+export async function supersededBy(id: string | null, sessions: Session[], ended: Set<string> = new Set()): Promise<Session | null> {
+  if (!id) return null
+  if (sessions.some(item => item.id === id)) { ended.delete(id); return null }
+  if (ended.has(id)) return null
+  const data = await getSession(id).catch(() => null)
+  if (!data) return null
+  if (sessionLifecycle(data.session) === 'ended') { ended.add(id); return null }
+  const next = successorOf(data.session)
   return next ? sessions.find(item => item.id === next) ?? null : null
 }
 export async function getSession(id: string): Promise<{ session: Session; snapshot: Snapshot }> {

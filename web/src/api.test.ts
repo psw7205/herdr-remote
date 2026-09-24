@@ -64,7 +64,7 @@ describe('session list', () => {
 })
 describe('superseded session', () => {
   const successor: Session = { ...session, id: 'claude:native-a', runtime_binding: 'bound-b' }
-  const detail = (body: Partial<Session>) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ session: { ...session, id: 'pane:w1:p2', active: false, ...body }, snapshot: { cursor: { epoch: 'e', sequence: 0 }, data: [] } }))))
+  const detail = (body: Partial<Session>) => vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify({ session: { ...session, id: 'pane:w1:p2', active: false, ...body }, snapshot: { cursor: { epoch: 'e', sequence: 0 }, data: [] } }))))
   it('follows the listed successor with its own binding', async () => {
     detail({ lifecycle: 'superseded', successor_id: successor.id, runtime_binding: undefined })
     const next = await supersededBy('pane:w1:p2', [successor])
@@ -83,5 +83,26 @@ describe('superseded session', () => {
     expect(await supersededBy('pane:w1:p2', [successor])).toBeNull()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'session not found' }), { status: 404 })))
     expect(await supersededBy('pane:w1:p2', [successor])).toBeNull()
+  })
+  it('stops fetching an ended session until it is listed again', async () => {
+    const ended = new Set<string>()
+    detail({ lifecycle: 'ended' })
+    const fetch = vi.mocked(globalThis.fetch)
+    expect(await supersededBy('pane:w1:p2', [successor], ended)).toBeNull()
+    expect(await supersededBy('pane:w1:p2', [successor], ended)).toBeNull()
+    expect(fetch).toHaveBeenCalledTimes(1)
+    const revived: Session = { ...session, id: 'pane:w1:p2' }
+    expect(await supersededBy('pane:w1:p2', [revived, successor], ended)).toBeNull()
+    detail({ lifecycle: 'superseded', successor_id: successor.id })
+    expect(await supersededBy('pane:w1:p2', [successor], ended)).toEqual(successor)
+  })
+  it('keeps polling while the successor is not listed yet or the fetch fails', async () => {
+    const ended = new Set<string>()
+    detail({ lifecycle: 'superseded', successor_id: successor.id })
+    expect(await supersededBy('pane:w1:p2', [], ended)).toBeNull()
+    expect(await supersededBy('pane:w1:p2', [successor], ended)).toEqual(successor)
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network lost')))
+    expect(await supersededBy('pane:w1:p2', [successor], ended)).toBeNull()
+    expect(ended.size).toBe(0)
   })
 })
