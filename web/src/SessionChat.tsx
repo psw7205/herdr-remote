@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { MessageMarkdown } from './MessageMarkdown'
-import { chooseCommand, readPending, type PendingCommand } from './commandDelivery'
+import { chooseCommand, pendingCommandCopy, readPending, type PendingCommand } from './commandDelivery'
 import { eventURL, getSession, sendCommand, type Cursor, type Event, type Message, type Session } from './api'
 
 const statusLabels: Record<Session['status'], string> = {
@@ -94,7 +94,7 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
     const text = draft.trim()
     if (!text || sending || !session.active || !session.chat || !session.runtime_binding || !['idle', 'completed'].includes(session.status)) return
     const command = chooseCommand(pending, session.runtime_binding, text, () => crypto.randomUUID())
-    if (!command) { setDelivery('이전 입력의 전달 여부를 Terminal에서 확인한 뒤 새 입력을 작성하세요.'); return }
+    if (!command) { setDelivery(pendingCommandCopy(session.terminal).blocked); return }
     sessionStorage.setItem(`command:${session.id}`, JSON.stringify(command))
     setPending(command)
     setSending(true); setDelivery('전달 상태 확인 중…')
@@ -119,6 +119,7 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
     const result = await sendCommand(session, 'interrupt', '', crypto.randomUUID()).catch(() => ({ status: 'delivery_unknown' as const }))
     setDelivery(result.status === 'accepted' ? '중단 입력을 전달했습니다.' : '중단 전달 여부를 확인할 수 없습니다.')
   }
+  const pendingCopy = pendingCommandCopy(session.terminal)
   const canPrompt = session.active && session.chat && Boolean(session.runtime_binding) && ['idle', 'completed'].includes(session.status)
   return <div className="session-layout">
     <header className="topbar">
@@ -140,7 +141,7 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
     </main>
     <form className="composer" onSubmit={event => { event.preventDefault(); void send() }}>
       {delivery && <p className="delivery" role="status">{delivery}</p>}
-      {pending && !sending && <button type="button" className="outline" onClick={() => { clearPending(); setDraft(''); setDelivery('Terminal에서 이전 입력을 확인한 후 새 입력을 작성할 수 있습니다.') }}>Terminal 확인 후 새 입력</button>}
+      {pending && !sending && <button type="button" className="outline" onClick={() => { clearPending(); setDraft(''); setDelivery(pendingCopy.cleared) }}>{pendingCopy.action}</button>}
       {!canPrompt && <p className="composer-hint">{!session.active ? '종료된 세션에는 입력할 수 없습니다.' : session.terminal ? '이 상태의 입력은 Terminal에서 진행하세요.' : '이 상태의 입력은 PC의 Herdr에서 진행하세요.'}</p>}
       <textarea aria-label="메시지" placeholder="이어서 요청하기" value={draft} onChange={event => setDraft(event.target.value)} disabled={!canPrompt || sending} rows={2} />
       <div className="composer-actions"><button type="button" className="outline" onClick={() => void interrupt()} disabled={!session.active || !session.runtime_binding}>중단</button><button type="submit" disabled={!canPrompt || sending || !draft.trim()}>{sending ? '전달 중…' : '보내기'}</button></div>
