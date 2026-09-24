@@ -83,19 +83,26 @@ Bridge는 항상 loopback에만 bind하고, Serve가 tailnet HTTPS 요청을 Bri
    tailnet에서 Serve를 처음 쓰면 CLI가 활성화 URL을 안내한다. Funnel은 켜지 않는다.
 3. Bridge를 (재)시작한다. `-tailnet-host`와 `-tailnet-login`은 기본값 `auto`이므로 추가 flag가
    필요 없다. Bridge는 시작할 때 한 번 `tailscale status --json`을 읽어 host와 소유자 login을
-   정하고 `https://<tailnet-host>`를 Origin allowlist에 추가한다. 시작 log에 확정된 host·login과
-   그 출처가 남는다. Tailscale 상태를 바꾼 뒤에는 Bridge를 재시작해야 반영된다.
-4. `doctor`를 다시 실행해 `tailnet.issues`가 비어 있는지 확인한다. `tailnet` section은
+   정하고, host와 login이 모두 확정된 경우에만 `https://<tailnet-host>`를 Origin allowlist에
+   추가한다. 시작 log에 확정된 host·login과 그 출처가 남는다. Tailscale 상태를 바꾼 뒤에는
+   Bridge를 재시작해야 반영된다.
+4. `doctor`를 다시 실행해 `tailnet.issues`가 비어 있는지 확인한다. Bridge `-listen`이
+   `127.0.0.1:8787`이 아니면 같은 주소를 `-bridge-listen`으로 넘긴다. 그렇지 않으면
+   `serve_proxy`가 거짓 음성이 된다. CLI 경로는 Bridge와 같이 `-tailscale-bin`으로 명시할 수
+   있다. `tailnet` section은
    `cli_available`, `backend_state`, `host`, `login`, `https_certificates`, `serve_proxy`, `funnel`을
    보여 주며, 문제가 있으면 `issues`에 조치 방법을 적는다. `serve_proxy`는 Serve가
-   `<tailnet-host>:443`을 Bridge listen 주소로 proxy하는지 나타낸다. Funnel이 켜져 있으면
+   `<tailnet-host>:443`을 Bridge listen 주소로 proxy하는지 나타내며 `--bg` 설정만 인정한다.
+   `funnel`은 모든 port와 `--bg` 없이 실행한 foreground 설정까지 확인하고, 켜져 있으면
    top-level blocker다.
 5. 소유자 계정으로 로그인한 mobile device에서 `https://<tailnet-host>`에 접속한다.
    이 end-to-end 경로는 아직 실기기에서 검증하지 않았다(P0-02).
 
 Tailscale CLI가 없거나 실패하거나 Tailscale이 실행 중이 아니면 Bridge는 종료하지 않고
-localhost 전용으로 동작한다. tagged node처럼 소유 사용자 login이 없으면 host는 유지하되
-모든 tailnet 요청을 거부한다. 이때는 `-tailnet-login`으로 소유자를 명시한다.
+localhost 전용으로 동작한다. 단, `-tailnet-host`를 명시했는데 `auto` login만 확정하지 못했다면
+host는 유지하되 모든 tailnet 요청을 거부한다. tagged node처럼 소유 사용자 login이 없을 때도
+같다. 이때는 `-tailnet-login`으로 소유자를 명시한다. login이 없는 동안 `-origins`에 넣은
+tailnet HTTPS Origin은 경고 log와 함께 제외되고 Bridge는 계속 시작한다.
 
 ### 보안 경계
 
@@ -114,7 +121,7 @@ host의 HTTPS 접근을 필요한 device로 제한한다. [Serve identity 동작
 | `-receipts-dir` | 사용자 state directory의 durable command receipts |
 | `-listen` | `127.0.0.1:8787`. loopback만 허용 |
 | `-static` | `web/dist`. 시작 시 `index.html` 존재 확인 |
-| `-origins` | `http://127.0.0.1:8787`. comma-separated exact Origin 목록. Tailnet host의 Origin은 자동 추가되며 이 flag는 Origin을 더 추가한다 |
+| `-origins` | `http://127.0.0.1:8787`. comma-separated exact Origin 목록. 지정하면 기본값을 대체하므로 localhost 접속이 필요하면 `http://127.0.0.1:8787`도 직접 포함한다. Tailnet Origin은 host와 login이 모두 확정되면 자동 추가된다 |
 | `-tailnet-host` | `auto`: `Self.DNSName`에서 끝의 점을 제거한 값. `off`: Tailnet 요청을 받지 않는 localhost 전용. 그 밖의 값은 Serve DNS host로 사용 |
 | `-tailnet-login` | `auto`: 이 Tailscale node를 소유한 사용자 login. 명시 값은 Serve로 접근할 수 있는 단일 사용자 login |
 | `-tailscale-bin` | Tailscale CLI 경로. 비우면 PATH, 이어서 알려진 설치 경로에서 찾는다 |
