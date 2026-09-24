@@ -37,8 +37,10 @@ type Meta struct {
 	Chat     bool   `json:"chat"`
 	Terminal bool   `json:"terminal"`
 	Active   bool   `json:"active"`
-	// Lifecycle is derived from Active and Binding; see lifecycle.
+	// Lifecycle is derived from ID, Active, Binding and SuccessorID; see lifecycle.
 	Lifecycle string `json:"lifecycle"`
+	// SuccessorID names the claude:<native> item that replaced this pane: item.
+	SuccessorID string `json:"successor_id,omitempty"`
 }
 type Item struct {
 	meta       Meta
@@ -85,23 +87,36 @@ func status(raw string) string {
 	}
 }
 
-// Lifecycle values published in Meta and agent.status. Only a confirmed end is
-// "ended": the pane left the Herdr snapshot, Herdr no longer reports claude on
-// it, or the pane provably hosts another native session. A running agent whose
-// runtime binding cannot be verified (stock Herdr, transient Herdr error,
-// snapshot/binding race) is "unverified" and every write fails closed.
+// Lifecycle values published in Meta and agent.status.
+//
+//   - active: Herdr verified the current runtime binding.
+//   - unverified: a claude:<native> item (created only from a verified binding)
+//     lost its binding while Herdr still runs claude on its pane; every write
+//     fails closed until the same native session is verified again.
+//   - unbound: a pane:<pane> item, whose native session was never identified,
+//     has no verified binding (stock Herdr, or no binding yet); writes fail closed.
+//   - superseded: a pane:<pane> item whose pane gained a verified claude:<native>
+//     item in the same Refresh; SuccessorID names it. The agent keeps running.
+//   - ended: the pane left the Herdr snapshot, Herdr no longer reports claude on
+//     it, or the pane provably hosts another native session.
 const (
 	LifecycleActive     = "active"
 	LifecycleUnverified = "unverified"
+	LifecycleUnbound    = "unbound"
+	LifecycleSuperseded = "superseded"
 	LifecycleEnded      = "ended"
 )
 
 func lifecycle(meta Meta) string {
 	switch {
+	case !meta.Active && meta.SuccessorID != "":
+		return LifecycleSuperseded
 	case !meta.Active:
 		return LifecycleEnded
-	case meta.Binding == "":
+	case meta.Binding == "" && strings.HasPrefix(meta.ID, "claude:"):
 		return LifecycleUnverified
+	case meta.Binding == "":
+		return LifecycleUnbound
 	default:
 		return LifecycleActive
 	}
@@ -221,14 +236,33 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		}
 		found[meta.ID] = meta
 	}
-	for id, item := range r.items {
-		if _, ok := found[id]; !ok && item.meta.Active {
-			item.meta.Active = false
-			item.meta.Binding = ""
-			item.meta.Terminal = false
-			item.meta.Status = "completed"
-			item.stream.Append("agent.status", map[string]any{"status": "completed", "lifecycle": LifecycleEnded})
+	// A pane: item is superseded, not ended, when its pane gained a verified
+	// claude: item that was not already active: same pane_id, newly verified.
+	successors := make(map[string]string)
+	for id, meta := range found {
+		if meta.Binding == "" || !strings.HasPrefix(id, "claude:") {
+			continue
 		}
+		if prev, ok := r.items[id]; ok && prev.meta.Active {
+			continue
+		}
+		successors[meta.PaneID] = id
+	}
+	for id, item := range r.items {
+		if _, ok := found[id]; ok || !item.meta.Active {
+			continue
+		}
+		item.meta.Active = false
+		item.meta.Binding = ""
+		item.meta.Terminal = false
+		if next := successors[item.meta.PaneID]; next != "" && id == "pane:"+item.meta.PaneID {
+			item.meta.SuccessorID = next
+			item.meta.Status = found[next].Status
+			item.stream.Append("agent.status", map[string]any{"status": item.meta.Status, "lifecycle": LifecycleSuperseded, "successor_id": next})
+			continue
+		}
+		item.meta.Status = "completed"
+		item.stream.Append("agent.status", map[string]any{"status": "completed", "lifecycle": LifecycleEnded})
 	}
 	for id, meta := range found {
 		if item, ok := r.items[id]; ok {
