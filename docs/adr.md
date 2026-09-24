@@ -1415,6 +1415,27 @@ localhost bind를 기본으로 하며 mutation과 WS handshake는 explicit Origi
 wildcard CORS/null Origin을 허용하지 않는다. HTTP mutation은 JSON content type을 요구하고
 Host도 명시한 배포 origin과 대조한다. README 배포 절차에 Tailscale ACL 최소 권한 구성을 포함한다.
 
+## Owner 자동 감지 기본값
+
+Status: Accepted (구현은 backlog P0-08)
+
+설치자가 host와 login을 직접 맞추지 않도록 Bridge는 시작 시 한 번 `tailscale status --json`을
+조회한다. 기본 host는 `Self.DNSName`에서 끝의 점을 제거한 값이고, 기본 소유자는 이 Tailscale
+node를 소유한 사용자의 login이다. `-tailnet-host`·`-tailnet-login`의 명시 값이 자동 값보다
+우선하며 `-tailnet-host off`는 Tailnet 요청을 받지 않는다. 이 값은 identity 대조 대상일 뿐
+app-level 인증을 추가하지 않는다. tagged node나 login이 없는 node처럼 소유자를 알 수 없으면
+host만 유지하고 모든 tailnet 요청을 거부한다. CLI가 없거나 실패하면 localhost 전용으로
+동작한다. 어느 경우에도 Serve 사용에는 tailnet 관리 화면에서 HTTPS Certificates를 한 번
+활성화해야 한다.
+
+기각한 대안:
+
+* Tailnet IP에 HTTP로 직접 bind: peer identity는 `WhoIs`로 확인할 수 있지만 insecure
+  browser context가 되어 service worker/PWA, clipboard API, `crypto.randomUUID`가 동작하지 않는다.
+* `tsnet` 내장: 여전히 tailnet의 HTTPS Certificates가 필요하고, 큰 `tailscale.com` dependency와
+  node state 관리가 추가되며, 줄이는 것은 `tailscale serve` 명령 하나다. Serve 설정 마찰이
+  실제로 관찰되면 다시 검토한다.
+
 ---
 
 # ADR-025 — Host는 MVP에서 하나만 지원한다
