@@ -62,8 +62,13 @@ curl -s http://127.0.0.1:8787/api/sessions
   뜻하지는 않으므로 `verified_binding`도 확인한다.
 - `unsupported`: 실행 중 server에 method가 없다. stock binary로 바뀌었을 가능성이 높다.
   아래 설치 절차를 따른다.
-- `unknown`: Herdr socket 조회가 실패했거나 판정 근거가 부족하다. `herdr status server`와
-  Bridge log를 먼저 본다.
+- `unknown`: 판정 근거가 없다. claude agent가 없거나, 모든 `agent.binding` 조회가
+  transport·응답 형식 오류로 끝났거나, Bridge가 아직 한 번도 Refresh에 성공하지 못한 경우다.
+  `herdr status server`와 Bridge log를 먼저 본다.
+
+Refresh에 한 번 성공한 뒤의 `session.snapshot` 실패는 값을 바꾸지 않는다. Bridge는 직전 성공
+Refresh의 값을 유지하므로 `/api/sessions`의 값이 실제 server 상태보다 늦을 수 있다.
+`doctor`는 socket 조회가 실패하면 JSON을 출력하지 않고 error로 종료한다.
 
 상태: `conditional_input` 감지·UI 안내는 이 문서와 같은 P0-04 작업에서 추가됐다.
 stock server를 상대로 `unsupported`가 표시되는지는 **미검증**이다. 기존 `doctor`의
@@ -201,8 +206,16 @@ just build
 ```
 
 1. `<new-tag>`로 rebase하거나 새 branch에 `0e672c5e`를 cherry-pick한다. 충돌은 patch가
-   수정한 `src/api/schema/agents.rs`, `src/pty/actor/unix.rs`, `src/pane.rs`, `src/app/api.rs`에서
-   예상된다. `src/runtime_binding.rs`와 `src/app/api/bound_input.rs`는 patch가 추가한 파일이다.
+   수정한 아래 `herdr` repo 파일에서 날 수 있다.
+   - 추가: `src/runtime_binding.rs`, `src/app/api/bound_input.rs`
+   - API schema·server: `src/api/mod.rs`, `src/api/schema.rs`, `src/api/schema/agents.rs`,
+     `src/api/schema/response.rs`, `src/api/server.rs`, `src/app/api.rs`
+   - PTY·pane: `src/pty/actor.rs`, `src/pty/actor/unix.rs`, `src/pane.rs`,
+     `src/terminal/runtime.rs`
+   - platform·진입점: `src/platform/mod.rs`, `src/platform/macos.rs`, `src/main.rs`,
+     `src/server/headless.rs`
+   - 문서: `docs/next/api/herdr-api.schema.json`,
+     `docs/next/website/src/content/docs/socket-api.mdx`
 2. `just ci`와 `just build`를 통과시킨다.
 3. §4의 절차로 설치한다. 이전 patched binary를 별도 이름으로 남긴다.
 4. §5의 live handoff로 적용한다. private protocol version이 바뀌었으면 `herdr status server`의
