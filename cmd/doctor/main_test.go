@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"herdr-remote/internal/herdr"
+	"herdr-remote/internal/tailnet"
 	"strings"
 	"testing"
 )
@@ -31,7 +32,7 @@ func (f fixtureReader) ProcessInfo(_ context.Context, id string) (herdr.ProcessI
 }
 func TestDoctorReportsBlockersWithoutInventingCapabilities(t *testing.T) {
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{}, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{}, tailnetReport{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
@@ -53,7 +54,7 @@ func TestDoctorReportsBlockersWithoutInventingCapabilities(t *testing.T) {
 }
 func TestDoctorNamesMissingHerdrPatch(t *testing.T) {
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{unsupported: true}, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{unsupported: true}, tailnetReport{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
@@ -69,7 +70,7 @@ func TestDoctorNamesMissingHerdrPatch(t *testing.T) {
 }
 func TestDoctorReportsProcessFailurePerPane(t *testing.T) {
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{processErr: errors.New("gone")}, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{processErr: errors.New("gone")}, tailnetReport{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
@@ -93,7 +94,7 @@ func (f fixtureReader) Binding(_ context.Context, id string) (herdr.Binding, err
 }
 func TestDoctorDetectsBoundInputWithoutPrintingToken(t *testing.T) {
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{binding: true}, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{binding: true}, tailnetReport{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
@@ -112,7 +113,7 @@ func TestDoctorDetectsBoundInputWithoutPrintingToken(t *testing.T) {
 }
 func TestDoctorReportsVisibleReadWithoutOutputDisclosure(t *testing.T) {
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{}, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{}, tailnetReport{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
@@ -122,5 +123,92 @@ func TestDoctorReportsVisibleReadWithoutOutputDisclosure(t *testing.T) {
 	}
 	if bytes.Contains(out.Bytes(), []byte("private terminal output")) {
 		t.Fatal("terminal text disclosed")
+	}
+}
+
+// Anonymized `tailscale status --json` subset; all values are synthetic.
+const doctorStatus = `{"BackendState":"Running","CertDomains":%s,"Self":{"DNSName":"node.example-tailnet.ts.net.","UserID":7%s},"User":{"7":{"ID":7,"LoginName":"%s"}}}`
+
+// Source-derived from Tailscale ipn/serve.go (ServeConfig.Web/AllowFunnel), not
+// observed: the development host has no serve config.
+const doctorServeBridge = `{"TCP":{"443":{"HTTPS":true}},"Web":{"node.example-tailnet.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8787"}}}}%s}`
+
+func tailnetRunner(status, serve string) tailnet.Runner {
+	return func(_ context.Context, args ...string) ([]byte, error) {
+		switch strings.Join(args, " ") {
+		case "status --json":
+			return []byte(status), nil
+		case "serve status --json":
+			return []byte(serve), nil
+		}
+		return nil, errors.New("mutating or unexpected tailscale call: " + strings.Join(args, " "))
+	}
+}
+
+func TestInspectTailnetReportsMissingSetupAsIssues(t *testing.T) {
+	status := fmt.Sprintf(doctorStatus, "null", "", "owner@example.com")
+	tn := inspectTailnet(context.Background(), tailnetRunner(status, "{}"), nil, "127.0.0.1:8787")
+	if !tn.CLIAvailable || tn.BackendState != "Running" || tn.Host != "node.example-tailnet.ts.net" || tn.Login != "owner@example.com" {
+		t.Fatalf("identity: %+v", tn)
+	}
+	if tn.HTTPSCertificates || tn.ServeProxy || tn.Funnel || len(tn.Issues) != 2 {
+		t.Fatalf("setup: %+v", tn)
+	}
+	if !strings.Contains(tn.Issues[0], "HTTPS Certificates") || !strings.Contains(tn.Issues[1], "tailscale serve --bg 8787") {
+		t.Fatalf("issues not actionable: %v", tn.Issues)
+	}
+	var out bytes.Buffer
+	if err := diagnose(context.Background(), fixtureReader{binding: true}, tn, &out); err != nil {
+		t.Fatal(err)
+	}
+	var got report
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Blockers) != 0 || len(got.Tailnet.Issues) != 2 {
+		t.Fatalf("missing tailnet setup must not block localhost use: %+v", got)
+	}
+}
+
+func TestInspectTailnetReadyAndTagged(t *testing.T) {
+	certs := `["node.example-tailnet.ts.net"]`
+	tn := inspectTailnet(context.Background(), tailnetRunner(fmt.Sprintf(doctorStatus, certs, "", "owner@example.com"), fmt.Sprintf(doctorServeBridge, "")), nil, "127.0.0.1:8787")
+	if !tn.HTTPSCertificates || !tn.ServeProxy || tn.Funnel || len(tn.Issues) != 0 {
+		t.Fatalf("ready tailnet reported issues: %+v", tn)
+	}
+	tn = inspectTailnet(context.Background(), tailnetRunner(fmt.Sprintf(doctorStatus, certs, `,"Tags":["tag:server"]`, "tagged-devices"), fmt.Sprintf(doctorServeBridge, "")), nil, "127.0.0.1:8787")
+	if tn.Host == "" || tn.Login != "" || len(tn.Issues) != 1 || !strings.Contains(tn.Issues[0], "-tailnet-login") {
+		t.Fatalf("tagged node: %+v", tn)
+	}
+}
+
+func TestDoctorBlocksFunnel(t *testing.T) {
+	certs := `["node.example-tailnet.ts.net"]`
+	serve := fmt.Sprintf(doctorServeBridge, `,"AllowFunnel":{"node.example-tailnet.ts.net:443":true}`)
+	tn := inspectTailnet(context.Background(), tailnetRunner(fmt.Sprintf(doctorStatus, certs, "", "owner@example.com"), serve), nil, "127.0.0.1:8787")
+	if !tn.Funnel {
+		t.Fatalf("funnel missed: %+v", tn)
+	}
+	var out bytes.Buffer
+	if err := diagnose(context.Background(), fixtureReader{binding: true}, tn, &out); err != nil {
+		t.Fatal(err)
+	}
+	var got report
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Blockers) != 1 || !strings.Contains(got.Blockers[0], "Funnel") {
+		t.Fatalf("Funnel must be a blocker: %v", got.Blockers)
+	}
+}
+
+func TestInspectTailnetWithoutCLI(t *testing.T) {
+	tn := inspectTailnet(context.Background(), nil, errors.New("tailscale CLI not found"), "127.0.0.1:8787")
+	if tn.CLIAvailable || tn.Host != "" || len(tn.Issues) != 1 {
+		t.Fatalf("missing CLI: %+v", tn)
+	}
+	stopped := inspectTailnet(context.Background(), tailnetRunner(`{"BackendState":"Stopped"}`, "{}"), nil, "127.0.0.1:8787")
+	if !stopped.CLIAvailable || stopped.BackendState != "Stopped" || stopped.Host != "" || len(stopped.Issues) != 1 || !strings.Contains(stopped.Issues[0], "tailscale up") {
+		t.Fatalf("stopped backend: %+v", stopped)
 	}
 }
