@@ -12,7 +12,7 @@ Chat은 native transcript를 읽어 표시한다. Bridge가 agent를 start/resum
 | 대화 복구 | incremental JSONL, snapshot/replay/live, epoch, reconnect 구현 |
 | 입력 보호 | Herdr 조건부 binding 검증, durable command receipt, browser retry ID 유지 |
 | 모바일 UI | React Chat, Markdown/code, 특수 키가 있는 xterm.js, PWA shell·설치 icon |
-| Tailnet | Serve 소유자 identity·Host/Origin 검증 구현. host·owner 자동 감지와 `doctor` 진단은 [P0-08](docs/backlog.md#p0--배포와-핵심-안정성), 실제 mobile HTTPS handoff는 미검증(P0-02) |
+| Tailnet | Serve 소유자 identity·Host/Origin 검증 구현. host·owner 자동 감지와 `doctor` 진단은 [P0-08](docs/backlog.md#p0--배포와-핵심-안정성), Serve HTTPS와 소유자 phone의 Chat·prompt·Terminal은 확인(P0-01), WebSocket reconnect·다른 사용자 거부 실측·PWA 설치는 미검증(P0-02) |
 | Codex | Herdr CLI/native transcript 조사 완료. Chat/write adapter는 미구현 |
 | Tool cards·Changed Files·attachment·notification | 후속 optional 기능 |
 
