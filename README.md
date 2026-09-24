@@ -36,7 +36,8 @@ Claude의 localhost handoff와 Bridge 재시작 복구는 실제 process에서 �
 검증한 Herdr patch는 `herdr` repo의 `codex/mobile-binding` branch, commit `0e672c5e`다.
 stock과 patched binary가 같은 version 문자열을 사용할 수 있으므로 version만으로
 지원 여부를 판단하지 않는다. `doctor`로 현재 server를 확인한다. Herdr updater가 stock
-binary를 설치하면 조건부 입력이 비활성화되므로 patch 유지 절차가 필요하다.
+binary를 설치하면 조건부 입력이 비활성화되므로 [Herdr patch runbook](docs/herdr-patch.md)의
+확인·설치·rollback·upgrade 절차를 따른다.
 
 ## 빠른 시작
 
@@ -130,4 +131,5 @@ mobile Terminal의 resize와 별개다. 검증한 범위와 남은 조건은 [�
 | [ADR](docs/adr.md) | architecture 결정 |
 | [구현 기록](docs/implementation-plan.md) | 구현 경계와 실제 검증 결과 |
 | [Integration 조사](docs/integration-findings.md) | Herdr/Claude/Codex 코드·runtime 근거 |
+| [Herdr patch runbook](docs/herdr-patch.md) | 조건부 입력 patch의 확인·설치·rollback·upgrade |
 | [Backlog](docs/backlog.md) | 남은 작업의 우선순위·의존 관계·완료 기준 |
