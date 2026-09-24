@@ -34,6 +34,7 @@
 | `internal/claude/`, `internal/transcript/` | native history 해석, incremental file read |
 | `internal/command/`, `internal/stream/` | durable receipt, snapshot/replay/live |
 | `internal/httpapi/` | HTTP/WS, Origin·Host·identity 경계 |
+| `internal/tailnet/` | Tailscale CLI 조회, owner·host 자동 감지. `tailscale.com` dependency 없음 |
 | `web/src/`, `web/public/` | thin client, Markdown, Terminal, PWA |
 
 Agent-specific parser나 Herdr socket logic을 browser로 옮기지 않는다. Go에서는 `net/http`,
