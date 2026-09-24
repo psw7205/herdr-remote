@@ -13,9 +13,10 @@
 | P0-01 | Tailscale Serve 활성화 | `blocked`. 현재 tailnet에서 Serve가 비활성화돼 있다. 관리자 로그인·활성화는 사용자가 직접 해야 한다. Bridge는 localhost `launchd` 서비스로 실행 중이다. | Tailnet HTTPS URL이 Bridge를 proxy하며 Funnel은 꺼져 있다. |
 | P0-02 | 실제 mobile Tailnet handoff | `todo`, P0-01 이후. localhost 브라우저에서만 end-to-end를 검증했다. | 소유자 mobile device에서 기존 Claude 대화와 Terminal을 열고 prompt→같은 native transcript 응답을 확인한다. HTTPS와 WebSocket reconnect가 동작하고, 다른 사용자 identity와 잘못된 Origin은 거부된다. |
 | P0-03 | Tailnet network 접근 최소화 | `todo`. Bridge의 `Tailscale-User-Login` 검증은 적용됐지만 network 계층의 ACL/grant는 Bridge host로 좁히지 않았다. | 기존 다른 서비스 접근을 보존하면서 이 host의 Serve HTTPS 접근을 의도한 본인 device로 제한한 ACL/grant를 검증한다. 전역 tailnet 정책 변경 전 영향 범위를 확인한다. |
-| P0-04 | Herdr patch 유지·업데이트 경로 | `todo`. 조건부 입력은 `herdr` repo의 `codex/mobile-binding` branch와 설치된 patched binary에 의존한다. stock `0.9.1`에는 API가 없다. | Herdr 업데이트/재시작 후 `agent.binding`·`agent.bound_input` 제공 여부를 검사하고, 불일치 시 Bridge가 fail closed한다. patch 적용과 원본 binary 복구 절차를 문서화·검증한다. |
+| P0-04 | Herdr patch 유지·업데이트 경로 | `todo`. 조건부 입력은 `herdr` repo의 `codex/mobile-binding` branch와 설치된 patched binary에 의존한다. stock `0.9.1`에는 API가 없고 두 binary의 version 문자열이 같다. `/api/sessions`의 `herdr.conditional_input`(`supported`/`unsupported`/`unknown`), `doctor`의 `conditional_input`·blocker, Web UI 안내로 감지를 노출하며 Bridge는 fail closed한다. build·백업·설치·live handoff·rollback·upgrade 절차는 [Herdr patch runbook](herdr-patch.md)에 기록했다. stock server에서의 `unsupported` 판정, rollback, 새 release rebase는 격리 환경에서 실행하지 않았다. P0-07과 연결된다. | Herdr 업데이트/재시작 후 `agent.binding`·`agent.bound_input` 제공 여부를 검사하고, 불일치 시 Bridge가 fail closed한다. patch 적용과 원본 binary 복구 절차를 문서화·검증한다. |
 | P0-05 | 실제 pane/session 교체 회귀 테스트 | `todo`. actor 단위 테스트와 live stale-token 거부는 통과했다. A 종료→같은 pane shell/B 과정은 기존 사용자 agent를 건드리지 않기 위해 실측하지 않았다. | 격리 Herdr 환경에서 A→shell, A→B, 같은 process의 native session 교체, queued text→Enter 사이 교체를 재현한다. 오래된 Chat/Terminal command가 새 대상에 입력되지 않고 `delivery_unknown`을 중복 retry하지 않는다. |
 | P0-06 | 실제 interrupt·blocked interaction | `todo`. Terminal Esc 전달과 API/unit 경로는 검증했다. 작업 중 interrupt와 permission/question 대기 화면은 실측하지 않았다. | 격리 agent에서 Stop이 기존 process에만 전달되고, 구조를 모르는 CLI 대기는 Chat이 임의 Allow/Deny를 만들지 않고 같은 pane의 Terminal에서 처리된다. 연결 종료는 agent를 중단하지 않는다. |
+| P0-07 | Binding·capability 손실과 agent 종료 구분 | `todo`, P0-04와 연결. Herdr가 binding을 제공하지 않으면 `internal/session/registry.go`가 session ID를 `claude:<native-id>`에서 `pane:<pane-id>`로 바꿔 등록한다. 기존 ID는 발견되지 않은 것으로 처리돼 `lifecycle: ended`가 기록되므로, 열린 Chat은 agent가 계속 실행 중이어도 `ended`로 보인다. stock binary로 교체하거나 rollback할 때 재현될 것으로 예상한다. | Capability 손실이나 binding 손실을 agent lifecycle 종료로 표시하지 않는다. PRD §8의 `ended/unavailable`은 process 종료가 확인된 경우에만 표시한다. |
 
 ## P1 — 핵심 UX와 다음 agent
 
@@ -49,6 +50,6 @@ full IDE·source editor, mobile Git commit/push/merge는 현 PRD의 non-goal이�
 이 목록에서 우선순위를 받은 기능이 아니다.
 
 **의도:** 기존 Herdr session의 무결성과 모바일에서의 복구 가능성을 먼저 완성한다.
-**추천:** P0-01→02의 실제 Tailnet handoff를 닫고, P0-03~06을 격리 환경에서 검증한 뒤
+**추천:** P0-01→02의 실제 Tailnet handoff를 닫고, P0-03~07을 격리 환경에서 검증한 뒤
 P1-01/02 Codex adapter로 확장한다 — 이유는 remote 사용 경로와 잘못된 process 입력 방지가
 Rich Chat 기능보다 먼저 증명돼야 하기 때문이다.

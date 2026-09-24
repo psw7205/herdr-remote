@@ -2323,6 +2323,9 @@ text/Enter 중 일부가 전달되었으면 `delivery_unknown`으로 반환한�
 
 `pane_id`, `terminal_id`, `revision`, `state_change_seq`는 단독 binding이 아니다.
 Herdr capability가 없거나 native identity가 불명확하면 write를 fail closed한다.
+Bridge는 실행 중 server의 조건부 입력 지원을 `supported`/`unsupported`/`unknown`으로 판정해
+`/api/sessions`의 `herdr.conditional_input`과 `doctor`에 노출한다. stock과 patch가 같은 version
+문자열을 쓰므로 version으로 판정하지 않는다. 운영 절차는 `docs/herdr-patch.md`를 따른다.
 process 종료와 OS PTY 수신 사이 race까지 무조건 해결했다고 가정하지 않으며
 실제 process 교체 acceptance를 통과하기 전에는 write-enabled handoff 완료로 표시하지 않는다.
 
