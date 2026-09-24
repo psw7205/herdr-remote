@@ -463,8 +463,17 @@ cwd/mtime 기반 transcript guessing은 첫 slice에서 사용하지 않는다.
 `pane_id`, `terminal_id`, 일반 `revision`은 process/session incarnation을 대신하지 않는다.
 identity가 불명확하거나 조건부 입력을 지원하지 않으면 prompt/interrupt/raw input을 비활성화한다.
 
-목록은 현재 Herdr에서 발견한 active agent를 대상으로 한다. 열어 둔 session의 process가
-종료되면 `ended/unavailable`로 표시하고 입력과 Terminal 제어를 비활성화한다.
+목록은 현재 Herdr에서 발견한 active agent를 대상으로 한다. session lifecycle은 세 가지다.
+
+| lifecycle | 조건 | 사용자 경험 |
+| --- | --- | --- |
+| `active` | Herdr가 현재 `runtime_binding`을 검증했다 | Chat prompt, interrupt, Terminal 사용 가능 |
+| `unverified` | Herdr가 같은 pane에서 agent를 계속 보고하지만 binding이나 capability를 확인할 수 없다 | agent는 계속 실행 중으로 표시한다. prompt, interrupt, Terminal read/input은 fail closed한다 |
+| `ended/unavailable` | pane이 사라졌거나 agent가 더 이상 보고되지 않거나 pane이 다른 native session을 가리킨다 | 종료로 표시하고 입력과 Terminal 제어를 비활성화한다 |
+
+Herdr patch 누락, 일시적 binding 오류 같은 binding·capability 손실은 process 종료의 증거가
+아니므로 `ended/unavailable`로 표시하지 않는다. `unverified`는 같은 native ID의 binding이 다시
+검증되면 `active`로 돌아간다. 판정 규칙은 ADR-034를 따른다.
 `completed`는 turn 완료 상태이며 살아 있는 process에서 후속 prompt가 가능하다.
 historical transcript만 남은 session을 탐색하는 기능은 첫 slice에서 제외한다.
 
@@ -568,7 +577,7 @@ Bridge에서 다음과 같은 semantic event로 normalize한다.
 | `tool.failed`             | tool 실패           |
 | `permission.requested`    | permission 필요     |
 | `question.requested`      | user input 필요     |
-| `agent.status`            | agent 상태 변경       |
+| `agent.status`            | agent 상태 변경. `status`와 `lifecycle`(`active` \| `unverified` \| `ended`)을 담는다. 종료 시 `status`도 `completed`이므로 turn 완료와 process 종료는 `lifecycle`로 구분한다 |
 | `session.completed`       | 작업 완료             |
 | `session.error`           | session 오류        |
 
@@ -1121,6 +1130,16 @@ Agent is running, but its conversation could not be identified.
 
 [Open Terminal]
 ```
+
+### Agent connection unverified
+
+```text
+Agent is still running in Herdr, but this conversation's connection can't be verified.
+Input and Terminal are disabled until it is verified.
+```
+
+`lifecycle: unverified`의 안내다. 종료로 표시하지 않으며 Terminal fallback도 binding이 필요하므로
+`[Open Terminal]`을 제공하지 않는다.
 
 ### Transcript unsupported
 

@@ -226,6 +226,8 @@ agent type
 첫 slice에서는 cwd/mtime guessing을 사용하지 않는다.
 실제 PID metadata와 OS process 시작 시간을 대조한 read-only resolution은 가능하지만
 write authority는 Herdr가 검증한 binding만 사용한다.
+binding을 잃은 기존 session을 같은 pane에 유지할 때 쓰는 `pane_id`와 Herdr `agent_session`도
+read-only continuity 신호일 뿐 write authority가 아니다(ADR-034).
 fallback 결과가 ambiguous하면 임의 선택하지 않는다.
 
 사용자에게:
@@ -2354,6 +2356,30 @@ Bridge는 실행 중 server의 조건부 입력 지원을 `supported`/`unsupport
 문자열을 쓰므로 version으로 판정하지 않는다. 운영 절차는 `docs/herdr-patch.md`를 따른다.
 process 종료와 OS PTY 수신 사이 race까지 무조건 해결했다고 가정하지 않으며
 실제 process 교체 acceptance를 통과하기 전에는 write-enabled handoff 완료로 표시하지 않는다.
+
+### Binding·capability 손실은 lifecycle 종료가 아니다
+
+Herdr capability 부재(`ErrUnsupported`)나 일시적 binding 오류로 검증된 binding을 잃어도 기존
+`claude:<native-id>` session은 목록에 남고 lifecycle은 `unverified`다. `runtime_binding`을 비우므로
+prompt, interrupt, Terminal read/input은 모두 fail closed한다.
+
+Continuity 규칙: active `claude:<native-id>` item은 Herdr가 같은 `pane_id`에서 `claude`를 계속
+보고하고, Herdr `agent_session`이 없거나 같은 native ID일 때만 유지한다. 한 pane에 active item이
+둘 이상이면 continuity를 적용하지 않는다. `terminal_id`는 live handoff에서 재발급되고 cwd는 같은
+repository의 session끼리 공유하므로 continuity 신호로 쓰지 않는다.
+
+`ended`는 pane이 snapshot에서 사라졌거나, Herdr가 그 pane에서 claude를 더 이상 보고하지 않거나,
+`agent_session` 또는 검증된 binding이 다른 native ID를 가리킬 때만 기록한다. 같은 native ID의
+binding이 다시 검증되면 새 binding으로 `active`에 복귀하며, 이미 `ended`인 item도 이 경로로만
+복귀한다. `ended` item에는 `unverified` continuity를 적용하지 않는다.
+
+알려진 한계:
+
+* Herdr hook이 `agent_session`을 보고하지 않으면 한 refresh 주기(2s) 안의 같은 pane claude→claude
+  교체를 구분하지 못한다. 이때 이전 session의 transcript를 read-only로 계속 보여 주며 write는 불가능하다.
+* agent 감지가 순간적으로 빠지면 item은 `ended`가 된다.
+* binding 없이 등록된 `pane:<pane-id>` item은 나중에 binding을 얻으면 `claude:<native-id>`로
+  re-key되고 기존 `pane:` item은 `ended`로 보인다.
 
 # ADR-035 — Mobile Terminal은 기존 PTY의 passive mirror다
 
