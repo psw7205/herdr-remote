@@ -8,6 +8,7 @@ import (
 	"herdr-remote/internal/herdr"
 	"herdr-remote/internal/httpapi"
 	"herdr-remote/internal/session"
+	"herdr-remote/internal/tailnet"
 	"log/slog"
 	"net"
 	"net/http"
@@ -31,8 +32,9 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:8787", "loopback HTTP address")
 	origins := flag.String("origins", "http://127.0.0.1:8787", "comma-separated exact browser Origins")
 	staticDir := flag.String("static", "web/dist", "built client directory")
-	tailnetHost := flag.String("tailnet-host", "", "Tailscale Serve DNS host without a trailing dot")
-	tailnetLogin := flag.String("tailnet-login", "", "only Tailscale user login allowed through Serve")
+	tailnetHost := flag.String("tailnet-host", tailnet.Auto, "Tailscale Serve DNS host: auto (from tailscale status), off (localhost-only), or an explicit host")
+	tailnetLogin := flag.String("tailnet-login", tailnet.Auto, "only Tailscale user login allowed through Serve: auto (node owner) or an explicit login")
+	tailscaleBin := flag.String("tailscale-bin", "", "Tailscale CLI path (default: PATH, then well-known install locations)")
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*listen)
 	if err != nil || host != "localhost" && host != "127.0.0.1" && host != "::1" {
@@ -69,8 +71,15 @@ func main() {
 			}
 		}
 	}()
-	api := httpapi.New(registry, receipts, strings.Split(*origins, ","), *staticDir)
-	api.SetTailnetIdentity(*tailnetHost, *tailnetLogin)
+	identity := resolveTailnet(ctx, *tailnetHost, *tailnetLogin, *tailscaleBin)
+	allowed := strings.Split(*origins, ",")
+	if identity.Host != "" && identity.Login != "" {
+		// ValidateOrigins only accepts the tailnet Origin with an owner login;
+		// without one every tailnet request is rejected anyway.
+		allowed = tailnet.WithOrigin(allowed, identity.Host)
+	}
+	api := httpapi.New(registry, receipts, allowed, *staticDir)
+	api.SetTailnetIdentity(identity.Host, identity.Login)
 	if err = api.ValidateOrigins(); err != nil {
 		slog.Error("invalid Origin config", "error", err)
 		os.Exit(2)
@@ -88,9 +97,30 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(shutdownCtx)
 	}()
-	slog.Info("Bridge listening", "address", *listen)
+	slog.Info("Bridge listening", "address", *listen, "origins", allowed)
 	if err = server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("Bridge failed", "error", err)
 		os.Exit(1)
 	}
+}
+
+// resolveTailnet reads `tailscale status --json` once at startup when a flag
+// is auto. Failures degrade to localhost-only instead of exiting.
+func resolveTailnet(ctx context.Context, hostFlag, loginFlag, bin string) tailnet.Identity {
+	var run tailnet.Runner
+	var cliErr error
+	if hostFlag != tailnet.Off && (hostFlag == tailnet.Auto || loginFlag == tailnet.Auto) {
+		var path string
+		if path, cliErr = tailnet.FindCLI(bin); cliErr == nil {
+			run = tailnet.ExecRunner(path)
+		}
+	}
+	resolveCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	identity := tailnet.Resolve(resolveCtx, hostFlag, loginFlag, run, cliErr)
+	for _, warning := range identity.Warnings {
+		slog.Warn("tailnet setup incomplete", "reason", warning)
+	}
+	slog.Info("tailnet identity", "host", identity.Host, "host_source", identity.HostSource, "login", identity.Login, "login_source", identity.LoginSource)
+	return identity
 }
