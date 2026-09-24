@@ -10,6 +10,7 @@ import (
 	"herdr-remote/internal/transcript"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -36,6 +37,8 @@ type Meta struct {
 	Chat     bool   `json:"chat"`
 	Terminal bool   `json:"terminal"`
 	Active   bool   `json:"active"`
+	// Lifecycle is derived from Active and Binding; see lifecycle.
+	Lifecycle string `json:"lifecycle"`
 }
 type Item struct {
 	meta       Meta
@@ -81,56 +84,143 @@ func status(raw string) string {
 		return "error"
 	}
 }
+
+// Lifecycle values published in Meta and agent.status. Only a confirmed end is
+// "ended": the pane left the Herdr snapshot, Herdr no longer reports claude on
+// it, or the pane provably hosts another native session. A running agent whose
+// runtime binding cannot be verified (stock Herdr, transient Herdr error,
+// snapshot/binding race) is "unverified" and every write fails closed.
+const (
+	LifecycleActive     = "active"
+	LifecycleUnverified = "unverified"
+	LifecycleEnded      = "ended"
+)
+
+func lifecycle(meta Meta) string {
+	switch {
+	case !meta.Active:
+		return LifecycleEnded
+	case meta.Binding == "":
+		return LifecycleUnverified
+	default:
+		return LifecycleActive
+	}
+}
+
+type observation struct {
+	agent    herdr.Agent
+	binding  herdr.Binding
+	verified bool
+	path     string
+	resolved bool
+}
+
+// reportedNativeID is the native session that Herdr's own agent hook reported
+// for the pane (the predicate doctor uses), or "" when nothing was reported.
+func reportedNativeID(a herdr.Agent) string {
+	if s := a.Session; s != nil && s.Agent == "claude" && s.Kind == "id" {
+		return s.Value
+	}
+	return ""
+}
+
 func (r *Registry) Refresh(ctx context.Context) error {
 	snapshot, err := r.gateway.Snapshot(ctx)
 	if err != nil {
 		return err
 	}
-	found := make(map[string]Meta)
-	paths := make(map[string]string)
+	// Gateway and filesystem calls stay outside r.mu.
+	observed := make([]observation, 0, len(snapshot.Agents))
 	conditional := herdr.ConditionalInputUnknown
 	for _, a := range snapshot.Agents {
 		if a.Agent != "claude" || a.PaneID == "" {
 			continue
 		}
-		meta := Meta{ID: "pane:" + a.PaneID, Agent: a.Agent, PaneID: a.PaneID, Project: a.CWD, Title: a.Title, Status: status(a.Status), Active: true}
+		o := observation{agent: a}
 		binding, e := r.gateway.Binding(ctx, a.PaneID)
 		conditional = herdr.ObserveConditionalInput(conditional, e)
-		if e == nil && binding.Agent == "claude" && binding.TerminalID == a.TerminalID && binding.Token != "" && binding.ProcessID != 0 {
-			meta.Binding = binding.Token
-			meta.Project = binding.CWD
-			meta.Terminal = true
+		if e == nil && binding.Agent == "claude" && binding.TerminalID == a.TerminalID && binding.Token != "" && binding.ProcessID != 0 && binding.NativeSessionID != "" {
+			o.binding, o.verified = binding, true
 			if path, e := claude.Resolve(r.claudeRoot, binding.NativeSessionID); e == nil {
-				meta.ID = "claude:" + binding.NativeSessionID
-				meta.Chat = true
-				paths[meta.ID] = path
+				o.path, o.resolved = path, true
 			}
 		}
-		found[meta.ID] = meta
+		observed = append(observed, o)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.conditional = conditional
+	// Continuity without a verified binding: an active claude:<native> item
+	// stays on its pane, as "unverified", while Herdr still reports claude on
+	// that pane and Herdr's own native session report (agent_session), when
+	// present, names the same native ID. A different report, a verified binding
+	// for another native ID, or the pane leaving the snapshot ends it.
+	// terminal_id is not used because live handoff reissues it, and cwd cannot
+	// tell two sessions of one repository apart. Without a native report, a
+	// claude-to-claude swap in the same pane is indistinguishable: the item
+	// keeps showing the old session's own read-only transcript as "unverified",
+	// with writes and Terminal closed, until a verified binding confirms or
+	// replaces it.
+	byPane := make(map[string]*Item)
+	ambiguous := make(map[string]bool)
+	for _, item := range r.items {
+		if !item.meta.Active || item.nativeID == "" {
+			continue
+		}
+		if _, dup := byPane[item.meta.PaneID]; dup {
+			ambiguous[item.meta.PaneID] = true
+		}
+		byPane[item.meta.PaneID] = item
+	}
+	found := make(map[string]Meta)
+	paths := make(map[string]string)
+	for _, o := range observed {
+		a := o.agent
+		meta := Meta{ID: "pane:" + a.PaneID, Agent: a.Agent, PaneID: a.PaneID, Project: a.CWD, Title: a.Title, Status: status(a.Status), Active: true}
+		if o.verified {
+			meta.Binding = o.binding.Token
+			meta.Project = o.binding.CWD
+			meta.Terminal = true
+			id := "claude:" + o.binding.NativeSessionID
+			if item, ok := r.items[id]; ok {
+				// Same native session as a known item: keep its identity even if
+				// the transcript cannot be resolved again right now.
+				meta.ID = id
+				meta.Chat = item.path != ""
+			} else if o.resolved {
+				meta.ID = id
+				meta.Chat = true
+				paths[id] = o.path
+			}
+		} else if item := byPane[a.PaneID]; item != nil && !ambiguous[a.PaneID] {
+			if reported := reportedNativeID(a); reported == "" || reported == item.nativeID {
+				meta.ID = item.meta.ID
+				meta.Chat = item.path != ""
+				meta.Project = item.meta.Project
+			}
+		}
+		found[meta.ID] = meta
+	}
 	for id, item := range r.items {
 		if _, ok := found[id]; !ok && item.meta.Active {
 			item.meta.Active = false
 			item.meta.Binding = ""
 			item.meta.Terminal = false
 			item.meta.Status = "completed"
-			item.stream.Append("agent.status", map[string]any{"status": "completed", "lifecycle": "ended"})
+			item.stream.Append("agent.status", map[string]any{"status": "completed", "lifecycle": LifecycleEnded})
 		}
 	}
 	for id, meta := range found {
 		if item, ok := r.items[id]; ok {
 			if item.meta.Binding != meta.Binding || item.meta.Status != meta.Status || item.meta.Active != meta.Active {
-				item.stream.Append("agent.status", map[string]any{"status": meta.Status, "lifecycle": "active"})
+				item.stream.Append("agent.status", map[string]any{"status": meta.Status, "lifecycle": lifecycle(meta)})
 			}
 			item.meta = meta
 			continue
 		}
 		item := &Item{meta: meta, path: paths[id], stream: stream.New(id), projection: claude.NewProjection()}
-		if meta.Chat {
-			item.nativeID = id[len("claude:"):]
+		if native, ok := strings.CutPrefix(id, "claude:"); ok {
+			item.nativeID = native
 		}
 		r.items[id] = item
 		if meta.Chat {
@@ -232,6 +322,7 @@ func (r *Registry) List() []Meta {
 
 func effectiveMeta(item *Item) Meta {
 	meta := item.meta
+	meta.Lifecycle = lifecycle(meta)
 	item.mu.Lock()
 	if item.invalid {
 		meta.Chat = false

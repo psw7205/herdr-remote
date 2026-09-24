@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"herdr-remote/internal/claude"
@@ -10,6 +11,7 @@ import (
 	"herdr-remote/internal/transcript"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -19,6 +21,7 @@ type fakeHerdr struct {
 	bindings    map[string]herdr.Binding
 	bindingErr  error
 	snapshotErr error
+	inputs      int
 }
 
 func (f *fakeHerdr) Snapshot(context.Context) (herdr.Snapshot, error) {
@@ -66,7 +69,10 @@ func TestConditionalInputCapabilityFailsClosed(t *testing.T) {
 		t.Fatalf("snapshot failure changed capability: %v %s", e, r.ConditionalInput())
 	}
 }
-func (f *fakeHerdr) BoundInput(context.Context, string, string, string, string) error { return nil }
+func (f *fakeHerdr) BoundInput(context.Context, string, string, string, string) error {
+	f.inputs++
+	return nil
+}
 func (f *fakeHerdr) TerminalSnapshot(_ context.Context, paneID string) (herdr.TerminalSnapshot, error) {
 	return herdr.TerminalSnapshot{PaneID: paneID, Source: "visible", Format: "ansi"}, nil
 }
@@ -173,5 +179,243 @@ func TestTerminalRejectsPaneReplacedAfterClientOpened(t *testing.T) {
 	r := &Registry{gateway: f, items: map[string]*Item{item.meta.ID: item}}
 	if _, err := r.Terminal(context.Background(), item.meta.ID, "A"); err == nil {
 		t.Fatal("old session displayed replacement pane")
+	}
+}
+
+const (
+	nativeA = "11111111-1111-4111-8111-111111111111"
+	nativeB = "22222222-2222-4222-8222-222222222222"
+	nativeC = "33333333-3333-4333-8333-333333333333"
+)
+
+func writeTranscript(t *testing.T, root, project, id string) {
+	t.Helper()
+	dir := filepath.Join(root, "projects", project)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"user","uuid":"u-` + id + `","parentUuid":null,"sessionId":"` + id + `","message":{"role":"user","content":"sample"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// boundRegistry returns a Registry whose pane w1:p2 is verified as
+// claude:nativeA with binding "A" and whose history has finished loading.
+func boundRegistry(t *testing.T) (*Registry, *fakeHerdr, string) {
+	t.Helper()
+	root := t.TempDir()
+	writeTranscript(t, root, "repo", nativeA)
+	writeTranscript(t, root, "repo", nativeB)
+	a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle", CWD: "repo"}
+	f := &fakeHerdr{agents: []herdr.Agent{a}, bindings: map[string]herdr.Binding{a.PaneID: {Token: "A", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	r := NewRegistry(ctx, f, root)
+	if err := r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		snap, meta, err := r.Get("claude:" + nativeA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if meta.Lifecycle != LifecycleActive || meta.Binding != "A" {
+			t.Fatalf("not verified: %+v", meta)
+		}
+		if len(snap.Data) > 3 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("history not loaded")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	return r, f, root
+}
+
+// statusEvents subscribes live so a transcript Reset cannot drop the events.
+func statusEvents(t *testing.T, r *Registry, id string) func() []string {
+	t.Helper()
+	s, err := r.Stream(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, live, stop := s.Subscribe(s.Snapshot().Cursor)
+	t.Cleanup(stop)
+	return func() []string {
+		var out []string
+		for {
+			select {
+			case e := <-live:
+				if e.Type == "agent.status" {
+					var p struct{ Lifecycle string }
+					if err := json.Unmarshal(e.Payload, &p); err != nil {
+						t.Fatal(err)
+					}
+					out = append(out, p.Lifecycle)
+				}
+			default:
+				return out
+			}
+		}
+	}
+}
+
+func assertNoWrites(t *testing.T, r *Registry, f *fakeHerdr, id string) {
+	t.Helper()
+	for _, token := range []string{"A", ""} {
+		for _, kind := range []string{"prompt", "interrupt", "terminal_input"} {
+			if err := r.BoundInput(context.Background(), id, token, kind, "x"); err == nil {
+				t.Fatalf("%s accepted with binding %q", kind, token)
+			}
+		}
+		if _, err := r.Terminal(context.Background(), id, token); err == nil {
+			t.Fatalf("Terminal read accepted with binding %q", token)
+		}
+	}
+	if f.inputs != 0 {
+		t.Fatalf("Herdr received %d writes", f.inputs)
+	}
+}
+
+func TestBindingLossKeepsSessionUnverified(t *testing.T) {
+	handoff := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Status: "working", CWD: "repo"}
+	reported := handoff
+	reported.Session = &herdr.NativeSession{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: nativeA}
+	unsupported := fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+	cases := []struct {
+		name    string
+		agent   herdr.Agent
+		binding herdr.Binding
+		err     error
+	}{
+		{"stock Herdr after handoff", handoff, herdr.Binding{}, unsupported},
+		{"transient transport error", handoff, herdr.Binding{}, errors.New("dial unix: connection refused")},
+		{"method-level binding error", handoff, herdr.Binding{}, &herdr.APIError{Code: "binding_unavailable", Message: "no native session"}},
+		{"snapshot and binding race", handoff, herdr.Binding{Token: "B", TerminalID: "term_c", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude"}, nil},
+		{"Herdr reports the same native session", reported, herdr.Binding{}, unsupported},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, f, _ := boundRegistry(t)
+			id := "claude:" + nativeA
+			events := statusEvents(t, r, id)
+			f.agents = []herdr.Agent{tc.agent}
+			f.bindings[tc.agent.PaneID] = tc.binding
+			f.bindingErr = tc.err
+			if err := r.Refresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			items := r.List()
+			if len(items) != 1 || items[0].ID != id {
+				t.Fatalf("session identity not kept or duplicated: %+v", items)
+			}
+			got := items[0]
+			if !got.Active || got.Lifecycle != LifecycleUnverified || got.Binding != "" || got.Terminal || !got.Chat || got.Status != "working" {
+				t.Fatalf("wrong degraded meta: %+v", got)
+			}
+			if e := events(); !slices.Equal(e, []string{LifecycleUnverified}) {
+				t.Fatalf("agent.status lifecycles %v", e)
+			}
+			assertNoWrites(t, r, f, id)
+		})
+	}
+}
+
+func TestBindingLossEndsOnlyOnConfirmedEnd(t *testing.T) {
+	cases := []struct {
+		name   string
+		agents []herdr.Agent
+		want   []string
+	}{
+		{"pane left the snapshot", nil, nil},
+		{"Herdr no longer reports claude on the pane", []herdr.Agent{{PaneID: "w1:p2", TerminalID: "term_b", Status: "idle"}}, nil},
+		{"Herdr reports another native session", []herdr.Agent{{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Status: "idle", Session: &herdr.NativeSession{Agent: "claude", Kind: "id", Value: nativeC}}}, []string{"pane:w1:p2"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, f, _ := boundRegistry(t)
+			id := "claude:" + nativeA
+			events := statusEvents(t, r, id)
+			f.agents = tc.agents
+			f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+			if err := r.Refresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			var ids []string
+			for _, item := range r.List() {
+				ids = append(ids, item.ID)
+				if item.Lifecycle != LifecycleUnverified || item.Binding != "" {
+					t.Fatalf("replacement item not fail closed: %+v", item)
+				}
+			}
+			if !slices.Equal(ids, tc.want) {
+				t.Fatalf("listed %v, want %v", ids, tc.want)
+			}
+			if _, meta, err := r.Get(id); err != nil || meta.Active || meta.Lifecycle != LifecycleEnded {
+				t.Fatalf("old session not ended: %+v %v", meta, err)
+			}
+			if e := events(); !slices.Equal(e, []string{LifecycleEnded}) {
+				t.Fatalf("agent.status lifecycles %v", e)
+			}
+			assertNoWrites(t, r, f, id)
+		})
+	}
+}
+
+func TestBindingRecovery(t *testing.T) {
+	cases := []struct {
+		name       string
+		native     string
+		ambiguous  bool
+		wantID     string
+		wantEvents []string
+	}{
+		{"same native session", nativeA, false, "claude:" + nativeA, []string{LifecycleUnverified, LifecycleActive}},
+		{"same native session while transcript is ambiguous", nativeA, true, "claude:" + nativeA, []string{LifecycleUnverified, LifecycleActive}},
+		{"different native session", nativeB, false, "claude:" + nativeB, []string{LifecycleUnverified, LifecycleEnded}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, f, root := boundRegistry(t)
+			old := "claude:" + nativeA
+			events := statusEvents(t, r, old)
+			a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Status: "idle", CWD: "repo"}
+			f.agents = []herdr.Agent{a}
+			f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+			if err := r.Refresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if tc.ambiguous {
+				// A second copy makes claude.Resolve fail without touching the watched file.
+				writeTranscript(t, root, "other", nativeA)
+			}
+			f.bindingErr = nil
+			f.bindings[a.PaneID] = herdr.Binding{Token: "B", TerminalID: "term_b", NativeSessionID: tc.native, ProcessID: 13, Agent: "claude", CWD: "repo"}
+			if err := r.Refresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			items := r.List()
+			if len(items) != 1 || items[0].ID != tc.wantID || items[0].Lifecycle != LifecycleActive || items[0].Binding != "B" || !items[0].Terminal || !items[0].Chat {
+				t.Fatalf("recovered sessions %+v", items)
+			}
+			if tc.wantID != old {
+				if _, meta, _ := r.Get(old); meta.Active || meta.Lifecycle != LifecycleEnded {
+					t.Fatalf("old session not ended: %+v", meta)
+				}
+			}
+			if e := events(); !slices.Equal(e, tc.wantEvents) {
+				t.Fatalf("agent.status lifecycles %v, want %v", e, tc.wantEvents)
+			}
+			if err := r.BoundInput(context.Background(), tc.wantID, "A", "terminal_input", "x"); err == nil {
+				t.Fatal("stale binding accepted after recovery")
+			}
+			if err := r.BoundInput(context.Background(), tc.wantID, "B", "terminal_input", "x"); err != nil {
+				t.Fatalf("recovered binding rejected: %v", err)
+			}
+		})
 	}
 }
