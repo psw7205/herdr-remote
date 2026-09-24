@@ -30,3 +30,15 @@ export function pendingCommandCopy(terminal: boolean) {
     cleared: `${place}에서 이전 입력을 확인한 후 새 입력을 작성할 수 있습니다.`,
   }
 }
+
+export function rejectedMessage(code?: string): string {
+  switch (code) {
+    case 'SESSION_CHANGED':
+    case 'RUNTIME_BINDING_MISMATCH':
+      return '세션이 바뀌었습니다. 목록에서 다시 선택하세요.'
+    case 'HERDR_UNSUPPORTED':
+      return '현재 Herdr에 conditional input API가 없어 입력을 전달하지 않았습니다. PC에서 Herdr patch 적용 여부를 확인하세요.'
+    default:
+      return `전달 거부: ${code ?? '확인 필요'}`
+  }
+}

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { chooseCommand, pendingCommandCopy, readPending, type PendingCommand } from './commandDelivery'
+import { chooseCommand, pendingCommandCopy, readPending, rejectedMessage, type PendingCommand } from './commandDelivery'
 
 const pending: PendingCommand = { id: 'same-id', binding: 'binding-a', text: 'continue' }
 it('reuses the command ID for the same prompt after a timeout or reload', () => {
@@ -25,4 +25,8 @@ it('points pending-command guidance to Terminal only when the session has one', 
     expect(text).toContain('PC의 Herdr')
     expect(text).not.toContain('Terminal')
   }
+})
+it('explains a rejection from a Herdr build without conditional input', () => {
+  expect(rejectedMessage('HERDR_UNSUPPORTED')).toContain('Herdr patch')
+  expect(rejectedMessage('INPUT_REJECTED')).toBe('전달 거부: INPUT_REJECTED')
 })

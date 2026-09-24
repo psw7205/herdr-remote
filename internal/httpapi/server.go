@@ -160,6 +160,11 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			return command.Result{Status: "accepted"}
 		}
+		// Herdr rejects an unknown method while deserializing the request, before
+		// any dispatch or PTY write, so this is a definite non-delivery.
+		if errors.Is(err, herdr.ErrUnsupported) {
+			return command.Result{Status: "rejected", Code: "HERDR_UNSUPPORTED"}
+		}
 		var api *herdr.APIError
 		if errors.As(err, &api) {
 			switch api.Code {
