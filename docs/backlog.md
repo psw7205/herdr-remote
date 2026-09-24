@@ -17,6 +17,8 @@
 | P0-05 | 실제 pane/session 교체 회귀 테스트 | `todo`. actor 단위 테스트와 live stale-token 거부는 통과했다. A 종료→같은 pane shell/B 과정은 기존 사용자 agent를 건드리지 않기 위해 실측하지 않았다. | 격리 Herdr 환경에서 A→shell, A→B, 같은 process의 native session 교체, queued text→Enter 사이 교체를 재현한다. 오래된 Chat/Terminal command가 새 대상에 입력되지 않고 `delivery_unknown`을 중복 retry하지 않는다. |
 | P0-06 | 실제 interrupt·blocked interaction | `todo`. Terminal Esc 전달과 API/unit 경로는 검증했다. 작업 중 interrupt와 permission/question 대기 화면은 실측하지 않았다. | 격리 agent에서 Stop이 기존 process에만 전달되고, 구조를 모르는 CLI 대기는 Chat이 임의 Allow/Deny를 만들지 않고 같은 pane의 Terminal에서 처리된다. 연결 종료는 agent를 중단하지 않는다. |
 | P0-07 | Binding·capability 손실과 agent 종료 구분 | `todo`, P0-04와 연결. Herdr가 binding을 제공하지 않으면 `internal/session/registry.go`가 session ID를 `claude:<native-id>`에서 `pane:<pane-id>`로 바꿔 등록한다. 기존 ID는 발견되지 않은 것으로 처리돼 `lifecycle: ended`가 기록되므로, 열린 Chat은 agent가 계속 실행 중이어도 `ended`로 보인다. stock binary로 교체하거나 rollback할 때 재현될 것으로 예상한다. | Capability 손실이나 binding 손실을 agent lifecycle 종료로 표시하지 않는다. PRD §8의 `ended/unavailable`은 process 종료가 확인된 경우에만 표시한다. |
+| P0-08 | Tailnet 설정 자동 감지·진단 | `todo`. 현재 `-tailnet-host`·`-tailnet-login` 기본값은 빈 값이라 설치자가 `tailscale status --json`의 host와 login, `-origins`를 수동으로 맞춰야 한다. 원격 경로는 Tailscale Serve만 유지한다(ADR-024). P0-01/P0-02와 연결된다. | 새 package `internal/tailnet`이 `tailscale.com` 의존성 없이 CLI를 shell-out한다. `-tailnet-host`·`-tailnet-login` 기본값 `auto`는 시작 시 한 번 `tailscale status --json`에서 host(`Self.DNSName`의 trailing dot 제거)와 node 소유 사용자의 login을 얻는다. `-tailnet-host off`는 Tailnet 요청을 받지 않는 localhost 전용이고, 명시 값은 `auto`보다 우선한다. tagged node이거나 login이 없으면 host는 유지하고 login은 비워 모든 tailnet 요청을 거부한다. CLI 없음·실행 실패·Tailscale 미실행이면 localhost 전용으로 동작하며 Bridge는 종료하지 않는다. `-tailscale-bin`은 CLI 경로를 명시하고, 없으면 PATH, 이어서 알려진 설치 경로를 찾는다(`launchd`의 최소 PATH, macOS app bundle wrapper 대응). host가 정해지면 `https://<host>`를 Origin allowlist에 자동 추가하고 `-origins`는 Origin을 더 추가한다. 시작 log에 확정된 host/login과 각각의 출처를 남긴다. `doctor`에 `tailnet` section(`cli_available`, `backend_state`, `host`, `login`, `https_certificates`, `serve_proxy`, `funnel`, 조치 방법을 담은 `issues`)을 추가한다. `serve_proxy`는 Serve가 `<host>:443`을 Bridge listen 주소로 proxy하는지 확인한다. Funnel 활성화는 top-level blocker이고, Tailnet 미설정은 localhost 전용이 지원 범위이므로 blocker가 아니다. README는 설치자 기준 절차를 먼저 안내한다. 소유자가 Serve를 활성화한 뒤 `doctor`의 `tailnet.issues`가 비어 있음을 확인하고 P0-01/P0-02 흐름으로 실제 접속을 검증한다. |
+| P0-09 | 공개 전 점검 | `todo`, 소유자 주도. P0-01~P0-08 이후. GitHub에 공개해 다른 사용자가 자신의 tailnet에 설치하기 전 단계다. | (1) Host/Origin/identity 경계, command receipt, fixture, log를 포함한 전체 security review를 완료한다. (2) 모든 tracked 문서에서 개인·host 전제를 제거한다. 예: PRD §22의 "이 호스트처럼", P0-01/P0-03과 `docs/implementation-plan.md`·`docs/herdr-patch.md`에 적힌 이 host·tailnet의 Serve/ACL 상태. (3) 공개 전에 Git history를 재생성한다. (4) 소유자가 원하면 LICENSE와 기여 안내를 추가한다. |
 
 ## P1 — 핵심 UX와 다음 agent
 
@@ -50,6 +52,7 @@ full IDE·source editor, mobile Git commit/push/merge는 현 PRD의 non-goal이�
 이 목록에서 우선순위를 받은 기능이 아니다.
 
 **의도:** 기존 Herdr session의 무결성과 모바일에서의 복구 가능성을 먼저 완성한다.
-**추천:** P0-01→02의 실제 Tailnet handoff를 닫고, P0-03~07을 격리 환경에서 검증한 뒤
-P1-01/02 Codex adapter로 확장한다 — 이유는 remote 사용 경로와 잘못된 process 입력 방지가
+**추천:** P0-08로 Tailnet 설정을 자동화한 뒤 P0-01→02의 실제 Tailnet handoff를 닫고,
+P0-03~07을 격리 환경에서 검증한다. 이어서 P0-09 공개 전 점검을 거쳐 P1-01/02 Codex adapter로
+확장한다 — 이유는 remote 사용 경로와 잘못된 process 입력 방지가
 Rich Chat 기능보다 먼저 증명돼야 하기 때문이다.
