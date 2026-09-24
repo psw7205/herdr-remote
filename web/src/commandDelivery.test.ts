@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { chooseCommand, readPending, type PendingCommand } from './commandDelivery'
+import { chooseCommand, pendingCommandCopy, readPending, type PendingCommand } from './commandDelivery'
 
 const pending: PendingCommand = { id: 'same-id', binding: 'binding-a', text: 'continue' }
 it('reuses the command ID for the same prompt after a timeout or reload', () => {
@@ -18,4 +18,11 @@ afterEach(() => vi.unstubAllGlobals())
 it('recovers the same pending command from browser storage after reload', () => {
   vi.stubGlobal('sessionStorage', { getItem: () => JSON.stringify(pending) })
   expect(readPending('command:session')).toEqual(pending)
+})
+it('points pending-command guidance to Terminal only when the session has one', () => {
+  for (const text of Object.values(pendingCommandCopy(true))) expect(text).toContain('Terminal')
+  for (const text of Object.values(pendingCommandCopy(false))) {
+    expect(text).toContain('PC의 Herdr')
+    expect(text).not.toContain('Terminal')
+  }
 })
