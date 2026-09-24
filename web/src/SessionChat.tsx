@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { MessageMarkdown } from './MessageMarkdown'
-import { chooseCommand, pendingCommandCopy, readPending, type PendingCommand } from './commandDelivery'
+import { chooseCommand, pendingCommandCopy, readPending, rejectedMessage, type PendingCommand } from './commandDelivery'
 import { eventURL, getSession, sendCommand, type Cursor, type Event, type Message, type Session } from './api'
 
 const statusLabels: Record<Session['status'], string> = {
@@ -108,7 +108,7 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
       } else {
         sessionStorage.removeItem(`command:${session.id}`)
         setPending(null)
-        setDelivery(result.code === 'SESSION_CHANGED' || result.code === 'RUNTIME_BINDING_MISMATCH' ? '세션이 바뀌었습니다. 목록에서 다시 선택하세요.' : `전달 거부: ${result.code ?? '확인 필요'}`)
+        setDelivery(rejectedMessage(result.code))
       }
     } catch { setDelivery('연결이 끊겼습니다. 같은 입력은 기존 command ID로만 확인합니다.') }
     finally { setSending(false) }

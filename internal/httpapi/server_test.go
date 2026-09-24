@@ -45,6 +45,7 @@ type fakeSessions struct {
 	hub         *stream.Session
 	count       atomic.Int32
 	conditional string
+	boundErr    error
 }
 
 func (f *fakeSessions) ConditionalInput() string { return f.conditional }
@@ -61,7 +62,7 @@ func (f *fakeSessions) BoundInput(_ context.Context, _, binding, _, _ string) er
 		return errors.New("session binding changed")
 	}
 	f.count.Add(1)
-	return nil
+	return f.boundErr
 }
 func (f *fakeSessions) Terminal(context.Context, string, string) (herdr.TerminalSnapshot, error) {
 	return herdr.TerminalSnapshot{}, nil
@@ -111,6 +112,32 @@ func TestCommandRetryAndStaleBinding(t *testing.T) {
 	}
 	if sessions.count.Load() != 1 {
 		t.Fatal("stale dispatch")
+	}
+}
+func TestUnsupportedBoundInputIsDurablyRejected(t *testing.T) {
+	server, sessions := newTestServer(t)
+	sessions.boundErr = fmt.Errorf("%w: agent.bound_input", herdr.ErrUnsupported)
+	body := `{"command_id":"00000000-0000-4000-8000-000000000002","session_id":"claude:native","runtime_binding":"bound","command_type":"prompt","payload":{"text":"hello"}}`
+	for attempt := range 2 {
+		r, e := http.NewRequest(http.MethodPost, server.URL+"/api/sessions/claude:native/commands", strings.NewReader(body))
+		if e != nil {
+			t.Fatal(e)
+		}
+		r.Header.Set("Origin", "http://localhost:5173")
+		r.Header.Set("Content-Type", "application/json")
+		res, e := http.DefaultClient.Do(r)
+		if e != nil {
+			t.Fatal(e)
+		}
+		var result command.Result
+		e = json.NewDecoder(res.Body).Decode(&result)
+		res.Body.Close()
+		if e != nil || res.StatusCode != 409 || result != (command.Result{Status: "rejected", Code: "HERDR_UNSUPPORTED"}) {
+			t.Fatalf("attempt %d: status %d result %+v err %v", attempt, res.StatusCode, result, e)
+		}
+	}
+	if sessions.count.Load() != 1 {
+		t.Fatalf("retry re-dispatched: %d", sessions.count.Load())
 	}
 }
 func TestSessionsReportsHerdrConditionalInput(t *testing.T) {
