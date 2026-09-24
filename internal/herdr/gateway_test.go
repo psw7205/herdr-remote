@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -279,5 +280,73 @@ func TestBoundInputUsesSeparateMethodWithoutRetry(t *testing.T) {
 	e := g.BoundInput(context.Background(), "w1:p2", "verified", "prompt", "hello")
 	if e != nil {
 		t.Fatal(e)
+	}
+}
+
+// Observed shape of a Herdr 0.9.1 unknown-method rejection. The expected
+// variant list is truncated; detection must not depend on it.
+const unknownMethodResponse = `{"id":"","error":{"code":"invalid_request","message":"invalid request: unknown variant ` + "`%s`, expected one of `ping`, `session.snapshot`, `pane.read`" + ` at line 1 column 71"}}`
+
+func rejectAs(t *testing.T, method, response string) string {
+	return socketServer(t, func(c net.Conn) {
+		var req struct {
+			Method string `json:"method"`
+		}
+		if err := json.NewDecoder(c).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		if req.Method != method {
+			t.Errorf("method = %s, want %s", req.Method, method)
+		}
+		c.Write([]byte(response + "\n"))
+	})
+}
+
+func TestUnknownMethodIsUnsupported(t *testing.T) {
+	path := rejectAs(t, "agent.binding", fmt.Sprintf(unknownMethodResponse, "agent.binding"))
+	_, err := NewGateway(path).Binding(context.Background(), "w1:p2")
+	if !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("got %v", err)
+	}
+	var api *APIError
+	if errors.As(err, &api) {
+		t.Fatal("unsupported must not look like a method-level API error")
+	}
+}
+
+func TestOtherUncorrelatedErrorsStayMismatch(t *testing.T) {
+	unsupported := fmt.Sprintf(unknownMethodResponse, "agent.binding")
+	for name, response := range map[string]string{
+		"other method":  fmt.Sprintf(unknownMethodResponse, "agent.other"),
+		"params error":  `{"id":"","error":{"code":"invalid_request","message":"invalid request: missing field ` + "`target`" + ` at line 1 column 40"}}`,
+		"other code":    strings.Replace(unsupported, "invalid_request", "internal_error", 1),
+		"mismatched id": strings.Replace(unsupported, `"id":""`, `"id":"other"`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := rejectAs(t, "agent.binding", response)
+			_, err := NewGateway(path).Binding(context.Background(), "w1:p2")
+			if err == nil || errors.Is(err, ErrUnsupported) || err.Error() != "Herdr response correlation mismatch" {
+				t.Fatalf("got %v", err)
+			}
+		})
+	}
+}
+
+func TestObserveConditionalInput(t *testing.T) {
+	for _, tc := range []struct {
+		current string
+		err     error
+		want    string
+	}{
+		{ConditionalInputUnknown, errors.New("dial failed"), ConditionalInputUnknown},
+		{ConditionalInputUnknown, nil, ConditionalInputSupported},
+		{ConditionalInputUnknown, &APIError{Code: "session_ended"}, ConditionalInputSupported},
+		{ConditionalInputSupported, fmt.Errorf("%w: agent.binding", ErrUnsupported), ConditionalInputUnsupported},
+		{ConditionalInputUnsupported, nil, ConditionalInputUnsupported},
+	} {
+		if got := ObserveConditionalInput(tc.current, tc.err); got != tc.want {
+			t.Fatalf("Observe(%s, %v) = %s, want %s", tc.current, tc.err, got, tc.want)
+		}
 	}
 }

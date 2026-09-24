@@ -2,6 +2,8 @@ package session
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"herdr-remote/internal/claude"
 	"herdr-remote/internal/herdr"
 	"herdr-remote/internal/stream"
@@ -13,15 +15,56 @@ import (
 )
 
 type fakeHerdr struct {
-	agents   []herdr.Agent
-	bindings map[string]herdr.Binding
+	agents      []herdr.Agent
+	bindings    map[string]herdr.Binding
+	bindingErr  error
+	snapshotErr error
 }
 
 func (f *fakeHerdr) Snapshot(context.Context) (herdr.Snapshot, error) {
+	if f.snapshotErr != nil {
+		return herdr.Snapshot{}, f.snapshotErr
+	}
 	return herdr.Snapshot{Version: "0.9.1", Protocol: 22, Agents: f.agents}, nil
 }
 func (f *fakeHerdr) Binding(_ context.Context, p string) (herdr.Binding, error) {
+	if f.bindingErr != nil {
+		return herdr.Binding{}, f.bindingErr
+	}
 	return f.bindings[p], nil
+}
+func TestConditionalInputCapabilityFailsClosed(t *testing.T) {
+	a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle"}
+	f := &fakeHerdr{}
+	ctx := context.Background()
+	r := NewRegistry(ctx, f, t.TempDir())
+	if e := r.Refresh(ctx); e != nil || r.ConditionalInput() != "unknown" {
+		t.Fatalf("no agents: %v %s", e, r.ConditionalInput())
+	}
+	f.agents = []herdr.Agent{a}
+	f.bindingErr = errors.New("dial unix: connection refused")
+	if r.Refresh(ctx); r.ConditionalInput() != "unknown" {
+		t.Fatalf("transport error counted as evidence: %s", r.ConditionalInput())
+	}
+	f.bindingErr = &herdr.APIError{Code: "binding_unavailable", Message: "no native session"}
+	if r.Refresh(ctx); r.ConditionalInput() != "supported" {
+		t.Fatalf("method-level error: %s", r.ConditionalInput())
+	}
+	f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+	if r.Refresh(ctx); r.ConditionalInput() != "unsupported" {
+		t.Fatalf("unsupported: %s", r.ConditionalInput())
+	}
+	items := r.List()
+	if len(items) != 1 || items[0].Chat || items[0].Terminal || items[0].Binding != "" {
+		t.Fatalf("unsupported Herdr enabled controls: %+v", items)
+	}
+	if e := r.BoundInput(ctx, items[0].ID, "", "terminal_input", "x"); e == nil {
+		t.Fatal("unsupported Herdr accepted input")
+	}
+	f.snapshotErr = errors.New("snapshot failed")
+	if e := r.Refresh(ctx); e == nil || r.ConditionalInput() != "unsupported" {
+		t.Fatalf("snapshot failure changed capability: %v %s", e, r.ConditionalInput())
+	}
 }
 func (f *fakeHerdr) BoundInput(context.Context, string, string, string, string) error { return nil }
 func (f *fakeHerdr) TerminalSnapshot(_ context.Context, paneID string) (herdr.TerminalSnapshot, error) {

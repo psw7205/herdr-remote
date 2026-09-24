@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -18,6 +19,10 @@ import (
 const maxResponseBytes = 4 << 20
 
 var ErrEmptyTarget = errors.New("explicit pane target required")
+
+// ErrUnsupported means the Herdr server rejected the method name itself, as a
+// stock build does for agent.binding and agent.bound_input.
+var ErrUnsupported = errors.New("Herdr method unsupported")
 var requestSequence atomic.Uint64
 
 type Gateway struct{ socket string }
@@ -150,6 +155,26 @@ func (g *Gateway) TerminalSnapshot(ctx context.Context, paneID string) (Terminal
 
 func (e *APIError) Error() string { return e.Code + ": " + e.Message }
 
+// Conditional input capability observed from agent.binding responses.
+const (
+	ConditionalInputUnknown     = "unknown"
+	ConditionalInputSupported   = "supported"
+	ConditionalInputUnsupported = "unsupported"
+)
+
+// ObserveConditionalInput folds one agent.binding result into current.
+// Transport and response-shape errors are not evidence either way.
+func ObserveConditionalInput(current string, err error) string {
+	var api *APIError
+	switch {
+	case current == ConditionalInputUnsupported || errors.Is(err, ErrUnsupported):
+		return ConditionalInputUnsupported
+	case err == nil || errors.As(err, &api):
+		return ConditionalInputSupported
+	}
+	return current
+}
+
 func (g *Gateway) Snapshot(ctx context.Context) (Snapshot, error) {
 	var result struct {
 		Type     string    `json:"type"`
@@ -220,6 +245,11 @@ func (g *Gateway) read(ctx context.Context, method string, params any, result an
 	}
 	if err := json.Unmarshal(line, &response); err != nil {
 		return fmt.Errorf("decode Herdr response: %w", err)
+	}
+	// Herdr rejects an unknown method while deserializing the request, before
+	// it has an ID to echo. Only that exact rejection proves the method is absent.
+	if response.ID == "" && response.Error != nil && response.Error.Code == "invalid_request" && strings.HasPrefix(response.Error.Message, "invalid request: unknown variant `"+method+"`") {
+		return fmt.Errorf("%w: %s", ErrUnsupported, method)
 	}
 	if response.ID != id {
 		return errors.New("Herdr response correlation mismatch")
