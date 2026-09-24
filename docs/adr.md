@@ -1424,8 +1424,13 @@ Status: Accepted (구현은 backlog P0-08)
 node를 소유한 사용자의 login이다. `-tailnet-host`·`-tailnet-login`의 명시 값이 자동 값보다
 우선하며 `-tailnet-host off`는 Tailnet 요청을 받지 않는다. 이 값은 identity 대조 대상일 뿐
 app-level 인증을 추가하지 않는다. tagged node나 login이 없는 node처럼 소유자를 알 수 없으면
-host만 유지하고 모든 tailnet 요청을 거부한다. CLI가 없거나 실패하면 localhost 전용으로
-동작한다. 어느 경우에도 Serve 사용에는 tailnet 관리 화면에서 HTTPS Certificates를 한 번
+host만 유지하고 모든 tailnet 요청을 거부한다. CLI가 없거나 실패하면 `auto` host는 확정되지
+않아 localhost 전용으로 동작한다. host를 명시했는데 `auto` login만 실패한 경우에는 host를
+유지하고 모든 tailnet 요청을 거부하며, localhost 전용으로 바뀌지 않는다. 어느 쪽이든 Bridge는
+종료하지 않는다. `https://<host>`는 host와 owner login이 모두 확정된 경우에만 Origin
+allowlist에 추가되며, login이 없는 동안 `-origins`로 넣은 tailnet HTTPS Origin은 경고와 함께
+제외된다. `doctor`의 Funnel 감지는 host의 모든 port와 `--bg` 없이 실행한 foreground Serve
+설정까지 포함한다. 어느 경우에도 Serve 사용에는 tailnet 관리 화면에서 HTTPS Certificates를 한 번
 활성화해야 한다.
 
 기각한 대안:
