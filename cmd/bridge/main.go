@@ -72,7 +72,10 @@ func main() {
 		}
 	}()
 	identity := resolveTailnet(ctx, *tailnetHost, *tailnetLogin, *tailscaleBin)
-	allowed := strings.Split(*origins, ",")
+	allowed, dropped := identity.DropUnverifiedOrigins(strings.Split(*origins, ","))
+	for _, origin := range dropped {
+		slog.Warn("tailnet setup incomplete", "reason", "dropping -origins entry without a resolved tailnet owner login", "origin", origin)
+	}
 	if identity.Host != "" && identity.Login != "" {
 		// ValidateOrigins only accepts the tailnet Origin with an owner login;
 		// without one every tailnet request is rejected anyway.
