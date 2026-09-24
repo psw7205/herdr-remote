@@ -2311,7 +2311,7 @@ receipt는 conversation 본문을 저장하는 DB가 아니며 command digest와
 
 ## Status
 
-Accepted (현재 Herdr 0.9.1에서는 미지원)
+Accepted (stock Herdr `0.9.1`에는 미포함, 현재 로컬 patch에서 구현)
 
 ## Decision
 
