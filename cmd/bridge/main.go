@@ -115,6 +115,7 @@ func resolveTailnet(ctx context.Context, hostFlag, loginFlag, bin string) tailne
 			run = tailnet.ExecRunner(path)
 		}
 	}
+	// ExecRunner adds at most its WaitDelay (1s) after this timeout.
 	resolveCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	identity := tailnet.Resolve(resolveCtx, hostFlag, loginFlag, run, cliErr)

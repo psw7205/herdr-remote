@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // statusRunning is an anonymized `tailscale status --json` shape: field names
@@ -169,6 +172,19 @@ const serveOther = `{
   "AllowFunnel": {"node.example-tailnet.ts.net:443": false}
 }`
 
+// Source-derived, not observed: `tailscale funnel 8787` without --bg. The CLI
+// keeps its config under Foreground[<session ID>] while it runs and leaves the
+// background Web and AllowFunnel untouched.
+const serveForegroundFunnel = `{
+  "Foreground": {
+    "0123456789abcdef": {
+      "TCP": {"443": {"HTTPS": true}},
+      "Web": {"node.example-tailnet.ts.net:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8787"}}}},
+      "AllowFunnel": {"node.example-tailnet.ts.net:443": true}
+    }
+  }
+}`
+
 func TestServeConfigProxyAndFunnel(t *testing.T) {
 	const host = "node.example-tailnet.ts.net"
 	cases := []struct {
@@ -180,6 +196,8 @@ func TestServeConfigProxyAndFunnel(t *testing.T) {
 		{"bridge", serveBridge, true, false},
 		{"funnel", serveFunnel, true, true},
 		{"other", serveOther, false, false},
+		// Foreground proxies are not durable; Foreground Funnel still exposes Bridge.
+		{"foreground funnel", serveForegroundFunnel, false, true},
 	}
 	for _, tc := range cases {
 		c, err := ReadServeConfig(context.Background(), fixedRunner(map[string]string{"serve status --json": tc.fixture}, nil))
@@ -194,6 +212,9 @@ func TestServeConfigProxyAndFunnel(t *testing.T) {
 		}
 		if c.ProxiesTo("other.example-tailnet.ts.net", "127.0.0.1:8787") {
 			t.Errorf("%s: proxy matched another host", tc.name)
+		}
+		if c.FunnelEnabled("other.example-tailnet.ts.net") {
+			t.Errorf("%s: Funnel matched another host", tc.name)
 		}
 	}
 }
@@ -250,5 +271,49 @@ func TestFindCLI(t *testing.T) {
 	}
 	if _, err := findCLI(plain, onPath, []string{bin}); err == nil {
 		t.Fatal("explicit non-executable path accepted")
+	}
+}
+
+// The macOS /usr/local/bin/tailscale wrapper runs the app binary without
+// exec (the trailing command keeps sh from exec-ing sleep as a tail call). A
+// context kill then only hits the shell while the grandchild keeps
+// stdout open; the runner must still return after WaitDelay.
+func TestExecRunnerReturnsWhenGrandchildHoldsPipe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh unavailable")
+	}
+	script := filepath.Join(t.TempDir(), "tailscale")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 5\nexit $?\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const timeout, waitDelay = 200 * time.Millisecond, 200 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	start := time.Now()
+	_, err := execRunner(script, waitDelay, maxOutputBytes)(ctx, "status", "--json")
+	if elapsed := time.Since(start); elapsed > timeout+waitDelay+time.Second {
+		t.Fatalf("runner blocked for %v", elapsed)
+	}
+	if err == nil {
+		t.Fatal("canceled run reported success")
+	}
+}
+
+func TestExecRunnerRejectsOversizedOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
+	script := filepath.Join(t.TempDir(), "tailscale")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 0123456789\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := execRunner(script, execWaitDelay, 4)(context.Background()); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized output: %v", err)
+	}
+	if out, err := execRunner(script, execWaitDelay, 64)(context.Background()); err != nil || string(out) != "0123456789" {
+		t.Fatalf("bounded output: %q %v", out, err)
 	}
 }
