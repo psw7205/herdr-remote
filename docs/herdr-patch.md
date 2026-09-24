@@ -35,9 +35,10 @@ patch가 없거나 binding을 확인할 수 없으면 Bridge는 fail closed한�
 - Bridge가 raw pane input이나 stock `agent.prompt`로 우회하지 않는다.
 - Herdr가 소유한 agent process는 영향을 받지 않는다.
 
-알려진 한계: binding이 사라지면 현재 Bridge는 session을 `claude:<native-id>`에서
-`pane:<pane-id>`로 다시 등록한다. 이미 열린 Chat은 agent가 실행 중이어도 `ended`로 보인다.
-[P0-07](backlog.md#p0--배포와-핵심-안정성)에서 다룬다.
+binding이 사라져도 agent가 같은 pane에서 계속 보고되면 기존 `claude:<native-id>` session은
+`ended`가 아닌 `unverified`로 남고, 같은 native session이 다시 검증되면 `active`로 돌아간다.
+native session을 식별하지 못한 `pane:<pane-id>` item은 `unbound`로 보인다
+([P0-07](backlog.md#p0--배포와-핵심-안정성), ADR-034).
 
 ## 2. 현재 상태 확인
 
