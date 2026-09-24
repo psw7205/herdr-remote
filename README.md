@@ -1,116 +1,133 @@
 # Herdr Mobile Chat
 
-Herdr가 이미 실행 중인 Claude Code session을 모바일 브라우저에서 읽고 이어서 대화하는
-single-host client다. Herdr가 agent와 PTY를 소유한다. Chat은 native transcript의 투영이며
-Bridge가 새 agent나 native session을 생성하지 않는다.
+Herdr에서 이미 실행 중인 coding agent를 모바일 브라우저에서 확인하고 같은 session에
+입력하는 single-user, single-host client다. Herdr가 process와 PTY를 소유하고,
+Chat은 native transcript를 읽어 표시한다. Bridge가 agent를 start/resume하지 않는다.
 
-현재 구현은 Claude Code / macOS의 첫 handoff 경로다. Codex adapter와 PRD의 optional 기능은
-[구현 계획](docs/implementation-plan.md)에 남아 있다.
+## 현재 지원 범위
 
-## 실행 조건
+| 항목 | 상태 |
+| --- | --- |
+| Claude Code / macOS | 기존 session 발견, Chat, prompt, interrupt API, Terminal fallback 구현 |
+| 대화 복구 | incremental JSONL, snapshot/replay/live, epoch, reconnect 구현 |
+| 입력 보호 | Herdr 조건부 binding 검증, durable command receipt, browser retry ID 유지 |
+| 모바일 UI | React Chat, Markdown/code, 특수 키가 있는 xterm.js, PWA shell·설치 icon |
+| Tailnet | Serve 소유자 identity 및 Host/Origin 검증 구현. 실제 mobile HTTPS 검증은 남아 있음 |
+| Codex | Herdr CLI/native transcript 조사 완료. Chat/write adapter는 미구현 |
+| Tool cards·Changed Files·attachment·notification | 후속 optional 기능 |
 
-- 이 저장소의 `mise.toml`: Go, Node.js, pnpm
-- `herdr` repo의 `codex/mobile-binding` branch에서 빌드한 Herdr server
-- 기존 Herdr pane에서 실행 중인 Claude Code와 접근 가능한 native transcript
-- mobile 접근 시 Tailscale Serve와 Bridge의 소유자 identity 검증
+Claude의 localhost handoff와 Bridge 재시작 복구는 실제 process에서 검증했다.
+실기기·process 교체 등 아직 확인하지 않은 scenario는 [Backlog](docs/backlog.md)에 구분했다.
 
-기본 Herdr `0.9.1`에는 `agent.binding`/`agent.bound_input`가 없다. Bridge는 그 API가
-없을 때 prompt를 다른 입력 API로 우회하지 않는다. Herdr patch의 `just ci`와 release
-build가 통과했고, live handoff에서 기존 두 Claude PID와 native session ID를 유지했다.
-Herdr 자체를 재시작하거나 updater가 기본 binary로 교체하면 patch를 다시 적용해야 한다.
+## 기술 스택
 
-## 개발과 실행
+- Frontend: React + TypeScript + Vite, pnpm
+- Bridge: Go `net/http`, `coder/websocket`, `fsnotify`, `log/slog`
+- Terminal: xterm.js의 visible ANSI snapshot 표시
+- Toolchain: `mise.toml`
+- Persistence: command receipt만 disk에 보존. conversation DB·Redis·broker 없음
+
+## 사전 조건
+
+기존 Herdr server와 Claude interactive session이 필요하다. Bridge는 Herdr가 꺼졌을 때
+대신 시작하지 않는다. stock Herdr `0.9.1`에는 필수 API인 `agent.binding`과
+`agent.bound_input`가 없다.
+
+검증한 Herdr patch는 `herdr` repo의 `codex/mobile-binding` branch, commit `0e672c5e`다.
+stock과 patched binary가 같은 version 문자열을 사용할 수 있으므로 version만으로
+지원 여부를 판단하지 않는다. `doctor`로 현재 server를 확인한다. Herdr updater가 stock
+binary를 설치하면 조건부 입력이 비활성화되므로 patch 유지 절차가 필요하다.
+
+## 빠른 시작
+
+저장소 root에서 실행한다.
 
 ```sh
 mise install
-pnpm --dir web install --frozen-lockfile
-mise run test
-pnpm --dir web build
-go run ./cmd/bridge -herdr-socket "$HERDR_SOCKET_PATH"
+mise exec -- pnpm --dir web install --frozen-lockfile
+mise exec -- pnpm --dir web build
+
+export HERDR_SOCKET_PATH="$(herdr status server | sed -n 's/^socket: *//p')"
+test -S "$HERDR_SOCKET_PATH"
+mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
+mise exec -- go run ./cmd/bridge -herdr-socket "$HERDR_SOCKET_PATH"
 ```
 
-`HERDR_SOCKET_PATH`는 `herdr status server`가 출력한 기존 socket 경로를 사용한다.
-Bridge는 기본적으로 `127.0.0.1:8787`에만 bind하고 `web/dist`를 제공한다.
-브라우저에서 `http://127.0.0.1:8787`로 접속한다. server가 꺼져 있어도 agent는 계속 실행된다.
-Bridge 재시작 후 transcript에서 history를 재구성하고 cursor epoch를 교체한다.
-이 호스트에서는 Bridge가 사용자 `launchd` 서비스로 실행 중이다. 소스 변경 후에는
-`pnpm --dir web build`로 정적 파일을 다시 만들고, Go binary를 재빌드한 뒤 서비스를
-재시작해야 한다. 실행 설정은 사용자 LaunchAgent에만 있으며 Git에는 포함하지 않는다.
+[http://127.0.0.1:8787](http://127.0.0.1:8787)로 접속한다. `doctor`는 read-only이며
+transcript 원문이나 binding token을 출력하지 않는다. 종료 코드 0은 조회 성공이고,
+모든 handoff acceptance의 완료를 의미하지 않는다. `verified_binding`과 `blockers`를 확인한다.
 
-모바일 Tailnet HTTPS에서는 Bridge를 다음처럼 실행한다. `<tailnet-host>`는
-`tailscale status --json`의 `Self.DNSName` 값이며 끝의 점을 제거한 host다.
+Vite hot reload와 변경별 검증 절차는 [CONTRIBUTING.md](CONTRIBUTING.md)에 있다.
+
+## Bridge 설정
+
+| Flag | 기본값·역할 |
+| --- | --- |
+| `-herdr-socket` | 사용자 기본 Herdr socket. 다른 named session은 명시적으로 지정 |
+| `-claude-dir` | 사용자 Claude native data directory |
+| `-receipts-dir` | 사용자 state directory의 durable command receipts |
+| `-listen` | `127.0.0.1:8787`. loopback만 허용 |
+| `-static` | `web/dist`. 시작 시 `index.html` 존재 확인 |
+| `-origins` | `http://127.0.0.1:8787`. comma-separated exact Origin 목록 |
+| `-tailnet-host` | Serve의 DNS host. trailing dot은 제거 |
+| `-tailnet-login` | Serve를 통해 접근할 수 있는 단일 사용자 로그인 |
+
+전체 flag는 `mise exec -- go run ./cmd/bridge -h`로 확인한다.
+`-herdr-socket`은 CLI flag이며, 위 예시의 `HERDR_SOCKET_PATH`는 shell이 전달하는 값이다.
+
+## Tailnet HTTPS
+
+`tailscale status --json`의 `Self.DNSName`에서 끝의 점을 제거해 `<tailnet-host>`에,
+`tailscale whoami`의 사용자 로그인을 `<tailscale-login>`에 넣는다.
 
 ```sh
-go run ./cmd/bridge -herdr-socket "$HERDR_SOCKET_PATH" \
+mise exec -- go run ./cmd/bridge -herdr-socket "$HERDR_SOCKET_PATH" \
   -origins "http://127.0.0.1:8787,https://<tailnet-host>" \
   -tailnet-host "<tailnet-host>" -tailnet-login "<tailscale-login>"
 tailscale serve --bg 8787
 ```
 
-Serve는 Tailnet 내부에서만 사용하고 Funnel은 사용하지 않는다. `<tailscale-login>`은
-`tailscale whoami`의 현재 사용자 로그인이다. Bridge는 Serve가 추가하는
-`Tailscale-User-Login`을 정확히 대조한다. header가 없거나 다른 사용자면 읽기와 제어를
-모두 거부한다. Serve는 클라이언트가 보낸 동일 header를 제거한다.
-Tailnet ACL이 넓을 수 있으므로 identity 검증이
-필수다. 추가로 [Tailscale ACL 문서](https://tailscale.com/docs/features/access-control/acls)에
-따라 대상 mobile device만 허용하도록 network 정책을 좁히는 것을 권장한다.
-정확한 Origin 값은 Bridge가 HTTP mutation과 WebSocket handshake 모두에서 검증한다.
-비밀번호/OAuth/JWT는 추가하지 않았다.
-Tailnet에서 Serve를 처음 켤 때 Tailscale 관리자 로그인이 필요할 수 있다. Serve가
-활성화되지 않은 동안 앱은 localhost에서만 접속 가능하다.
+Tailnet에서 Serve를 처음 활성화할 때는 CLI가 안내하는 관리자 로그인·활성화가 필요하다.
+활성화 전에는 localhost에서만 접속할 수 있다. Funnel은 사용하지 않는다.
 
-## 동작과 확인
+Bridge는 Serve가 검증해 추가한 `Tailscale-User-Login`을 소유자와 대조한다. 다른 사용자나
+누락된 identity는 읽기·제어 모두 거부한다. HTTP mutation과 WS는 exact Origin도 검사한다.
+Bridge는 localhost에만 bind해야 하며, network ACL/grant 역시 필요한 device로 제한한다.
+자체 password/OAuth/JWT는 없다. [Serve identity 동작](https://tailscale.com/docs/features/tailscale-serve)과
+[Tailscale 접근 정책](https://tailscale.com/docs/features/access-control/acls)을 참고한다.
 
-`GET /api/sessions`에서 실행 중인 agent를 찾는다. session별 `agent.binding`을 검증해
-native session ID로 transcript를 찾고, JSONL을 incremental하게 읽는다. partial record는
-완성되기 전까지 표시하지 않는다. 같은 cwd에 여러 session이 있으면 ID로 분리한다.
+## 데이터와 lifecycle
 
-`POST /api/sessions/{id}/commands`는 `command_id`를 disk receipt에 먼저 기록한 뒤
-Herdr의 조건부 입력 API를 한 번 호출한다. 같은 ID의 retry는 저장된 결과를 반환하고,
-timeout/crash 뒤 전달이 불확실한 command는 자동 재전송하지 않는다. `accepted`는 PTY
-전달 결과다. Chat 메시지는 native transcript에서 관찰된 뒤 표시된다.
-Browser도 초안과 `command_id`를 `sessionStorage`에 보관한다. timeout이나 reload 후 같은
-입력을 재시도하면 동일 ID를 사용한다. 사용자가 이전 입력을 확인하기 전에는 바뀐 내용으로
-새 command를 보내지 않는다.
-
-`GET /api/sessions/{id}`의 snapshot cursor와
-`WS /api/sessions/{id}/events?epoch=…&sequence=…`는 replay와 live 구독을 하나의 lock에서
-연결한다. buffer miss나 Bridge restart 후에는 새로운 snapshot을 보낸다. WebSocket 종료는
-Herdr pane이나 agent process를 종료하지 않는다.
-
-Terminal은 같은 pane의 `pane.read` visible ANSI frame을 xterm.js에 교체 표시한다.
-모바일 viewport로 Herdr PTY를 resize하지 않는다. Chat에서 표현하지 못하는 CLI interaction은
-Terminal의 조건부 raw input과 특수 키로 처리한다. Terminal frame은 현재 화면이며
-이전 frame 전체의 byte replay는 제공하지 않는다.
-
-검증 명령:
-
-```sh
-mise run test
-mise run vet
-pnpm --dir web test
-pnpm --dir web build
-go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
+```text
+기존 Herdr agent → native transcript → Go Bridge → Chat
+Chat command → durable receipt → Herdr binding 검증 → 기존 PTY
 ```
 
-`doctor`는 read-only다. 응답/terminal 내용이나 binding token을 출력하지 않고,
-agent별 verified native binding과 visible terminal snapshot 가능 여부를 보고한다.
+- Chat 메시지는 native transcript에서 관찰된 뒤 표시한다. `accepted`는 PTY 전달 결과다.
+- `delivery_unknown`은 자동 재전송하지 않는다. 같은 초안은 browser reload 뒤에도 같은 `command_id`를 사용한다.
+- transcript가 불명확하면 Chat prompt를 막는다. 검증된 binding이 있으면 같은 Terminal로 전환한다.
+- Terminal은 frame을 교체 표시한다. raw output history 전체를 replay하거나 mobile 크기로 PTY를 resize하지 않는다.
+- WS 종료나 Bridge 종료는 Herdr process를 중단하지 않는다. Bridge restart는 새 epoch로 native history를 복구한다.
+- receipts를 임의로 지우면 오래된 command ID의 재수락을 막는 근거가 사라진다.
 
-2026-09-23에 실행 중인 Herdr `0.9.1` 두 Claude session으로 확인한 결과:
+## 운영과 알려진 제한
 
-- 두 native transcript가 다른 session ID로 Chat에 표시됨
-- mobile prompt 한 건의 user/assistant record가 동일 native transcript와 desktop pane에 나타남
-- 전후 Claude PID와 native session ID가 동일함
-- 같은 `command_id` retry가 prompt를 다시 실행하지 않음
-- 오래된 binding 요청이 Bridge와 Herdr에서 거부됨
-- Bridge 종료 중에도 Claude PID가 유지되고, 재시작 후 다른 cursor epoch와 전체 대화 복구
-- 모바일 Chat/Terminal 화면 전환 전후 Herdr pane geometry 동일
+정적 파일 변경은 `pnpm --dir web build`, Go 변경은 binary 재빌드와 **Bridge만의 재시작**이
+필요하다. 사용자 `launchd` 등 process manager를 쓸 수 있으며 host별 실행 설정은 Git 밖에서
+관리한다. 이 repo에는 자동 service 설치 script가 없다.
 
-Herdr live handoff 자체는 당시 desktop client 연결을 끊으며 geometry를 기본 120×40으로
-바꿨다. 이는 mobile Terminal의 resize가 아니며, desktop Herdr client 재접속 시 기존
-client의 크기 소유권이 다시 적용된다. 최초 handoff 전에 desktop geometry를 유지해야 한다면
-현재 live handoff 구현을 별도로 개선해야 한다.
+Herdr live handoff는 테스트에서 agent PID·native session을 보존했지만 terminal ID를
+재발급했고 desktop client가 끊긴 동안 geometry를 기본 120×40으로 변경했다. 이 동작은
+mobile Terminal의 resize와 별개다. 검증한 범위와 남은 조건은 [구현 기록](docs/implementation-plan.md)을 따른다.
 
-설계 근거는 [PRD](docs/prd.md), [ADR](docs/adr.md),
-[실제 integration 조사](docs/integration-findings.md)를 따른다.
-남은 작업은 [Backlog](docs/backlog.md)에 우선순위와 완료 기준으로 정리했다.
+## 문서
+
+| 문서 | 용도 |
+| --- | --- |
+| [AGENTS.md](AGENTS.md) | agent 작업 규칙과 제품 불변식 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 개발 server, 검증, 변경 제출 절차 |
+| [PRD](docs/prd.md) | 제품 요구와 범위 |
+| [ADR](docs/adr.md) | architecture 결정 |
+| [구현 기록](docs/implementation-plan.md) | 구현 경계와 실제 검증 결과 |
+| [Integration 조사](docs/integration-findings.md) | Herdr/Claude/Codex 코드·runtime 근거 |
+| [Backlog](docs/backlog.md) | 남은 작업의 우선순위·의존 관계·완료 기준 |
