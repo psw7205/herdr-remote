@@ -140,6 +140,7 @@ Chat command → durable receipt → Herdr binding 검증 → 기존 PTY
 - `delivery_unknown`은 자동 재전송하지 않는다. 같은 초안은 browser reload 뒤에도 같은 `command_id`를 사용한다.
 - transcript가 불명확하면 Chat prompt를 막는다. 검증된 binding이 있으면 같은 Terminal로 전환한다.
 - Terminal은 frame을 교체 표시한다. raw output history 전체를 replay하거나 mobile 크기로 PTY를 resize하지 않는다.
+- Herdr binding이나 capability를 잃어도 agent가 같은 pane에서 계속 보고되면 session은 `ended`가 아닌 `unverified`로 남고 입력과 Terminal은 fail closed한다. 같은 native session의 binding이 다시 검증되면 `active`로 돌아간다.
 - WS 종료나 Bridge 종료는 Herdr process를 중단하지 않는다. Bridge restart는 새 epoch로 native history를 복구한다.
 - receipts를 임의로 지우면 오래된 command ID의 재수락을 막는 근거가 사라진다.
 
