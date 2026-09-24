@@ -162,3 +162,29 @@ Bridge 재시작 후 두 PID가 살아 있었고 새 epoch의 snapshot에서 기
 metadata에서 native ID를 검증해 두 session을 서로 다른 transcript에 연결했다.
 현재 확장은 macOS Claude에 한정된다. Codex Desktop JSONL 조사 결과를 Codex CLI
 Herdr session adapter의 검증으로 간주하지 않는다.
+
+## 2026-09-24 — 격리 Herdr Codex CLI 조사
+
+별도 이름의 Herdr 테스트 server와 빈 workspace에서 Codex CLI `0.155.1`을 실행했다.
+Herdr Codex `SessionStart` hook은 처음에 Codex의 trust review를 요구했다. 등록된
+로컬 Herdr hook 명령을 검토하고 신뢰한 뒤 한 번의 도구 없는 prompt를 보냈다.
+Herdr `agent.get`에는 `source: herdr:codex`, `kind: id`인 native session ID가 기록됐고,
+그 ID와 정확히 일치하는 rollout JSONL 파일이 하나 생성됐다. 독립 테스트 server와
+hook 등록은 조사 후 제거했고 기존 Codex 설정은 백업과 byte-identical하게 복원했다.
+
+실제 CLI rollout은 `session_meta`, `response_item`, `event_msg`, `turn_context`,
+`world_state`, `token_usage_record`를 포함했다. `session_meta.payload.id`는 Herdr가
+보고한 native ID와 일치했고 `source`는 `cli`였다. `response_item`의 `user` 역할만으로
+human prompt를 판별할 수 없다. 시작 시 주입된 `AGENTS.md`와 환경 정보도 `user`
+record였으며 `internal_chat_message_metadata_passthrough.content_item_kinds`가
+각각 `agents_md.instructions`, `environments.environment_context`로 표시했다.
+실제 사용자가 보낸 입력은 `user.text`로 표시됐다. assistant text는
+`response_item.payload.content[].type: output_text`에서 관찰됐다.
+`event_msg`의 `item_completed` 및 `task_complete`에도 관련 정보가 있으므로
+양쪽을 모두 Chat 메시지로 변환하면 중복될 수 있다.
+
+이 조사는 transcript parser의 근거지만 안전한 Codex write binding의 증명은 아니다.
+현재 Herdr 조건부 입력은 Claude process의 PID별 native metadata를 사용한다.
+Codex hook session ID가 현재 foreground process incarnation과 결합돼 있는지와
+같은 process에서 `/clear` 또는 resume할 때 binding이 어떻게 바뀌는지는 별도 검증이
+필요하다. 이 경계가 확인되기 전에는 Codex prompt를 pane ID만으로 보내지 않는다.

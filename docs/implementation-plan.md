@@ -55,6 +55,11 @@ conversation 본문을 저장하지 않는다.
 native session association을 얻어 별도로 검증해야 한다. Desktop Codex JSONL sample을 CLI
 schema로 추측해 재사용하지 않는다. PRD의 Changed Files, attachments, notifications,
 structured permission/question은 optional 후속 기능이다.
+격리 Codex CLI 테스트에서는 Herdr hook이 native ID를 보고하고 실제 rollout도 확인했다.
+Codex `user` record에는 시작 지침도 포함되므로 `content_item_kinds: user.text`만
+human prompt로 취급해야 한다. 현재 남은 gate는 보고된 native ID를 foreground process
+incarnation에 결합하고 세션 교체 중 조건부 PTY input을 검증하는 것이다. 이 gate가
+끝나기 전에는 Codex adapter를 write-enabled로 표시하지 않는다.
 
 Tailnet 배포에서는 localhost Bridge를 Tailscale Serve에 연결하고, `Tailscale-User-Login`
 소유자 검증과 exact browser Origin을 모두 적용한다. 추가로
