@@ -15,15 +15,21 @@ export type Cursor = { epoch: string; sequence: number }
 export type Snapshot = { cursor: Cursor; data: Message[] }
 export type Event = { type: string; cursor: Cursor; payload: unknown; event_id: string }
 export type Delivery = { status: 'accepted' | 'rejected' | 'delivery_unknown'; code?: string }
+export type ConditionalInput = 'supported' | 'unsupported' | 'unknown'
+export type SessionList = { sessions: Session[]; conditionalInput: ConditionalInput }
 
 async function readJSON<T>(response: Response): Promise<T> {
   const body = await response.json()
   if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`)
   return body as T
 }
-export async function listSessions(): Promise<Session[]> {
-  const body = await readJSON<{ sessions: Session[] }>(await fetch('/api/sessions', { cache: 'no-store' }))
-  return body.sessions
+export async function listSessions(): Promise<SessionList> {
+  const body = await readJSON<{ sessions: Session[]; herdr?: { conditional_input?: ConditionalInput } }>(await fetch('/api/sessions', { cache: 'no-store' }))
+  return { sessions: body.sessions, conditionalInput: body.herdr?.conditional_input ?? 'unknown' }
+}
+export function sessionCardText(session: Pick<Session, 'chat' | 'terminal'>): string {
+  if (session.chat) return '기존 대화 연결됨'
+  return session.terminal ? 'Terminal에서 확인 가능' : '입력·Terminal 사용 불가'
 }
 export async function getSession(id: string): Promise<{ session: Session; snapshot: Snapshot }> {
   return readJSON(await fetch(`/api/sessions/${encodeURIComponent(id)}`, { cache: 'no-store' }))

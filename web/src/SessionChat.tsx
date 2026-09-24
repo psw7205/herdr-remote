@@ -129,8 +129,8 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
     </header>
     <div className={`connection ${connection}`}>{connection === 'connected' ? '연결됨' : connection === 'syncing' ? '대화 동기화 중…' : '연결 끊김 · agent는 계속 실행 중'}</div>
     <main className="conversation" aria-live="polite">
-      {!session.chat && <div className="notice">이 세션의 대화를 안전하게 찾지 못했습니다. Terminal에서 확인하세요.</div>}
-      {unsupported && <div className="notice">Chat에서 표현할 수 없는 내용이 있습니다. Terminal을 열어 확인하세요.</div>}
+      {!session.chat && <div className="notice">{session.terminal ? '이 세션의 대화를 안전하게 찾지 못했습니다. Terminal에서 확인하세요.' : '이 세션의 대화를 안전하게 찾지 못했습니다. PC의 Herdr에서 확인하세요.'}</div>}
+      {unsupported && <div className="notice">{session.terminal ? 'Chat에서 표현할 수 없는 내용이 있습니다. Terminal을 열어 확인하세요.' : 'Chat에서 표현할 수 없는 내용이 있습니다. PC의 Herdr에서 확인하세요.'}</div>}
       {messages.map(message => <article className={`message ${message.role}`} key={message.id}>
         <div className="message-label">{message.role === 'user' ? '나' : 'Claude'}</div>
         <div className="markdown"><MessageMarkdown text={message.text} /></div>
@@ -141,7 +141,7 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
     <form className="composer" onSubmit={event => { event.preventDefault(); void send() }}>
       {delivery && <p className="delivery" role="status">{delivery}</p>}
       {pending && !sending && <button type="button" className="outline" onClick={() => { clearPending(); setDraft(''); setDelivery('Terminal에서 이전 입력을 확인한 후 새 입력을 작성할 수 있습니다.') }}>Terminal 확인 후 새 입력</button>}
-      {!canPrompt && <p className="composer-hint">{session.active ? '이 상태의 입력은 Terminal에서 진행하세요.' : '종료된 세션에는 입력할 수 없습니다.'}</p>}
+      {!canPrompt && <p className="composer-hint">{!session.active ? '종료된 세션에는 입력할 수 없습니다.' : session.terminal ? '이 상태의 입력은 Terminal에서 진행하세요.' : '이 상태의 입력은 PC의 Herdr에서 진행하세요.'}</p>}
       <textarea aria-label="메시지" placeholder="이어서 요청하기" value={draft} onChange={event => setDraft(event.target.value)} disabled={!canPrompt || sending} rows={2} />
       <div className="composer-actions"><button type="button" className="outline" onClick={() => void interrupt()} disabled={!session.active || !session.runtime_binding}>중단</button><button type="submit" disabled={!canPrompt || sending || !draft.trim()}>{sending ? '전달 중…' : '보내기'}</button></div>
     </form>
