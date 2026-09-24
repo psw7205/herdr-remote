@@ -26,6 +26,7 @@ type Sessions interface {
 	Stream(string) (*stream.Session, error)
 	BoundInput(context.Context, string, string, string, string) error
 	Terminal(context.Context, string, string) (herdr.TerminalSnapshot, error)
+	ConditionalInput() string
 }
 type Server struct {
 	registry     Sessions
@@ -90,7 +91,7 @@ func problem(w http.ResponseWriter, status int, code string) {
 	jsonResponse(w, status, map[string]string{"error": code})
 }
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
-	jsonResponse(w, 200, map[string]any{"sessions": s.registry.List()})
+	jsonResponse(w, 200, map[string]any{"sessions": s.registry.List(), "herdr": map[string]string{"conditional_input": s.registry.ConditionalInput()}})
 }
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
 	snapshot, meta, err := s.registry.Get(r.PathValue("id"))

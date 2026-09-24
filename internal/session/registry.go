@@ -55,10 +55,17 @@ type Registry struct {
 	gateway    Gateway
 	claudeRoot string
 	items      map[string]*Item
+	// conditional is the agent.binding capability seen by the last successful Refresh.
+	conditional string
 }
 
 func NewRegistry(ctx context.Context, gateway Gateway, claudeRoot string) *Registry {
-	return &Registry{ctx: ctx, gateway: gateway, claudeRoot: claudeRoot, items: make(map[string]*Item)}
+	return &Registry{ctx: ctx, gateway: gateway, claudeRoot: claudeRoot, items: make(map[string]*Item), conditional: herdr.ConditionalInputUnknown}
+}
+func (r *Registry) ConditionalInput() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.conditional
 }
 func status(raw string) string {
 	switch raw {
@@ -81,12 +88,14 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	}
 	found := make(map[string]Meta)
 	paths := make(map[string]string)
+	conditional := herdr.ConditionalInputUnknown
 	for _, a := range snapshot.Agents {
 		if a.Agent != "claude" || a.PaneID == "" {
 			continue
 		}
 		meta := Meta{ID: "pane:" + a.PaneID, Agent: a.Agent, PaneID: a.PaneID, Project: a.CWD, Title: a.Title, Status: status(a.Status), Active: true}
 		binding, e := r.gateway.Binding(ctx, a.PaneID)
+		conditional = herdr.ObserveConditionalInput(conditional, e)
 		if e == nil && binding.Agent == "claude" && binding.TerminalID == a.TerminalID && binding.Token != "" && binding.ProcessID != 0 {
 			meta.Binding = binding.Token
 			meta.Project = binding.CWD
@@ -101,6 +110,7 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.conditional = conditional
 	for id, item := range r.items {
 		if _, ok := found[id]; !ok && item.meta.Active {
 			item.meta.Active = false

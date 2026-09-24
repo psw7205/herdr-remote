@@ -42,9 +42,12 @@ func TestMutationRequiresExactOriginAndHost(t *testing.T) {
 }
 
 type fakeSessions struct {
-	hub   *stream.Session
-	count atomic.Int32
+	hub         *stream.Session
+	count       atomic.Int32
+	conditional string
 }
+
+func (f *fakeSessions) ConditionalInput() string { return f.conditional }
 
 func (f *fakeSessions) List() []session.Meta {
 	return []session.Meta{{ID: "claude:native", Binding: "bound", Chat: true, Active: true}}
@@ -108,6 +111,31 @@ func TestCommandRetryAndStaleBinding(t *testing.T) {
 	}
 	if sessions.count.Load() != 1 {
 		t.Fatal("stale dispatch")
+	}
+}
+func TestSessionsReportsHerdrConditionalInput(t *testing.T) {
+	server, sessions := newTestServer(t)
+	for _, want := range []string{"supported", "unsupported", "unknown"} {
+		sessions.conditional = want
+		res, e := http.Get(server.URL + "/api/sessions")
+		if e != nil {
+			t.Fatal(e)
+		}
+		var body struct {
+			Sessions []session.Meta `json:"sessions"`
+			Herdr    map[string]any `json:"herdr"`
+		}
+		e = json.NewDecoder(res.Body).Decode(&body)
+		res.Body.Close()
+		if e != nil || res.StatusCode != 200 {
+			t.Fatal(res.StatusCode, e)
+		}
+		if len(body.Sessions) != 1 || body.Sessions[0].ID != "claude:native" {
+			t.Fatalf("sessions changed: %+v", body.Sessions)
+		}
+		if len(body.Herdr) != 1 || body.Herdr["conditional_input"] != want {
+			t.Fatalf("herdr = %+v, want %s", body.Herdr, want)
+		}
 	}
 }
 func TestWebSocketReplaysSnapshotGapAndDisconnectKeepsSession(t *testing.T) {
