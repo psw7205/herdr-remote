@@ -113,3 +113,4 @@ client의 크기 소유권이 다시 적용된다. 최초 handoff 전에 desktop
 
 설계 근거는 [PRD](docs/prd.md), [ADR](docs/adr.md),
 [실제 integration 조사](docs/integration-findings.md)를 따른다.
+남은 작업은 [Backlog](docs/backlog.md)에 우선순위와 완료 기준으로 정리했다.
