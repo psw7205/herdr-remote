@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"herdr-remote/internal/herdr"
+	"strings"
 	"testing"
 )
 
 type fixtureReader struct {
-	processErr error
-	binding    bool
+	processErr  error
+	binding     bool
+	unsupported bool
 }
 
 func (f fixtureReader) Snapshot(context.Context) (herdr.Snapshot, error) {
@@ -41,11 +44,27 @@ func TestDoctorReportsBlockersWithoutInventingCapabilities(t *testing.T) {
 	if len(got.Agents) != 2 || got.Agents[0].NativeAssociation || !got.Agents[1].NativeAssociation {
 		t.Fatalf("incorrect association report: %+v", got)
 	}
-	if len(got.Blockers) == 0 {
-		t.Fatal("missing capability blocker")
+	if got.ConditionalInput != "unknown" || len(got.Blockers) != 1 || strings.Contains(got.Blockers[0], "herdr-patch.md") {
+		t.Fatalf("plain binding errors are not API evidence: %+v", got)
 	}
 	if bytes.Contains(out.Bytes(), []byte("native-b")) {
 		t.Fatal("doctor unnecessarily prints native session identity")
+	}
+}
+func TestDoctorNamesMissingHerdrPatch(t *testing.T) {
+	var out bytes.Buffer
+	if err := diagnose(context.Background(), fixtureReader{unsupported: true}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var got report
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ConditionalInput != "unsupported" || got.WriteEnabled || got.TerminalMirrorEnabled {
+		t.Fatalf("unsupported Herdr enabled controls: %+v", got)
+	}
+	if len(got.Blockers) != 1 || !strings.Contains(got.Blockers[0], "agent.binding") || !strings.Contains(got.Blockers[0], "docs/herdr-patch.md") {
+		t.Fatalf("missing patch blocker: %v", got.Blockers)
 	}
 }
 func TestDoctorReportsProcessFailurePerPane(t *testing.T) {
@@ -64,6 +83,9 @@ func (f fixtureReader) TerminalSnapshot(_ context.Context, id string) (herdr.Ter
 	return herdr.TerminalSnapshot{PaneID: id, Source: "visible", Format: "ansi", Text: "private terminal output"}, nil
 }
 func (f fixtureReader) Binding(_ context.Context, id string) (herdr.Binding, error) {
+	if f.unsupported {
+		return herdr.Binding{}, fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+	}
 	if !f.binding || id != "w1:p2" {
 		return herdr.Binding{}, errors.New("binding unavailable")
 	}
@@ -78,8 +100,11 @@ func TestDoctorDetectsBoundInputWithoutPrintingToken(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.WriteEnabled || !got.TerminalMirrorEnabled || !got.Agents[1].VerifiedBinding {
+	if !got.WriteEnabled || !got.TerminalMirrorEnabled || !got.Agents[1].VerifiedBinding || got.ConditionalInput != "supported" {
 		t.Fatalf("binding omitted: %+v", got)
+	}
+	if len(got.Blockers) != 0 {
+		t.Fatalf("unexpected blockers: %v", got.Blockers)
 	}
 	if bytes.Contains(out.Bytes(), []byte(`"verified"`)) {
 		t.Fatal("binding token disclosed")
