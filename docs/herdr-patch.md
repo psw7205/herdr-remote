@@ -70,6 +70,12 @@ Refresh에 한 번 성공한 뒤의 `session.snapshot` 실패는 값을 바꾸�
 Refresh의 값을 유지하므로 `/api/sessions`의 값이 실제 server 상태보다 늦을 수 있다.
 `doctor`는 socket 조회가 실패하면 JSON을 출력하지 않고 error로 종료한다.
 
+patch→stock handoff 직후처럼 다음 2초 Refresh가 binding을 지우기 전에 보낸 command는
+`agent.bound_input` method 자체가 거부된다. Herdr는 이를 request deserialization 단계, 즉 PTY
+write 전에 거부하므로 Bridge는 `delivery_unknown`이 아니라 `rejected`·`HERDR_UNSUPPORTED`로
+receipt에 기록하고, 같은 `command_id` 재시도에는 재전송 없이 이 결과를 돌려준다. Chat UI는
+conditional input API가 없어 입력을 전달하지 않았다는 안내를 표시한다.
+
 상태: `conditional_input` 감지·UI 안내는 이 문서와 같은 P0-04 작업에서 추가됐다.
 stock server를 상대로 `unsupported`가 표시되는지는 **미검증**이다. 기존 `doctor`의
 "No verified native runtime binding" blocker는 synthetic fixture test로 확인했다.
