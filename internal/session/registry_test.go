@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -236,7 +238,7 @@ func boundRegistry(t *testing.T) (*Registry, *fakeHerdr, string) {
 	return r, f, root
 }
 
-// statusEvents subscribes live so a transcript Reset cannot drop the events.
+// statusEvents subscribes live; a successor_id is appended as "lifecycle>id". so a transcript Reset cannot drop the events.
 func statusEvents(t *testing.T, r *Registry, id string) func() []string {
 	t.Helper()
 	s, err := r.Stream(id)
@@ -251,9 +253,15 @@ func statusEvents(t *testing.T, r *Registry, id string) func() []string {
 			select {
 			case e := <-live:
 				if e.Type == "agent.status" {
-					var p struct{ Lifecycle string }
+					var p struct {
+						Lifecycle   string
+						SuccessorID string `json:"successor_id"`
+					}
 					if err := json.Unmarshal(e.Payload, &p); err != nil {
 						t.Fatal(err)
+					}
+					if p.SuccessorID != "" {
+						p.Lifecycle += ">" + p.SuccessorID
 					}
 					out = append(out, p.Lifecycle)
 				}
@@ -418,4 +426,191 @@ func TestBindingRecovery(t *testing.T) {
 			}
 		})
 	}
+}
+
+func assertTokenRejected(t *testing.T, r *Registry, id string, tokens ...string) {
+	t.Helper()
+	for _, token := range tokens {
+		if err := r.BoundInput(context.Background(), id, token, "terminal_input", "x"); err == nil {
+			t.Fatalf("%s accepted binding %q", id, token)
+		}
+		if _, err := r.Terminal(context.Background(), id, token); err == nil {
+			t.Fatalf("%s Terminal accepted binding %q", id, token)
+		}
+	}
+}
+
+func TestVerifiedObservationWinsOverContinuity(t *testing.T) {
+	moved := herdr.Agent{PaneID: "w1:p3", TerminalID: "term_c", Agent: "claude", Status: "idle", CWD: "repo"}
+	old := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Status: "idle", CWD: "repo"}
+	for name, agents := range map[string][]herdr.Agent{"verified first": {moved, old}, "verified last": {old, moved}} {
+		t.Run(name, func(t *testing.T) {
+			r, f, _ := boundRegistry(t)
+			id := "claude:" + nativeA
+			f.agents = agents
+			f.bindings[moved.PaneID] = herdr.Binding{Token: "B", TerminalID: "term_c", NativeSessionID: nativeA, ProcessID: 13, Agent: "claude", CWD: "repo"}
+			f.bindings[old.PaneID] = herdr.Binding{}
+			if err := r.Refresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			_, meta, err := r.Get(id)
+			if err != nil || meta.Lifecycle != LifecycleActive || meta.PaneID != moved.PaneID || meta.Binding != "B" {
+				t.Fatalf("verified observation overridden: %+v %v", meta, err)
+			}
+			var ids []string
+			for _, item := range r.List() {
+				ids = append(ids, item.ID)
+			}
+			if !slices.Equal(ids, []string{id, "pane:w1:p2"}) {
+				t.Fatalf("listed %v", ids)
+			}
+			if err := r.BoundInput(context.Background(), id, "B", "terminal_input", "x"); err != nil {
+				t.Fatalf("verified binding rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestRejectedBindingForAnotherNativeEndsContinuity(t *testing.T) {
+	r, f, _ := boundRegistry(t)
+	id := "claude:" + nativeA
+	events := statusEvents(t, r, id)
+	f.agents = []herdr.Agent{{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Status: "idle", CWD: "repo"}}
+	// terminal_id race: the call succeeded but the binding is filtered out.
+	f.bindings["w1:p2"] = herdr.Binding{Token: "B", TerminalID: "term_c", NativeSessionID: nativeB, ProcessID: 13, Agent: "claude", CWD: "repo"}
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if items := r.List(); len(items) != 1 || items[0].ID != "pane:w1:p2" || items[0].Lifecycle != LifecycleUnverified {
+		t.Fatalf("listed %+v", items)
+	}
+	if _, meta, _ := r.Get(id); meta.Active || meta.Lifecycle != LifecycleEnded {
+		t.Fatalf("continuity kept on another native session: %+v", meta)
+	}
+	if e := events(); !slices.Equal(e, []string{LifecycleEnded}) {
+		t.Fatalf("agent.status lifecycles %v", e)
+	}
+	assertNoWrites(t, r, f, id)
+}
+
+func TestEndedSessionRevivesOnVerifiedBinding(t *testing.T) {
+	r, f, _ := boundRegistry(t)
+	id := "claude:" + nativeA
+	events := statusEvents(t, r, id)
+	a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Status: "idle", CWD: "repo"}
+	f.agents = []herdr.Agent{{PaneID: a.PaneID, TerminalID: a.TerminalID, Status: "idle"}}
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Ended items get no continuity, so the pane is re-listed as a pane: item.
+	f.agents = []herdr.Agent{a}
+	f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if items := r.List(); len(items) != 1 || items[0].ID != "pane:w1:p2" || items[0].Lifecycle != LifecycleUnverified {
+		t.Fatalf("listed %+v", items)
+	}
+	f.bindingErr = nil
+	f.bindings[a.PaneID] = herdr.Binding{Token: "C", TerminalID: "term_b", NativeSessionID: nativeA, ProcessID: 14, Agent: "claude", CWD: "repo"}
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if items := r.List(); len(items) != 1 || items[0].ID != id || !items[0].Active || items[0].Lifecycle != LifecycleActive || items[0].Binding != "C" || !items[0].Chat || !items[0].Terminal {
+		t.Fatalf("not revived %+v", items)
+	}
+	if e := events(); !slices.Equal(e, []string{LifecycleEnded, LifecycleActive}) {
+		t.Fatalf("agent.status lifecycles %v", e)
+	}
+	assertTokenRejected(t, r, id, "A", "")
+	if err := r.BoundInput(context.Background(), id, "C", "terminal_input", "x"); err != nil {
+		t.Fatalf("revived binding rejected: %v", err)
+	}
+}
+
+// Two active items share a pane only if one snapshot listed that pane twice
+// and the per-pane agent.binding calls disagreed; continuity must not pick one.
+func TestAmbiguousPaneGetsNoContinuity(t *testing.T) {
+	f := &fakeHerdr{agents: []herdr.Agent{{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Status: "idle"}}, bindingErr: fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)}
+	r := NewRegistry(context.Background(), f, t.TempDir())
+	for _, native := range []string{nativeA, nativeB} {
+		id := "claude:" + native
+		r.items[id] = &Item{nativeID: native, stream: stream.New(id), projection: claude.NewProjection(), meta: Meta{ID: id, Agent: "claude", PaneID: "w1:p2", Status: "idle", Binding: native, Terminal: true, Active: true}}
+	}
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if items := r.List(); len(items) != 1 || items[0].ID != "pane:w1:p2" || items[0].Lifecycle != LifecycleUnverified {
+		t.Fatalf("listed %+v", items)
+	}
+	for _, native := range []string{nativeA, nativeB} {
+		if _, meta, _ := r.Get("claude:" + native); meta.Active || meta.Lifecycle != LifecycleEnded {
+			t.Fatalf("ambiguous item kept: %+v", meta)
+		}
+	}
+}
+
+// flappingHerdr alternates binding success and capability loss, so every
+// Refresh mutates item meta and streams; it is safe for concurrent use.
+type flappingHerdr struct {
+	fakeHerdr
+	calls atomic.Int64
+}
+
+func (f *flappingHerdr) Binding(ctx context.Context, p string) (herdr.Binding, error) {
+	if f.calls.Add(1)%2 == 0 {
+		return herdr.Binding{}, fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+	}
+	return f.fakeHerdr.Binding(ctx, p)
+}
+
+func TestConcurrentRefreshAndReads(t *testing.T) {
+	root := t.TempDir()
+	writeTranscript(t, root, "repo", nativeA)
+	a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle", CWD: "repo"}
+	f := &flappingHerdr{fakeHerdr: fakeHerdr{agents: []herdr.Agent{a}, bindings: map[string]herdr.Binding{a.PaneID: {Token: "A", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"}}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := NewRegistry(ctx, f, root)
+	if err := r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	id := "claude:" + nativeA
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			if err := r.Refresh(ctx); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			for _, item := range r.List() {
+				if item.Lifecycle != LifecycleActive && item.Lifecycle != LifecycleUnverified {
+					t.Errorf("unexpected lifecycle %+v", item)
+					return
+				}
+			}
+			_ = r.ConditionalInput()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			if _, _, err := r.Get(id); err != nil {
+				t.Error(err)
+				return
+			}
+			if _, err := r.Stream(id); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+	wg.Wait()
 }

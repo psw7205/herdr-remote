@@ -113,6 +113,9 @@ type observation struct {
 	verified bool
 	path     string
 	resolved bool
+	// boundNative is the native session a successful agent.binding call named,
+	// even when the binding was rejected (e.g. a terminal_id race).
+	boundNative string
 }
 
 // reportedNativeID is the native session that Herdr's own agent hook reported
@@ -139,6 +142,9 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		o := observation{agent: a}
 		binding, e := r.gateway.Binding(ctx, a.PaneID)
 		conditional = herdr.ObserveConditionalInput(conditional, e)
+		if e == nil {
+			o.boundNative = binding.NativeSessionID
+		}
 		if e == nil && binding.Agent == "claude" && binding.TerminalID == a.TerminalID && binding.Token != "" && binding.ProcessID != 0 && binding.NativeSessionID != "" {
 			o.binding, o.verified = binding, true
 			if path, e := claude.Resolve(r.claudeRoot, binding.NativeSessionID); e == nil {
@@ -152,9 +158,10 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	r.conditional = conditional
 	// Continuity without a verified binding: an active claude:<native> item
 	// stays on its pane, as "unverified", while Herdr still reports claude on
-	// that pane and Herdr's own native session report (agent_session), when
-	// present, names the same native ID. A different report, a verified binding
-	// for another native ID, or the pane leaving the snapshot ends it.
+	// that pane and neither Herdr's own native session report (agent_session)
+	// nor a rejected agent.binding result names another native ID. A verified
+	// binding for the same native ID elsewhere, a different native report, or
+	// the pane leaving the snapshot ends it.
 	// terminal_id is not used because live handoff reissues it, and cwd cannot
 	// tell two sessions of one repository apart. Without a native report, a
 	// claude-to-claude swap in the same pane is indistinguishable: the item
@@ -162,6 +169,8 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	// with writes and Terminal closed, until a verified binding confirms or
 	// replaces it.
 	byPane := make(map[string]*Item)
+	// Each observation yields one found ID, so two active items share a pane
+	// only when a snapshot listed that pane twice; no continuity then.
 	ambiguous := make(map[string]bool)
 	for _, item := range r.items {
 		if !item.meta.Active || item.nativeID == "" {
@@ -174,26 +183,37 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	}
 	found := make(map[string]Meta)
 	paths := make(map[string]string)
+	// Verified observations claim IDs first so that an unverified continuity
+	// observation can never override a verified one, whatever the snapshot order.
 	for _, o := range observed {
+		if !o.verified {
+			continue
+		}
+		a := o.agent
+		meta := Meta{ID: "pane:" + a.PaneID, Agent: a.Agent, PaneID: a.PaneID, Project: o.binding.CWD, Title: a.Title, Status: status(a.Status), Active: true, Binding: o.binding.Token, Terminal: true}
+		id := "claude:" + o.binding.NativeSessionID
+		if item, ok := r.items[id]; ok {
+			// Same native session as a known item: keep its identity even if
+			// the transcript cannot be resolved again right now.
+			meta.ID = id
+			meta.Chat = item.path != ""
+		} else if o.resolved {
+			meta.ID = id
+			meta.Chat = true
+			paths[id] = o.path
+		}
+		found[meta.ID] = meta
+	}
+	for _, o := range observed {
+		if o.verified {
+			continue
+		}
 		a := o.agent
 		meta := Meta{ID: "pane:" + a.PaneID, Agent: a.Agent, PaneID: a.PaneID, Project: a.CWD, Title: a.Title, Status: status(a.Status), Active: true}
-		if o.verified {
-			meta.Binding = o.binding.Token
-			meta.Project = o.binding.CWD
-			meta.Terminal = true
-			id := "claude:" + o.binding.NativeSessionID
-			if item, ok := r.items[id]; ok {
-				// Same native session as a known item: keep its identity even if
-				// the transcript cannot be resolved again right now.
-				meta.ID = id
-				meta.Chat = item.path != ""
-			} else if o.resolved {
-				meta.ID = id
-				meta.Chat = true
-				paths[id] = o.path
-			}
-		} else if item := byPane[a.PaneID]; item != nil && !ambiguous[a.PaneID] {
-			if reported := reportedNativeID(a); reported == "" || reported == item.nativeID {
+		if item := byPane[a.PaneID]; item != nil && !ambiguous[a.PaneID] {
+			_, taken := found[item.meta.ID]
+			reported := reportedNativeID(a)
+			if !taken && (reported == "" || reported == item.nativeID) && (o.boundNative == "" || o.boundNative == item.nativeID) {
 				meta.ID = item.meta.ID
 				meta.Chat = item.path != ""
 				meta.Project = item.meta.Project
