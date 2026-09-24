@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { composerHint, lifecycleNotice, sendCommand, eventURL, listSessions, sessionCardText, sessionLifecycle, type Session } from './api'
+import { composerHint, lifecycleNotice, sendCommand, eventURL, listSessions, sessionCardText, sessionLifecycle, successorOf, supersededBy, type Session } from './api'
 
 const session: Session = { id: 'claude:native-a', agent: 'claude', pane_id: 'w1:p2', project: 'repo', title: 'Task', status: 'idle', runtime_binding: 'bound-a', chat: true, terminal: true, active: true }
 afterEach(() => vi.unstubAllGlobals())
@@ -44,8 +44,44 @@ describe('session list', () => {
     expect(lifecycleNotice(ended)).toBeNull()
     expect(lifecycleNotice({ ...session, lifecycle: 'active' })).toBeNull()
   })
+  it('shows a never-bound pane item as unavailable without the recovery notice', () => {
+    const unbound: Session = { ...session, id: 'pane:w1:p2', runtime_binding: undefined, chat: false, terminal: false, lifecycle: 'unbound' }
+    expect(sessionCardText(unbound)).toBe('입력·Terminal 사용 불가')
+    expect(lifecycleNotice(unbound)).toBeNull()
+    expect(composerHint(unbound)).not.toContain('종료')
+  })
+  it('never describes a superseded pane item as ended', () => {
+    const superseded: Session = { ...session, id: 'pane:w1:p2', active: false, lifecycle: 'superseded', successor_id: 'claude:native-a' }
+    expect(successorOf(superseded)).toBe('claude:native-a')
+    expect(successorOf({ lifecycle: 'ended', successor_id: 'claude:native-a' })).toBeNull()
+    expect(lifecycleNotice(superseded)).toBeNull()
+    expect(composerHint(superseded)).not.toContain('종료')
+  })
   it('derives lifecycle from active for an older Bridge', () => {
     expect(sessionLifecycle({active:true})).toBe('active')
     expect(sessionLifecycle({active:false})).toBe('ended')
+  })
+})
+describe('superseded session', () => {
+  const successor: Session = { ...session, id: 'claude:native-a', runtime_binding: 'bound-b' }
+  const detail = (body: Partial<Session>) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ session: { ...session, id: 'pane:w1:p2', active: false, ...body }, snapshot: { cursor: { epoch: 'e', sequence: 0 }, data: [] } }))))
+  it('follows the listed successor with its own binding', async () => {
+    detail({ lifecycle: 'superseded', successor_id: successor.id, runtime_binding: undefined })
+    const next = await supersededBy('pane:w1:p2', [successor])
+    expect(next).toEqual(successor)
+    expect(next?.runtime_binding).toBe('bound-b')
+  })
+  it('stays put for a listed, ended, unknown or unlisted-successor session', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    expect(await supersededBy(successor.id, [successor])).toBeNull()
+    expect(await supersededBy(null, [successor])).toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
+    detail({ lifecycle: 'ended' })
+    expect(await supersededBy('pane:w1:p2', [successor])).toBeNull()
+    detail({ lifecycle: 'superseded', successor_id: 'claude:other' })
+    expect(await supersededBy('pane:w1:p2', [successor])).toBeNull()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'session not found' }), { status: 404 })))
+    expect(await supersededBy('pane:w1:p2', [successor])).toBeNull()
   })
 })

@@ -10,10 +10,14 @@ export type Session = {
   terminal: boolean
   active: boolean
   lifecycle?: Lifecycle
+  successor_id?: string
 }
-// unverified: Herdr still runs the agent on the pane, but its runtime binding
-// cannot be verified, so every input and Terminal stays closed.
-export type Lifecycle = 'active' | 'unverified' | 'ended'
+// unverified: a verified claude: session lost its runtime binding while Herdr
+// still runs the agent, so every input and Terminal stays closed until it is
+// verified again. unbound: a pane: item whose native session was never
+// identified has no binding. superseded: the pane: item continues as
+// successor_id, which carries its own binding.
+export type Lifecycle = 'active' | 'unverified' | 'unbound' | 'superseded' | 'ended'
 export type Message = { id: string; role: 'user' | 'assistant'; text: string; timestamp: string }
 export type Cursor = { epoch: string; sequence: number }
 export type Snapshot = { cursor: Cursor; data: Message[] }
@@ -41,12 +45,25 @@ export function composerHint(session: Pick<Session, 'active' | 'lifecycle' | 'te
   const lifecycle = sessionLifecycle(session)
   if (lifecycle === 'ended') return '종료된 세션에는 입력할 수 없습니다.'
   if (lifecycle === 'unverified') return 'agent 연결을 확인할 수 없어 입력할 수 없습니다.'
+  if (lifecycle === 'superseded') return '같은 agent의 대화로 전환하는 중입니다.'
   return session.terminal ? '이 상태의 입력은 Terminal에서 진행하세요.' : '이 상태의 입력은 PC의 Herdr에서 진행하세요.'
 }
 export function sessionCardText(session: Pick<Session, 'chat' | 'terminal' | 'lifecycle'>): string {
   if (session.lifecycle === 'unverified') return '연결 확인 불가 · 입력 사용 불가'
-  if (session.chat) return '기존 대화 연결됨'
-  return session.terminal ? 'Terminal에서 확인 가능' : '입력·Terminal 사용 불가'
+  // unbound, or an older Bridge that sent no lifecycle and no binding.
+  if (session.lifecycle === 'unbound' || !session.terminal) return '입력·Terminal 사용 불가'
+  return session.chat ? '기존 대화 연결됨' : 'Terminal에서 확인 가능'
+}
+export function successorOf(session: Pick<Session, 'lifecycle' | 'successor_id'>): string | null {
+  return session.lifecycle === 'superseded' && session.successor_id ? session.successor_id : null
+}
+// supersededBy returns the listed successor of an open session that left the
+// list because it was superseded, or null. The successor's own
+// runtime_binding comes from the list, never from the superseded item.
+export async function supersededBy(id: string | null, sessions: Session[]): Promise<Session | null> {
+  if (!id || sessions.some(item => item.id === id)) return null
+  const next = await getSession(id).then(data => successorOf(data.session), () => null)
+  return next ? sessions.find(item => item.id === next) ?? null : null
 }
 export async function getSession(id: string): Promise<{ session: Session; snapshot: Snapshot }> {
   return readJSON(await fetch(`/api/sessions/${encodeURIComponent(id)}`, { cache: 'no-store' }))

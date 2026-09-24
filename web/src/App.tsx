@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { listSessions, sessionCardText, type ConditionalInput, type Session } from './api'
+import { useEffect, useRef, useState } from 'react'
+import { listSessions, sessionCardText, supersededBy, type ConditionalInput, type Session } from './api'
 import { SessionChat } from './SessionChat'
 import { TerminalView } from './TerminalView'
 
@@ -13,11 +13,25 @@ export function App() {
   const [terminal, setTerminal] = useState<Session | null>(null)
   const [error, setError] = useState('')
   const [conditionalInput, setConditionalInput] = useState<ConditionalInput>('unknown')
+  const open = useRef<string | null>(null)
+  open.current = terminal?.id ?? selected
   useEffect(() => {
     let alive = true
     const refresh = async () => {
-      try { const list = await listSessions(); if (alive) { setSessions(list.sessions); setConditionalInput(list.conditionalInput); setError('') } }
-      catch { if (alive) setError('Herdr 연결을 확인할 수 없습니다. 잠시 후 다시 시도합니다.') }
+      try {
+        const list = await listSessions()
+        const from = open.current
+        const successor = await supersededBy(from, list.sessions)
+        if (!alive) return
+        setSessions(list.sessions); setConditionalInput(list.conditionalInput); setError('')
+        if (successor) {
+          // Follow a pane: item re-keyed to its verified claude: session without
+          // a hashchange, which would close the Terminal.
+          if (hashSession() === from) history.replaceState(null, '', `#session=${encodeURIComponent(successor.id)}`)
+          setSelected(current => current === from ? successor.id : current)
+          setTerminal(current => current?.id === from ? (successor.terminal ? successor : null) : current)
+        }
+      } catch { if (alive) setError('Herdr 연결을 확인할 수 없습니다. 잠시 후 다시 시도합니다.') }
     }
     void refresh()
     const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 3000)
