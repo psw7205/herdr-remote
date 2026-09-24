@@ -2361,25 +2361,35 @@ process 종료와 OS PTY 수신 사이 race까지 무조건 해결했다고 가�
 
 Herdr capability 부재(`ErrUnsupported`)나 일시적 binding 오류로 검증된 binding을 잃어도 기존
 `claude:<native-id>` session은 목록에 남고 lifecycle은 `unverified`다. `runtime_binding`을 비우므로
-prompt, interrupt, Terminal read/input은 모두 fail closed한다.
+prompt, interrupt, Terminal read/input은 모두 fail closed한다. `unverified`는 검증됐던 session에만
+쓴다. native session을 식별하지 못한 `pane:<pane-id>` item은 binding이 없으면 `unbound`다.
 
 Continuity 규칙: active `claude:<native-id>` item은 Herdr가 같은 `pane_id`에서 `claude`를 계속
-보고하고, Herdr `agent_session`이 없거나 같은 native ID일 때만 유지한다. 한 pane에 active item이
-둘 이상이면 continuity를 적용하지 않는다. `terminal_id`는 live handoff에서 재발급되고 cwd는 같은
-repository의 session끼리 공유하므로 continuity 신호로 쓰지 않는다.
+보고하고, Herdr `agent_session`과 성공한 `agent.binding` 결과의 native ID가 없거나 같은 native ID일
+때만 유지한다. terminal_id race 등으로 걸러진 binding도 다른 native ID를 가리키면 다른 session의
+증거다. 한 Refresh에서는 검증된 관찰이 먼저 ID를 차지하고, continuity 관찰은 아직 차지되지 않은
+ID만 이어받는다. 한 pane에 active item이 둘 이상이면(snapshot이 같은 pane을 중복 보고한 경우)
+continuity를 적용하지 않는다. `terminal_id`는 live handoff에서 재발급되고 cwd는 같은 repository의
+session끼리 공유하므로 continuity 신호로 쓰지 않는다.
 
 `ended`는 pane이 snapshot에서 사라졌거나, Herdr가 그 pane에서 claude를 더 이상 보고하지 않거나,
 `agent_session` 또는 검증된 binding이 다른 native ID를 가리킬 때만 기록한다. 같은 native ID의
 binding이 다시 검증되면 새 binding으로 `active`에 복귀하며, 이미 `ended`인 item도 이 경로로만
 복귀한다. `ended` item에는 `unverified` continuity를 적용하지 않는다.
 
+Supersession 규칙: `pane:<pane-id>` item이 목록에서 빠지는 Refresh에서 같은 `pane_id`에 검증된
+`claude:<native-id>` item이 새로 active가 되면(신규 또는 `ended`에서 복귀) `pane:` item은 `ended`
+대신 `superseded`가 되고 `Meta`와 `agent.status`에 `successor_id`를 싣는다. successor의 binding은 그
+관찰에서만 가져오며 `pane:` item의 binding은 비워 reject한다. client는 열린 Chat·Terminal을
+successor로 전환한다.
+
 알려진 한계:
 
 * Herdr hook이 `agent_session`을 보고하지 않으면 한 refresh 주기(2s) 안의 같은 pane claude→claude
   교체를 구분하지 못한다. 이때 이전 session의 transcript를 read-only로 계속 보여 주며 write는 불가능하다.
 * agent 감지가 순간적으로 빠지면 item은 `ended`가 된다.
-* binding 없이 등록된 `pane:<pane-id>` item은 나중에 binding을 얻으면 `claude:<native-id>`로
-  re-key되고 기존 `pane:` item은 `ended`로 보인다.
+* supersession은 pane 단위 판정이다. `pane:` item의 process가 같은 pane의 다른 process로 바뀐 뒤
+  검증되어도 `superseded`로 보인다. write는 successor 자신의 binding으로만 가능하다.
 
 # ADR-035 — Mobile Terminal은 기존 PTY의 passive mirror다
 
