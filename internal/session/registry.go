@@ -237,13 +237,14 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		found[meta.ID] = meta
 	}
 	// A pane: item is superseded, not ended, when its pane gained a verified
-	// claude: item that was not already active: same pane_id, newly verified.
+	// claude: item that was not already active on that pane: same pane_id,
+	// newly verified there.
 	successors := make(map[string]string)
 	for id, meta := range found {
 		if meta.Binding == "" || !strings.HasPrefix(id, "claude:") {
 			continue
 		}
-		if prev, ok := r.items[id]; ok && prev.meta.Active {
+		if prev, ok := r.items[id]; ok && prev.meta.Active && prev.meta.PaneID == meta.PaneID {
 			continue
 		}
 		successors[meta.PaneID] = id

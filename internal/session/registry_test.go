@@ -471,6 +471,30 @@ func TestVerifiedObservationWinsOverContinuity(t *testing.T) {
 	}
 }
 
+func TestPaneItemSupersededBySessionMovedToItsPane(t *testing.T) {
+	r, f, _ := boundRegistry(t)
+	id := "claude:" + nativeA
+	p2 := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle", CWD: "repo"}
+	p3 := herdr.Agent{PaneID: "w1:p3", TerminalID: "term_c", Agent: "claude", Status: "idle", CWD: "repo"}
+	f.agents = []herdr.Agent{p2, p3}
+	f.bindings[p3.PaneID] = herdr.Binding{}
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	events := statusEvents(t, r, "pane:w1:p3")
+	f.agents = []herdr.Agent{p3}
+	f.bindings[p3.PaneID] = herdr.Binding{Token: "B", TerminalID: "term_c", NativeSessionID: nativeA, ProcessID: 13, Agent: "claude", CWD: "repo"}
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, meta, _ := r.Get("pane:w1:p3"); meta.Lifecycle != LifecycleSuperseded || meta.SuccessorID != id {
+		t.Fatalf("pane item %+v", meta)
+	}
+	if e := events(); !slices.Equal(e, []string{LifecycleSuperseded + ">" + id}) {
+		t.Fatalf("agent.status lifecycles %v", e)
+	}
+}
+
 func TestRejectedBindingForAnotherNativeEndsContinuity(t *testing.T) {
 	r, f, _ := boundRegistry(t)
 	id := "claude:" + nativeA
