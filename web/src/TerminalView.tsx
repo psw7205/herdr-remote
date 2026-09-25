@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { sendCommand, terminalFrame, type Session } from './api'
 import { singleFlight } from './singleFlight'
+import { withTimeout } from './withTimeout'
 import { DEFAULT_CELL_RATIO, fitFontSize, frameDimensions, gridSize, keyboardViewport, stepZoom, type GridSize } from './terminalSizing'
 import '@xterm/xterm/css/xterm.css'
 
 const FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+// A healthy frame takes milliseconds. 6s still covers one Herdr socket call running
+// to its 5s timeout plus the 500ms layout read, yet abandons a fetch stalled by a
+// network switch long before the browser would, so polling resumes.
+const FRAME_TIMEOUT_MS = 6000
 
 export function TerminalView({ session, onBack }: { session: Session; onBack: () => void }) {
   const layout = useRef<HTMLDivElement>(null)
@@ -41,6 +46,7 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
   useEffect(() => {
     if (!container.current) return
     let active = true
+    const unmount = new AbortController()
     let term: import('@xterm/xterm').Terminal | undefined
     let timer: ReturnType<typeof setInterval> | undefined
     let input: { dispose(): void } | undefined
@@ -75,7 +81,7 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
       if (screen) observer.observe(screen)
       const refresh = singleFlight(async () => {
         try {
-          const frame = await terminalFrame(session)
+          const frame = await withTimeout(signal => terminalFrame(session, signal), FRAME_TIMEOUT_MS, unmount.signal)
           if (!active || !term) return
           const sized = gridSize({ cols: frame.cols, rows: frame.rows }, frameDimensions(frame.text), recent)
           const next = sized.grid
@@ -88,7 +94,7 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
       void refresh()
       timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 1000)
     })
-    return () => { active = false; refit.current = () => {}; if (timer) clearInterval(timer); observer?.disconnect(); input?.dispose(); term?.dispose() }
+    return () => { active = false; unmount.abort(); refit.current = () => {}; if (timer) clearInterval(timer); observer?.disconnect(); input?.dispose(); term?.dispose() }
   }, [session.id, session.runtime_binding])
   return <div className="session-layout terminal-layout" ref={layout}>
     <header className="topbar"><button className="plain back" onClick={onBack} aria-label="Chat으로 돌아가기">‹</button><div className="session-heading"><strong>Terminal</strong><small>기존 Herdr pane · 화면 크기 유지</small></div>
