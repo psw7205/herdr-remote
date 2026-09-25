@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cellWidth, displayWidth, fitFontSize, frameDimensions, gridSize, MIN_FONT_SIZE, stepZoom } from './terminalSizing'
+import { cellWidth, displayWidth, fitFontSize, frameDimensions, gridSize, keyboardViewport, MAX_FONT_SIZE, MIN_FONT_SIZE, stepZoom, type GridSize } from './terminalSizing'
 
 describe('frameDimensions', () => {
   it('counts rows and widest line without ANSI escapes', () => {
@@ -61,22 +61,42 @@ describe('displayWidth', () => {
 
 describe('gridSize', () => {
   it('uses the Bridge pane size when the frame fits in it', () => {
-    expect(gridSize({ cols: 161, rows: 45 }, { cols: 120, rows: 45 })).toEqual({ cols: 161, rows: 45 })
+    expect(gridSize({ cols: 161, rows: 45 }, { cols: 120, rows: 45 }).grid).toEqual({ cols: 161, rows: 45 })
   })
 
   it('grows past the hint so no frame line wraps or scrolls off', () => {
-    expect(gridSize({ cols: 80, rows: 24 }, { cols: 100, rows: 30 })).toEqual({ cols: 100, rows: 30 })
+    expect(gridSize({ cols: 80, rows: 24 }, { cols: 100, rows: 30 }).grid).toEqual({ cols: 100, rows: 30 })
   })
 
   it('follows a smaller hint when the desktop pane shrinks', () => {
-    expect(gridSize({ cols: 90, rows: 30 }, { cols: 40, rows: 30 }, { cols: 161, rows: 45 })).toEqual({ cols: 90, rows: 30 })
+    expect(gridSize({ cols: 90, rows: 30 }, { cols: 40, rows: 30 }, [{ cols: 161, rows: 45 }]).grid).toEqual({ cols: 90, rows: 30 })
   })
 
-  it('falls back to a grow-only frame size without a hint', () => {
-    const first = gridSize({}, { cols: 128, rows: 40 })
-    expect(first).toEqual({ cols: 128, rows: 40 })
-    expect(gridSize({ cols: 0, rows: 0 }, { cols: 30, rows: 10 }, first)).toEqual({ cols: 128, rows: 40 })
-    expect(gridSize({}, { cols: 3, rows: 1 })).toEqual({ cols: 20, rows: 5 })
+  it('uses the largest of the recent frames without a hint', () => {
+    let recent: GridSize[] = []
+    const poll = (frame: GridSize) => { const next = gridSize({}, frame, recent); recent = next.recent; return next.grid }
+    expect(poll({ cols: 128, rows: 40 })).toEqual({ cols: 128, rows: 40 })
+    for (let i = 0; i < 4; i++) expect(poll({ cols: 30, rows: 10 })).toEqual({ cols: 128, rows: 40 })
+    expect(poll({ cols: 30, rows: 10 })).toEqual({ cols: 30, rows: 10 })
+    expect(recent).toHaveLength(5)
+    expect(gridSize({}, { cols: 3, rows: 1 }).grid).toEqual({ cols: 20, rows: 5 })
+  })
+
+  it('keeps a hinted size through a missed layout read', () => {
+    const hinted = gridSize({ cols: 161, rows: 45 }, { cols: 120, rows: 40 })
+    expect(gridSize({ cols: 0, rows: 0 }, { cols: 120, rows: 40 }, hinted.recent).grid).toEqual({ cols: 161, rows: 45 })
+  })
+
+  it('ignores recent frames when the hint is present', () => {
+    const wide = gridSize({}, { cols: 200, rows: 60 })
+    expect(gridSize({ cols: 90, rows: 30 }, { cols: 40, rows: 30 }, wide.recent).grid).toEqual({ cols: 90, rows: 30 })
+  })
+})
+
+describe('keyboardViewport', () => {
+  it('follows the keyboard and ignores pinch zoom', () => {
+    expect(keyboardViewport({ height: 420, offsetTop: 0, scale: 1 })).toEqual({ height: 420, top: 0 })
+    expect(keyboardViewport({ height: 300, offsetTop: 120, scale: 2 })).toBeUndefined()
   })
 })
 
@@ -95,6 +115,10 @@ describe('fitFontSize', () => {
     expect(fitFontSize({ availableWidth: 1000, cols: 40, cellRatio: 0.6 })).toBe(16)
     expect(fitFontSize({ availableWidth: 374, cols: 60, cellRatio: 0.6, zoom: 2 })).toBe(20.75)
     expect(fitFontSize({ availableWidth: 374, cols: 60, cellRatio: 0.6, zoom: 0.5 })).toBe(MIN_FONT_SIZE)
+  })
+
+  it('clamps a zoomed size at the maximum', () => {
+    expect(fitFontSize({ availableWidth: 1000, cols: 40, cellRatio: 0.6, zoom: 3 })).toBe(MAX_FONT_SIZE)
   })
 
   it('uses the default ratio for an unmeasured renderer', () => {

@@ -132,17 +132,37 @@ const MAX_GRID: GridSize = { cols: 1000, rows: 500 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
+export const RECENT_FRAMES = 5
+
+export type GridState = { grid: GridSize; recent: GridSize[] }
+
 // The Bridge hint is the pane's layout rect, an upper bound on the PTY grid in
 // normal layouts. The frame's own size is a floor for cases the hint misses
-// (direct attach size locks, older Bridges). Without a hint the grid only grows
-// while the view is open, so short frames do not make the font jump.
-export function gridSize(hint: Partial<GridSize>, frame: GridSize, previous?: GridSize): GridSize {
+// (direct attach size locks, older Bridges). Without a hint the grid is the
+// largest of the last RECENT_FRAMES polls, so short frames do not make the font
+// jump but one wide frame does not pin the grid for the life of the view.
+// `recent` holds each poll's own size, never the returned grid, and a hinted
+// poll records its hinted size so one missed layout read does not shrink it.
+export function gridSize(hint: Partial<GridSize>, frame: GridSize, recent: readonly GridSize[] = []): GridState {
   const hinted = (hint.cols ?? 0) > 0 && (hint.rows ?? 0) > 0
-  const base = hinted ? { cols: hint.cols!, rows: hint.rows! } : previous ?? MIN_GRID
+  const own = hinted ? { cols: Math.max(hint.cols!, frame.cols), rows: Math.max(hint.rows!, frame.rows) } : frame
+  const window = [...recent, own].slice(-RECENT_FRAMES)
+  const base = hinted ? [own] : window
   return {
-    cols: clamp(Math.max(base.cols, frame.cols), MIN_GRID.cols, MAX_GRID.cols),
-    rows: clamp(Math.max(base.rows, frame.rows), MIN_GRID.rows, MAX_GRID.rows),
+    grid: {
+      cols: clamp(Math.max(...base.map(size => size.cols)), MIN_GRID.cols, MAX_GRID.cols),
+      rows: clamp(Math.max(...base.map(size => size.rows)), MIN_GRID.rows, MAX_GRID.rows),
+    },
+    recent: window,
   }
+}
+
+// Height and top of the visible area for keeping the key bar above the
+// on-screen keyboard. A pinch zoom also shrinks the visual viewport, so a
+// zoomed viewport returns undefined and the layout keeps its last value.
+export function keyboardViewport(viewport: { height: number; offsetTop: number; scale: number }): { height: number; top: number } | undefined {
+  if (viewport.scale > 1.01) return undefined
+  return { height: viewport.height, top: viewport.offsetTop }
 }
 
 export const MIN_FONT_SIZE = 6
