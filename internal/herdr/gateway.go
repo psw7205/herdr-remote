@@ -168,11 +168,18 @@ func (g *Gateway) TerminalSnapshot(ctx context.Context, paneID string) (Terminal
 	return *result.Read, nil
 }
 
+// paneSizeTimeout bounds the pane.layout read. The size is only a render hint
+// fetched on every terminal poll, so a slow layout read must not hold the frame
+// for the generic request lifetime.
+const paneSizeTimeout = 500 * time.Millisecond
+
 // PaneSize reads pane.layout, which is read-only and never resizes the PTY.
 func (g *Gateway) PaneSize(ctx context.Context, paneID string) (PaneSize, error) {
 	if paneID == "" {
 		return PaneSize{}, ErrEmptyTarget
 	}
+	ctx, cancel := context.WithTimeout(ctx, paneSizeTimeout)
+	defer cancel()
 	type rect struct {
 		Width  int `json:"width"`
 		Height int `json:"height"`

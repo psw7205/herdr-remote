@@ -253,6 +253,19 @@ func TestPaneSizeUsesLayoutRectOrZoomedArea(t *testing.T) {
 	}
 }
 
+func TestPaneSizeHasShortTimeout(t *testing.T) {
+	path := socketServer(t, func(c net.Conn) {
+		bufio.NewReader(c).ReadBytes('\n')
+		var b [1]byte
+		c.Read(b[:])
+	})
+	start := time.Now()
+	_, err := NewGateway(path).PaneSize(context.Background(), "w1:p2")
+	if elapsed := time.Since(start); !errors.Is(err, context.DeadlineExceeded) || elapsed < paneSizeTimeout || elapsed > 2*time.Second {
+		t.Fatalf("got %v after %s", err, elapsed)
+	}
+}
+
 func TestPaneSizeRejectsMissingPaneOrEmptyRect(t *testing.T) {
 	for _, wire := range []string{
 		`{"type":"pane_layout","layout":{"zoomed":false,"area":{"width":200,"height":50},"focused_pane_id":"w1:p1","panes":[{"pane_id":"w1:p1","rect":{"width":200,"height":50}}]}}`,
