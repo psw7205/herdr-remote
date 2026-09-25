@@ -1,6 +1,6 @@
 # Herdr Mobile Chat Backlog
 
-2026-09-24 기준. 요구와 결정의 기준은 `docs/prd.md`, `docs/adr.md`이고, 확인된 구현·runtime 근거는 `docs/implementation-plan.md`, `docs/integration-findings.md`에 있다. 이 목록은 남은 작업의 순서와 완료 기준을 관리한다. 세부 구현 방식은 착수 시 실제 Herdr/API/agent version을 다시 확인한다.
+2026-09-25 기준. 요구와 결정의 기준은 `docs/prd.md`, `docs/adr.md`이고, 확인된 구현·runtime 근거는 `docs/implementation-plan.md`, `docs/integration-findings.md`에 있다. 이 목록은 남은 작업의 순서와 완료 기준을 관리한다. 세부 구현 방식은 착수 시 실제 Herdr/API/agent version을 다시 확인한다.
 
 현재 **Claude Code / macOS의 첫 vertical slice는 로컬에서 검증됐다**. 기존 session 발견, native transcript Chat, 동일 PTY prompt, transcript 응답, retry 중복 방지, stale binding 거부, Bridge 재시작 복구, Terminal fallback이 동작했다. 2026-09-24에는 Funnel 없이 Tailscale Serve HTTPS를 활성화했고(P0-01), 소유자 phone에서 Tailnet HTTPS로 기존 대화 표시, prompt 한 번 전달과 같은 native session 응답, Terminal 표시를 확인했다. 화면 잠금·네트워크 전환 후 WebSocket reconnect, 다른 tailnet 사용자 거부의 실측, PWA 홈 화면 설치, Codex write 경로는 완료되지 않았다.
 
