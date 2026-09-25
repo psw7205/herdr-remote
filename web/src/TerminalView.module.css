@@ -1,0 +1,68 @@
+.screen {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--terminal-bg);
+  color: var(--ink);
+}
+.label { font-weight: 500; color: var(--ink-soft); }
+
+.zoom { display: flex; align-items: center; gap: 2px; }
+.fit {
+  min-width: 52px;
+  height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+.fit[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent-ink); }
+
+.notice { flex: none; padding: var(--space-2) max(var(--space-3), env(safe-area-inset-right)) 0 max(var(--space-3), env(safe-area-inset-left)); }
+
+/* fit() in TerminalView reads this padding from the computed style, so the
+   safe-area insets of a landscape notch are part of it. */
+.shell {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px max(8px, env(safe-area-inset-right)) 8px max(8px, env(safe-area-inset-left));
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+.keys {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: var(--space-2) max(var(--space-3), env(safe-area-inset-right)) calc(var(--space-2) + env(safe-area-inset-bottom)) max(var(--space-3), env(safe-area-inset-left));
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  scrollbar-width: none;
+}
+.key {
+  flex: 1 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  font-weight: 500;
+  font-variant-ligatures: none;
+}
+.key:active { background: var(--line-strong); }

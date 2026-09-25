@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { composerHint, lifecycleNotice, sendCommand, eventURL, listSessions, sessionCardText, sessionLifecycle, successorOf, supersededBy, type Session } from './api'
+import { composerHint, lifecycleNotice, sendCommand, eventURL, listSessions, sessionLifecycle, successorOf, supersededBy, type Session } from './api'
 
 const session: Session = { id: 'claude:native-a', agent: 'claude', pane_id: 'w1:p2', project: 'repo', title: 'Task', status: 'idle', runtime_binding: 'bound-a', chat: true, terminal: true, active: true }
 afterEach(() => vi.unstubAllGlobals())
@@ -26,14 +26,8 @@ describe('session list', () => {
     respond({sessions:[session]})
     expect(await listSessions()).toEqual({sessions:[session],conditionalInput:'unknown'})
   })
-  it('describes card availability from chat and terminal', () => {
-    expect(sessionCardText({chat:true,terminal:true})).toBe('기존 대화 연결됨')
-    expect(sessionCardText({chat:false,terminal:true})).toBe('Terminal에서 확인 가능')
-    expect(sessionCardText({chat:false,terminal:false})).toBe('입력·Terminal 사용 불가')
-  })
   it('never describes an unverified session as connected or ended', () => {
     const unverified: Session = { ...session, runtime_binding: undefined, terminal: false, lifecycle: 'unverified' }
-    expect(sessionCardText(unverified)).toBe('연결 확인 불가 · 입력 사용 불가')
     expect(lifecycleNotice(unverified)).toContain('계속 실행 중')
     expect(composerHint(unverified)).toBe('agent 연결을 확인할 수 없어 입력할 수 없습니다.')
     expect(composerHint(unverified)).not.toContain('종료')
@@ -46,7 +40,6 @@ describe('session list', () => {
   })
   it('shows a never-bound pane item as unavailable without the recovery notice', () => {
     const unbound: Session = { ...session, id: 'pane:w1:p2', runtime_binding: undefined, chat: false, terminal: false, lifecycle: 'unbound' }
-    expect(sessionCardText(unbound)).toBe('입력·Terminal 사용 불가')
     expect(lifecycleNotice(unbound)).toBeNull()
     expect(composerHint(unbound)).not.toContain('종료')
   })
@@ -56,6 +49,17 @@ describe('session list', () => {
     expect(successorOf({ lifecycle: 'ended', successor_id: 'claude:native-a' })).toBeNull()
     expect(lifecycleNotice(superseded)).toBeNull()
     expect(composerHint(superseded)).not.toContain('종료')
+  })
+  it('tells a reader of a working session to wait, not to open the Terminal', () => {
+    expect(composerHint({ ...session, status: 'working' })).toBe('작업 중입니다. 끝나면 이어서 입력할 수 있습니다.')
+  })
+  it('sends a waiting prompt to where it can be answered', () => {
+    expect(composerHint({ ...session, status: 'needs_attention' })).toBe('입력을 기다리고 있습니다. Terminal에서 응답하세요.')
+    expect(composerHint({ ...session, status: 'needs_attention', terminal: false })).toBe('입력을 기다리고 있습니다. PC의 Herdr에서 응답하세요.')
+  })
+  it('explains an unbound session by what it cannot do', () => {
+    const unbound: Session = { ...session, id: 'pane:w1:p2', runtime_binding: undefined, chat: false, terminal: false, lifecycle: 'unbound' }
+    expect(composerHint(unbound)).toBe('이 세션은 원격 입력을 지원하지 않습니다. PC의 Herdr에서 입력하세요.')
   })
   it('derives lifecycle from active for an older Bridge', () => {
     expect(sessionLifecycle({active:true})).toBe('active')

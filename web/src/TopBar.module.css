@@ -1,0 +1,43 @@
+.bar {
+  position: relative;
+  z-index: var(--layer-bar);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: calc(var(--bar-height) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(var(--space-1), env(safe-area-inset-right)) 0 max(var(--space-1), env(safe-area-inset-left));
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+}
+.heading {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+}
+.bar[data-back] .heading { padding-left: 0; }
+.title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: var(--leading-tight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subtitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  font-size: var(--text-meta);
+  line-height: var(--leading-tight);
+  color: var(--muted);
+}
+.subtitle > * { min-width: 0; }
+.subtitle > :last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.actions { flex: none; display: flex; align-items: center; gap: 2px; }

@@ -11,7 +11,9 @@ import (
 	"herdr-remote/internal/transcript"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -857,4 +859,110 @@ func TestConcurrentRefreshAndReads(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+}
+
+func TestListPreviewsNewestVisibleMessage(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "repo")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	var data []byte
+	for _, line := range []map[string]any{
+		{"type": "user", "uuid": "u1", "parentUuid": nil, "sessionId": nativeA, "timestamp": "2026-09-22T00:00:01.000Z", "message": map[string]any{"role": "user", "content": "question"}},
+		{"type": "assistant", "uuid": "a1", "parentUuid": "u1", "sessionId": nativeA, "timestamp": "2026-09-22T00:00:02.000Z", "message": map[string]any{"role": "assistant", "content": []map[string]string{{"type": "text", "text": "first line\n\n  second\tline " + strings.Repeat("가", 200)}}}},
+		{"type": "user", "uuid": "c1", "parentUuid": "a1", "sessionId": nativeA, "timestamp": "2026-09-22T00:00:03.000Z", "message": map[string]any{"role": "user", "content": "<command-name>/sample</command-name>"}},
+	} {
+		b, err := json.Marshal(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data = append(append(data, b...), '\n')
+	}
+	if err := os.WriteFile(filepath.Join(dir, nativeA+".jsonl"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle"}
+	f := &fakeHerdr{agents: []herdr.Agent{a}, bindings: map[string]herdr.Binding{a.PaneID: {Token: "A", TerminalID: a.TerminalID, NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := NewRegistry(ctx, f, root)
+	if err := r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for r.List()[0].LastMessage == nil {
+		select {
+		case <-deadline:
+			t.Fatal("preview not loaded")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	// The newest record is a hidden slash command, so the assistant reply is the newest visible message.
+	want := MessagePreview{Role: "assistant", Text: "first line second line " + strings.Repeat("가", 136) + "…"}
+	item := r.List()[0]
+	if item.LastActivity != "2026-09-22T00:00:02.000Z" || item.LastMessage == nil || *item.LastMessage != want || len([]rune(want.Text)) != 160 {
+		t.Fatalf("wrong preview: %q %+v", item.LastActivity, item.LastMessage)
+	}
+	if _, meta, err := r.Get(item.ID); err != nil || meta.LastActivity != item.LastActivity || meta.LastMessage == nil || *meta.LastMessage != want {
+		t.Fatalf("Get differs from List: %+v %v", meta, err)
+	}
+	b, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(b, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["last_activity"] != "2026-09-22T00:00:02.000Z" || !reflect.DeepEqual(body["last_message"], map[string]any{"role": "assistant", "text": want.Text}) {
+		t.Fatalf("wrong JSON contract: %s", b)
+	}
+}
+
+func TestListOmitsPreviewWithoutValidChat(t *testing.T) {
+	item := &Item{nativeID: nativeA, meta: Meta{ID: "claude:" + nativeA, PaneID: "w1:p2", Chat: true, Active: true, Status: "idle"}, projection: claude.NewProjection(), stream: stream.New("claude:" + nativeA)}
+	noChat := &Item{meta: Meta{ID: "pane:w1:p3", PaneID: "w1:p3", Active: true, Status: "idle"}, last: []Message{{ID: "stale", Role: "user", Text: "stale", Timestamp: "2026-09-22T00:00:01.000Z"}}}
+	registry := &Registry{gateway: &fakeHerdr{}, items: map[string]*Item{item.meta.ID: item, noChat.meta.ID: noChat}}
+	valid := []byte(`{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"` + nativeA + `","timestamp":"2026-09-22T00:00:01.000Z","message":{"role":"user","content":"hello"}}`)
+	if err := item.apply(transcript.Batch{Reset: true, Lines: [][]byte{valid}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, meta, _ := registry.Get(item.meta.ID); meta.LastMessage == nil || *meta.LastMessage != (MessagePreview{Role: "user", Text: "hello"}) {
+		t.Fatalf("valid chat lacks preview: %+v", meta)
+	}
+	wrong := []byte(`{"type":"user","uuid":"u2","parentUuid":"u1","sessionId":"` + nativeB + `","message":{"role":"user","content":"other session"}}`)
+	if err := item.apply(transcript.Batch{Lines: [][]byte{wrong}}); err == nil {
+		t.Fatal("wrong transcript accepted")
+	}
+	for _, meta := range registry.List() {
+		b, err := json.Marshal(meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(b, &body); err != nil {
+			t.Fatal(err)
+		}
+		_, activity := body["last_activity"]
+		_, message := body["last_message"]
+		if activity || message {
+			t.Fatalf("preview published without valid chat: %s", b)
+		}
+	}
+}
+
+func TestPreviewTextCollapsesWhitespaceAndCutsRunes(t *testing.T) {
+	exact := strings.Repeat("가", 160)
+	for in, want := range map[string]string{
+		" \n a\t\tb \r\n c ": "a b c",
+		" \n\t ":             "",
+		exact:                exact,
+		exact + "나":          strings.Repeat("가", 159) + "…",
+		"x\n" + exact:        "x " + strings.Repeat("가", 157) + "…",
+	} {
+		if got := previewText(in); got != want {
+			t.Fatalf("previewText(%q) = %q, want %q", in, got, want)
+		}
+	}
 }

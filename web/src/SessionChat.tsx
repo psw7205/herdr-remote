@@ -1,38 +1,79 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, memo, useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowDown, RefreshCw, SquareTerminal, WifiOff } from 'lucide-react'
 import { MessageMarkdown } from './MessageMarkdown'
 import { chooseCommand, pendingCommandCopy, readPending, rejectedMessage, type PendingCommand } from './commandDelivery'
-import { composerHint, eventURL, getSession, lifecycleNotice, sendCommand, type Cursor, type Event, type Message, type Session } from './api'
+import { composerHint, eventURL, getSession, lifecycleNotice, sendCommand, sessionLifecycle, type Cursor, type Event, type Message, type Session } from './api'
+import { Composer, type ComposerStatus } from './Composer'
+import { Notice, type NoticeAction } from './Notice'
+import { agentName, projectName, statusPresentation } from './presentation'
+import { StatusBadge } from './StatusBadge'
+import { dividerLabel } from './time'
+import { TopBar } from './TopBar'
+import { useStickToBottom } from './useStickToBottom'
+import styles from './SessionChat.module.css'
+import ui from './ui.module.css'
 
-const statusLabels: Record<Session['status'], string> = {
-  needs_attention: '입력 필요', working: '작업 중', idle: '대기 중', completed: '응답 완료', error: '상태 확인 필요',
-}
+type DeliveryStatus = ComposerStatus & { kind?: 'accepted' | 'pending' }
+const UNCERTAIN = '같은 내용을 다시 보내면 중복 없이 확인합니다.'
+const ACCEPTED_NOTICE_MS = 8000
+
+// Memoized so typing in the composer or a metadata poll does not re-render
+// (and re-parse the Markdown of) a long conversation.
+const MessageList = memo(function MessageList({ messages, agent }: { messages: Message[]; agent: string }) {
+  return messages.map((message, index) => {
+    const previous = messages[index - 1]
+    const label = dividerLabel(previous?.timestamp ?? null, message.timestamp)
+    return <Fragment key={message.id}>
+      {label && <div className={styles.divider} role="separator"><time dateTime={message.timestamp}>{label}</time></div>}
+      <article className={message.role === 'user' ? styles.user : styles.assistant} data-turn={previous && previous.role !== message.role ? '' : undefined}>
+        <span className="visually-hidden">{message.role === 'user' ? '나' : agent}</span>
+        {message.role === 'user' ? <div className={styles.bubble}><MessageMarkdown text={message.text} /></div> : <MessageMarkdown text={message.text} />}
+      </article>
+    </Fragment>
+  })
+})
 
 export function SessionChat({ initial, onBack, onTerminal }: { initial: Session; onBack: () => void; onTerminal: (session: Session) => void }) {
   const [session, setSession] = useState(initial)
   const [messages, setMessages] = useState<Message[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [connection, setConnection] = useState<'syncing' | 'connected' | 'disconnected'>('syncing')
   const [draft, setDraft] = useState(() => sessionStorage.getItem(`draft:${initial.id}`) ?? '')
   const [pending, setPending] = useState<PendingCommand | null>(() => readPending(`command:${initial.id}`))
-  const [delivery, setDelivery] = useState(() => readPending(`command:${initial.id}`) ? '이전 입력의 전달 여부가 불확실합니다. 같은 초안은 기존 command ID로만 확인합니다.' : '')
+  const [delivery, setDelivery] = useState<DeliveryStatus | null>(() => readPending(`command:${initial.id}`) ? { tone: 'warning', text: `이전 입력이 전달됐는지 확인하지 못했습니다. ${UNCERTAIN}`, kind: 'pending' } : null)
   const [sending, setSending] = useState(false)
   const [unsupported, setUnsupported] = useState(false)
   const cursor = useRef<Cursor | null>(null)
-  const bottom = useRef<HTMLDivElement>(null)
+  const scroller = useRef<HTMLElement>(null)
+  const content = useRef<HTMLDivElement>(null)
   const socket = useRef<WebSocket | null>(null)
+  // Message count when a prompt was accepted; its transcript echo clears the
+  // notice. A slash command leaves no visible echo, so a timer clears it too.
+  const echoAfter = useRef<number | null>(null)
+  const acceptedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const { away, unseen, toBottom } = useStickToBottom(scroller, content, messages.length)
 
   useEffect(() => { sessionStorage.setItem(`draft:${session.id}`, draft) }, [draft, session.id])
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length])
+  useEffect(() => {
+    if (echoAfter.current === null || messages.length <= echoAfter.current) return
+    echoAfter.current = null
+    setDelivery(current => current?.kind === 'accepted' ? null : current)
+  }, [messages.length])
+  useEffect(() => () => clearTimeout(acceptedTimer.current), [])
 
   useEffect(() => {
     let alive = true
     let reconnect: ReturnType<typeof setTimeout> | undefined
     let ws: WebSocket | undefined
+    // A reconnect this client started on returning to the foreground is not a lost connection.
+    let resuming = false
     const load = async () => {
       const data = await getSession(initial.id)
       if (!alive) return
       setSession(data.session)
       setMessages(Array.isArray(data.snapshot.data) ? data.snapshot.data : [])
       cursor.current = data.snapshot.cursor
+      setLoaded(true)
     }
     const connect = async () => {
       try {
@@ -41,7 +82,7 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
         if (!alive || !cursor.current) return
         ws = new WebSocket(eventURL(initial.id, cursor.current))
         socket.current = ws
-        ws.onopen = () => { if (alive) setConnection('connected') }
+        ws.onopen = () => { if (alive) { resuming = false; setConnection('connected') } }
         ws.onmessage = message => {
           if (!alive) return
           try {
@@ -70,7 +111,7 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
         }
         ws.onclose = () => {
           if (!alive) return
-          setConnection('disconnected')
+          setConnection(resuming ? 'syncing' : 'disconnected')
           reconnect = setTimeout(connect, 1200)
         }
       } catch {
@@ -79,7 +120,7 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
         reconnect = setTimeout(connect, 2000)
       }
     }
-    const visible = () => { if (document.visibilityState === 'visible') ws?.close() }
+    const visible = () => { if (document.visibilityState === 'visible' && ws) { resuming = true; ws.close() } }
     document.addEventListener('visibilitychange', visible)
     void connect()
     const metadata = setInterval(() => { void getSession(initial.id).then(data => { if (alive) setSession(data.session) }).catch(() => {}) }, 3000)
@@ -90,62 +131,81 @@ export function SessionChat({ initial, onBack, onTerminal }: { initial: Session;
     sessionStorage.removeItem(`command:${session.id}`)
     setPending(null)
   }
+  const pendingCopy = pendingCommandCopy(session.terminal)
   const send = useCallback(async () => {
     const text = draft.trim()
     if (!text || sending || !session.active || !session.chat || !session.runtime_binding || !['idle', 'completed'].includes(session.status)) return
     const command = chooseCommand(pending, session.runtime_binding, text, () => crypto.randomUUID())
-    if (!command) { setDelivery(pendingCommandCopy(session.terminal).blocked); return }
+    if (!command) { setDelivery({ tone: 'warning', text: pendingCopy.blocked, kind: 'pending' }); return }
     sessionStorage.setItem(`command:${session.id}`, JSON.stringify(command))
     setPending(command)
-    setSending(true); setDelivery('전달 상태 확인 중…')
+    setSending(true); setDelivery({ tone: 'progress', text: '전달하는 중…' })
     try {
       const result = await sendCommand(session, 'prompt', text, command.id)
       if (result.status === 'accepted') {
         sessionStorage.removeItem(`command:${session.id}`)
-        setPending(null); setDraft(''); setDelivery('입력 전달됨 · 대화는 native transcript 기준')
+        setPending(null); setDraft('')
+        echoAfter.current = messages.length
+        setDelivery({ tone: 'success', text: '전달했습니다. 응답을 기다리는 중…', kind: 'accepted' })
+        clearTimeout(acceptedTimer.current)
+        acceptedTimer.current = setTimeout(() => setDelivery(current => current?.kind === 'accepted' ? null : current), ACCEPTED_NOTICE_MS)
+        toBottom()
       } else if (result.status === 'delivery_unknown') {
-        setDelivery('전달 여부가 불확실합니다. 같은 입력은 기존 command ID로만 확인합니다.')
+        setDelivery({ tone: 'warning', text: `전달됐는지 확인하지 못했습니다. ${UNCERTAIN}`, kind: 'pending' })
       } else {
         sessionStorage.removeItem(`command:${session.id}`)
         setPending(null)
-        setDelivery(rejectedMessage(result.code))
+        setDelivery({ tone: 'danger', text: rejectedMessage(result.code) })
       }
-    } catch { setDelivery('연결이 끊겼습니다. 같은 입력은 기존 command ID로만 확인합니다.') }
+    } catch { setDelivery({ tone: 'warning', text: `연결이 끊겨 전달됐는지 알 수 없습니다. ${UNCERTAIN}`, kind: 'pending' }) }
     finally { setSending(false) }
-  }, [draft, sending, session, pending])
+  }, [draft, sending, session, pending, pendingCopy.blocked, messages.length, toBottom])
 
   const interrupt = async () => {
     if (!session.runtime_binding) return
     const result = await sendCommand(session, 'interrupt', '', crypto.randomUUID()).catch(() => ({ status: 'delivery_unknown' as const }))
-    setDelivery(result.status === 'accepted' ? '중단 입력을 전달했습니다.' : '중단 전달 여부를 확인할 수 없습니다.')
+    setDelivery(result.status === 'accepted' ? { tone: 'neutral', text: '중단을 요청했습니다.' } : { tone: 'warning', text: '중단 요청이 전달됐는지 확인하지 못했습니다.' })
   }
-  const pendingCopy = pendingCommandCopy(session.terminal)
-  const canPrompt = session.active && session.chat && Boolean(session.runtime_binding) && ['idle', 'completed'].includes(session.status)
-  return <div className="session-layout">
-    <header className="topbar">
-      <button type="button" className="plain back" onClick={onBack} aria-label="세션 목록">‹</button>
-      <div className="session-heading"><strong>{session.title || (session.agent === 'claude' ? 'Claude Code' : session.agent)}</strong><small>{session.agent === 'claude' ? 'Claude Code' : session.agent} · {session.project.split('/').filter(Boolean).at(-1) ?? session.project} · {session.pane_id}</small></div>
-      <span className={`status-pill ${session.status}`}>{statusLabels[session.status]}</span>
-      {session.terminal && <button type="button" className="outline" onClick={() => onTerminal(session)}>Terminal</button>}
-    </header>
-    <div className={`connection ${connection}`}>{connection === 'connected' ? '연결됨' : connection === 'syncing' ? '대화 동기화 중…' : '연결 끊김 · agent는 계속 실행 중'}</div>
-    <main className="conversation" aria-live="polite">
-      {lifecycleNotice(session) && <div className="notice" role="status">{lifecycleNotice(session)}</div>}
-      {!session.chat &&<div className="notice">{session.terminal ? '이 세션의 대화를 안전하게 찾지 못했습니다. Terminal에서 확인하세요.' : '이 세션의 대화를 안전하게 찾지 못했습니다. PC의 Herdr에서 확인하세요.'}</div>}
-      {unsupported && <div className="notice">{session.terminal ? 'Chat에서 표현할 수 없는 내용이 있습니다. Terminal을 열어 확인하세요.' : 'Chat에서 표현할 수 없는 내용이 있습니다. PC의 Herdr에서 확인하세요.'}</div>}
-      {messages.map(message => <article className={`message ${message.role}`} key={message.id}>
-        <div className="message-label">{message.role === 'user' ? '나' : 'Claude'}</div>
-        <div className="markdown"><MessageMarkdown text={message.text} /></div>
-      </article>)}
-      {messages.length === 0 && session.chat && <p className="empty-chat">아직 표시할 대화가 없습니다.</p>}
-      <div ref={bottom} />
-    </main>
-    <form className="composer" onSubmit={event => { event.preventDefault(); void send() }}>
-      {delivery && <p className="delivery" role="status">{delivery}</p>}
-      {pending && !sending && <button type="button" className="outline" onClick={() => { clearPending(); setDraft(''); setDelivery(pendingCopy.cleared) }}>{pendingCopy.action}</button>}
-      {!canPrompt && <p className="composer-hint">{composerHint(session)}</p>}
-      <textarea aria-label="메시지" placeholder="이어서 요청하기" value={draft} onChange={event => setDraft(event.target.value)} disabled={!canPrompt || sending} rows={2} />
-      <div className="composer-actions"><button type="button" className="outline" onClick={() => void interrupt()} disabled={!session.active || !session.runtime_binding}>중단</button><button type="submit" disabled={!canPrompt || sending || !draft.trim()}>{sending ? '전달 중…' : '보내기'}</button></div>
-    </form>
+
+  const openTerminal = () => onTerminal(session)
+  const terminalAction: NoticeAction[] = session.terminal ? [{ label: 'Terminal 열기', onClick: openTerminal }] : []
+  const lifecycle = sessionLifecycle(session)
+  const controllable = lifecycle === 'active' && session.active && session.chat && Boolean(session.runtime_binding)
+  const canPrompt = controllable && ['idle', 'completed'].includes(session.status)
+  // Stop stays available beside whichever status line is showing.
+  const stopAction: NoticeAction[] = controllable && session.status === 'working' ? [{ label: '작업 중단', onClick: () => void interrupt() }] : []
+  const pendingActions: NoticeAction[] = pending && !sending ? [...terminalAction, { label: pendingCopy.action, onClick: () => { clearPending(); setDraft(''); setDelivery({ tone: 'neutral', text: pendingCopy.cleared }) } }] : []
+  const status: ComposerStatus | null = delivery
+    ? { ...delivery, actions: [...pendingActions, ...stopAction] }
+    : !canPrompt ? { tone: session.status === 'needs_attention' ? 'warning' : session.status === 'working' && controllable ? 'working' : 'neutral', text: composerHint(session), actions: [...(session.status === 'needs_attention' ? terminalAction : []), ...stopAction] }
+    : null
+
+  const agent = agentName(session.agent)
+  return <div className={styles.screen}>
+    <TopBar
+      onBack={onBack}
+      backLabel="세션 목록"
+      title={session.title || agent}
+      subtitle={<><StatusBadge status={statusPresentation(session)} /><span>{projectName(session.project)}</span></>}
+      actions={session.terminal && <button type="button" className={ui.iconButton} onClick={openTerminal} aria-label="Terminal 열기" title="Terminal"><SquareTerminal aria-hidden size={22} /></button>}
+    />
+    {connection === 'disconnected' && <div className={styles.band} data-state="lost" role="status"><WifiOff aria-hidden size={16} />연결이 끊겼습니다. agent는 계속 실행 중이며 다시 연결하고 있습니다.</div>}
+    {connection === 'syncing' && loaded && <div className={styles.band} data-state="syncing" role="status"><RefreshCw aria-hidden size={16} />다시 연결하는 중…</div>}
+    {(lifecycleNotice(session) || !session.chat || unsupported) && <div className={styles.notices}>
+      {lifecycleNotice(session) && <Notice tone="warning">{lifecycleNotice(session)}</Notice>}
+      {!session.chat && <Notice tone="info" actions={terminalAction}>{session.terminal ? '이 세션의 대화를 찾지 못했습니다. Terminal에서 확인하세요.' : '이 세션의 대화를 찾지 못했습니다. PC의 Herdr에서 확인하세요.'}</Notice>}
+      {unsupported && <Notice tone="warning" actions={terminalAction}>{session.terminal ? 'Chat에 표시할 수 없는 내용이 있습니다. Terminal에서 확인하세요.' : 'Chat에 표시할 수 없는 내용이 있습니다. PC의 Herdr에서 확인하세요.'}</Notice>}
+    </div>}
+    <div className={styles.frame}>
+      <main className={styles.scroller} ref={scroller} aria-label="대화" aria-busy={!loaded}>
+        <div className={styles.content} ref={content}>
+          {!loaded && session.chat && <div className={styles.skeleton} aria-hidden="true"><span data-role="user" /><span /><span /><span data-short="" /></div>}
+          <MessageList messages={messages} agent={agent} />
+          {loaded && messages.length === 0 && session.chat && <p className={styles.empty}>아직 대화가 없습니다.</p>}
+        </div>
+      </main>
+      {away && <button type="button" className={styles.jump} onClick={() => toBottom(true)}><ArrowDown aria-hidden size={16} />{unseen > 0 ? `새 메시지 ${unseen}개` : '최신으로'}</button>}
+    </div>
+    <Composer draft={draft} onDraft={setDraft} canType={controllable} canSend={canPrompt} sending={sending} onSend={() => void send()} status={status} />
   </div>
 }

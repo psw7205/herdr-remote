@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
+import { ArrowDown, ArrowUp, CornerDownLeft, ZoomIn, ZoomOut } from 'lucide-react'
 import { sendCommand, terminalFrame, type Session } from './api'
+import { Notice } from './Notice'
+import { agentName } from './presentation'
+import { TopBar } from './TopBar'
+import styles from './TerminalView.module.css'
+import ui from './ui.module.css'
 import { singleFlight } from './singleFlight'
 import { withTimeout } from './withTimeout'
-import { DEFAULT_CELL_RATIO, fitFontSize, frameDimensions, gridSize, keyboardViewport, stepZoom, type GridSize } from './terminalSizing'
+import { DEFAULT_CELL_RATIO, fitFontSize, frameDimensions, gridSize, stepZoom, type GridSize } from './terminalSizing'
 import '@xterm/xterm/css/xterm.css'
 
 const FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
@@ -12,7 +18,6 @@ const FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 const FRAME_TIMEOUT_MS = 6000
 
 export function TerminalView({ session, onBack }: { session: Session; onBack: () => void }) {
-  const layout = useRef<HTMLDivElement>(null)
   const container = useRef<HTMLDivElement>(null)
   const [error, setError] = useState('')
   const [zoom, setZoom] = useState(1)
@@ -22,27 +27,10 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
   const emit = (type: 'terminal_input' | 'interrupt', text: string) => {
     sender.current = sender.current.then(async () => {
       const response = await sendCommand(session, type, text, crypto.randomUUID())
-      if (response.status !== 'accepted') setError(response.status === 'delivery_unknown' ? '입력 전달 여부가 불확실합니다. 다시 보내기 전에 PC 화면을 확인하세요.' : '세션이 바뀌었거나 입력이 거부됐습니다.')
+      if (response.status !== 'accepted') setError(response.status === 'delivery_unknown' ? '입력이 전달됐는지 확인하지 못했습니다. 다시 누르기 전에 화면을 확인하세요.' : '세션이 바뀌었거나 입력이 거부됐습니다.')
     }).catch(() => setError('Terminal 연결이 끊겼습니다. agent는 계속 실행 중입니다.'))
   }
   useEffect(() => { zoomRef.current = zoom; refit.current() }, [zoom])
-  // Keep the key bar above the on-screen keyboard: 100dvh does not shrink for
-  // it on iOS, but the visual viewport does. Pinch zoom is not tracked.
-  useEffect(() => {
-    const viewport = window.visualViewport
-    const element = layout.current
-    if (!viewport || !element) return
-    const update = () => {
-      const visible = keyboardViewport(viewport)
-      if (!visible) return
-      element.style.setProperty('--terminal-height', `${visible.height}px`)
-      element.style.setProperty('--terminal-top', `${visible.top}px`)
-    }
-    update()
-    viewport.addEventListener('resize', update)
-    viewport.addEventListener('scroll', update)
-    return () => { viewport.removeEventListener('resize', update); viewport.removeEventListener('scroll', update) }
-  }, [])
   useEffect(() => {
     if (!container.current) return
     let active = true
@@ -72,7 +60,7 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
     refit.current = fit
     void import('@xterm/xterm').then(({ Terminal }) => {
       if (!active || !container.current) return
-      term = new Terminal({ cols: 120, rows: 40, convertEol: true, scrollback: 0, fontSize: 12, fontFamily: FONT_FAMILY, theme: { background: '#0b1120', foreground: '#e7eef7' } })
+      term = new Terminal({ cols: 120, rows: 40, convertEol: true, scrollback: 0, fontSize: 12, fontFamily: FONT_FAMILY, theme: { background: '#0c0c0b', foreground: '#dedad0' } })
       term.open(container.current)
       input = term.onData(text => emit('terminal_input', text))
       observer = new ResizeObserver(() => fit())
@@ -88,7 +76,7 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
           recent = sized.recent
           if (next.cols !== term.cols || next.rows !== term.rows) { term.resize(next.cols, next.rows); fit() }
           term.reset(); term.write(frame.text); setError('')
-        } catch { if (active) setError('Terminal 화면을 읽을 수 없습니다. 세션을 다시 선택하세요.') }
+        } catch { if (active) setError('Terminal 화면을 읽을 수 없습니다. 목록에서 세션을 다시 여세요.') }
       })
       fit()
       void refresh()
@@ -96,18 +84,28 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
     })
     return () => { active = false; unmount.abort(); refit.current = () => {}; if (timer) clearInterval(timer); observer?.disconnect(); input?.dispose(); term?.dispose() }
   }, [session.id, session.runtime_binding])
-  return <div className="session-layout terminal-layout" ref={layout}>
-    <header className="topbar"><button className="plain back" onClick={onBack} aria-label="Chat으로 돌아가기">‹</button><div className="session-heading"><strong>Terminal</strong><small>기존 Herdr pane · 화면 크기 유지</small></div>
-      <div className="terminal-zoom" aria-label="Terminal 글자 크기">
-        <button onClick={() => setZoom(z => stepZoom(z, -1))} aria-label="글자 작게" disabled={zoom <= 0.5}>A−</button>
-        <button onClick={() => setZoom(1)} aria-label="화면 폭에 맞춤" aria-pressed={zoom === 1}>맞춤</button>
-        <button onClick={() => setZoom(z => stepZoom(z, 1))} aria-label="글자 크게" disabled={zoom >= 3}>A+</button>
-      </div>
-    </header>
-    {error && <div className="notice" role="alert">{error}</div>}
-    <div className="terminal-shell" ref={container} />
-    <div className="terminal-keys" aria-label="Terminal 특수 키">
-      <button onClick={() => emit('terminal_input', '\x1b')}>Esc</button><button onClick={() => emit('terminal_input', '\t')}>Tab</button><button onClick={() => emit('interrupt', '')}>Ctrl-C</button><button onClick={() => emit('terminal_input', '\x1b[A')}>↑</button><button onClick={() => emit('terminal_input', '\x1b[B')}>↓</button><button onClick={() => emit('terminal_input', '\r')}>Enter</button>
+  // The Terminal stays dark in both themes, like the pane it mirrors.
+  return <div className={styles.screen} data-scheme="dark">
+    <TopBar
+      onBack={onBack}
+      backLabel="Chat으로 돌아가기"
+      title={session.title || agentName(session.agent)}
+      subtitle={<><span className={styles.label}>Terminal</span><span>PC 화면 크기 유지</span></>}
+      actions={<div className={styles.zoom} role="group" aria-label="Terminal 글자 크기">
+        <button type="button" className={ui.iconButton} onClick={() => setZoom(z => stepZoom(z, -1))} aria-label="글자 작게" disabled={zoom <= 0.5}><ZoomOut aria-hidden size={20} /></button>
+        <button type="button" className={styles.fit} onClick={() => setZoom(1)} aria-label="화면 폭에 맞춤" aria-pressed={zoom === 1}>맞춤</button>
+        <button type="button" className={ui.iconButton} onClick={() => setZoom(z => stepZoom(z, 1))} aria-label="글자 크게" disabled={zoom >= 3}><ZoomIn aria-hidden size={20} /></button>
+      </div>}
+    />
+    {error && <div className={styles.notice}><Notice tone="warning">{error}</Notice></div>}
+    <div className={styles.shell} ref={container} />
+    <div className={styles.keys} role="group" aria-label="Terminal 특수 키">
+      <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\x1b')}>Esc</button>
+      <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\t')}>Tab</button>
+      <button type="button" className={styles.key} onClick={() => emit('interrupt', '')}>Ctrl-C</button>
+      <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\x1b[A')} aria-label="위 화살표"><ArrowUp aria-hidden size={18} /></button>
+      <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\x1b[B')} aria-label="아래 화살표"><ArrowDown aria-hidden size={18} /></button>
+      <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\r')} aria-label="Enter"><CornerDownLeft aria-hidden size={18} /></button>
     </div>
   </div>
 }

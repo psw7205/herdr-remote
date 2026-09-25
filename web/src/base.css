@@ -1,0 +1,65 @@
+/* Document defaults: the browser surfaces this app does not draw itself
+   (selection, caret, focus, scrollbars, tap feedback) take the tokens too. */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+html, body { overflow: hidden; }
+
+html {
+  font-family: var(--font-sans);
+  font-size: 100%;
+  line-height: var(--leading-body);
+  color: var(--ink);
+  background: var(--canvas);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The app shell follows the visual viewport (see viewport.ts); every screen
+   scrolls inside it, never the document. */
+.app-shell {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--app-top, 0px);
+  height: var(--app-height, 100dvh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+::selection { background: var(--accent-soft); color: inherit; }
+
+button, textarea, input { font: inherit; color: inherit; }
+button { cursor: pointer; touch-action: manipulation; }
+button:disabled { cursor: not-allowed; }
+textarea { caret-color: var(--accent-ink); }
+
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

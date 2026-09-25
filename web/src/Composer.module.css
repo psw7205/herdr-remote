@@ -1,0 +1,66 @@
+.composer {
+  flex: none;
+  padding: var(--space-2) max(var(--space-3), env(safe-area-inset-right)) calc(var(--space-2) + env(safe-area-inset-bottom)) max(var(--space-3), env(safe-area-inset-left));
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.status {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-2);
+  font-size: var(--text-meta);
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+.statusIcon { flex: none; margin-top: 1px; color: var(--muted); }
+.status[data-tone="progress"] .statusIcon { color: var(--accent-ink); animation: spin 0.9s linear infinite; }
+.status[data-tone="working"] .statusIcon { color: var(--working); animation: spin 0.9s linear infinite; }
+.status[data-tone="success"] .statusIcon { color: var(--idle); }
+.status[data-tone="warning"] .statusIcon { color: var(--working); }
+.status[data-tone="danger"] .statusIcon { color: var(--attention); }
+.statusBody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.statusBody p { margin: 0; }
+.statusActions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.row { display: flex; align-items: flex-end; gap: var(--space-2); }
+.input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--target);
+  max-height: 168px;
+  margin: 0;
+  padding: 11px var(--space-4);
+  resize: none;
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 24px;
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  outline: none;
+  transition: border-color var(--duration) var(--ease);
+}
+.input::placeholder { color: var(--muted); }
+.input:focus-visible { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.input:disabled { background: var(--surface-2); color: var(--muted); }
+
+.primary {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--target);
+  height: var(--target);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--on-accent);
+  transition: background-color var(--duration) var(--ease), transform var(--duration-fast) var(--ease);
+}
+.primary:active:not(:disabled) { transform: scale(0.94); }
+.primary:disabled { background: var(--surface-2); color: var(--faint); }
+.spin { animation: spin 0.9s linear infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }

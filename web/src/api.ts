@@ -11,6 +11,10 @@ export type Session = {
   active: boolean
   lifecycle?: Lifecycle
   successor_id?: string
+  // Newest visible Chat message, as a native transcript timestamp and a short
+  // preview. Absent when the session has no visible message or no Chat.
+  last_activity?: string
+  last_message?: { role: Message['role']; text: string }
 }
 // unverified: a verified claude: session lost its runtime binding while Herdr
 // still runs the agent, so every input and Terminal stays closed until it is
@@ -41,18 +45,17 @@ export function sessionLifecycle(session: Pick<Session, 'active' | 'lifecycle'>)
 export function lifecycleNotice(session: Pick<Session, 'active' | 'lifecycle'>): string | null {
   return sessionLifecycle(session) === 'unverified' ? 'agent는 Herdr에서 계속 실행 중이지만 이 대화와의 연결을 확인할 수 없습니다. 연결이 확인될 때까지 입력과 Terminal을 사용할 수 없습니다.' : null
 }
-export function composerHint(session: Pick<Session, 'active' | 'lifecycle' | 'terminal'>): string {
+export function composerHint(session: Pick<Session, 'active' | 'lifecycle' | 'terminal' | 'status' | 'chat'>): string {
   const lifecycle = sessionLifecycle(session)
   if (lifecycle === 'ended') return '종료된 세션에는 입력할 수 없습니다.'
   if (lifecycle === 'unverified') return 'agent 연결을 확인할 수 없어 입력할 수 없습니다.'
   if (lifecycle === 'superseded') return '같은 agent의 대화로 전환하는 중입니다.'
-  return session.terminal ? '이 상태의 입력은 Terminal에서 진행하세요.' : '이 상태의 입력은 PC의 Herdr에서 진행하세요.'
-}
-export function sessionCardText(session: Pick<Session, 'chat' | 'terminal' | 'lifecycle'>): string {
-  if (session.lifecycle === 'unverified') return '연결 확인 불가 · 입력 사용 불가'
-  // unbound, or an older Bridge that sent no lifecycle and no binding.
-  if (session.lifecycle === 'unbound' || !session.terminal) return '입력·Terminal 사용 불가'
-  return session.chat ? '기존 대화 연결됨' : 'Terminal에서 확인 가능'
+  if (lifecycle === 'unbound') return '이 세션은 원격 입력을 지원하지 않습니다. PC의 Herdr에서 입력하세요.'
+  const place = session.terminal ? 'Terminal' : 'PC의 Herdr'
+  if (!session.chat) return `이 세션은 ${place}에서 입력하세요.`
+  if (session.status === 'working') return '작업 중입니다. 끝나면 이어서 입력할 수 있습니다.'
+  if (session.status === 'needs_attention') return `입력을 기다리고 있습니다. ${place}에서 응답하세요.`
+  return `지금은 ${place}에서 입력하세요.`
 }
 export function successorOf(session: Pick<Session, 'lifecycle' | 'successor_id'>): string | null {
   return session.lifecycle === 'superseded' && session.successor_id ? session.successor_id : null
