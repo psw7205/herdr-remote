@@ -24,8 +24,9 @@ type fakeHerdr struct {
 	bindingErr  error
 	snapshotErr error
 	inputs      int
-	size        herdr.PaneSize
+	sizes       map[string]herdr.PaneSize
 	sizeErr     error
+	afterSize   func()
 }
 
 func (f *fakeHerdr) Snapshot(context.Context) (herdr.Snapshot, error) {
@@ -80,8 +81,18 @@ func (f *fakeHerdr) BoundInput(context.Context, string, string, string, string) 
 func (f *fakeHerdr) TerminalSnapshot(_ context.Context, paneID string) (herdr.TerminalSnapshot, error) {
 	return herdr.TerminalSnapshot{PaneID: paneID, Source: "visible", Format: "ansi"}, nil
 }
-func (f *fakeHerdr) PaneSize(context.Context, string) (herdr.PaneSize, error) {
-	return f.size, f.sizeErr
+func (f *fakeHerdr) PaneSize(_ context.Context, paneID string) (herdr.PaneSize, error) {
+	if f.afterSize != nil {
+		defer f.afterSize()
+	}
+	if f.sizeErr != nil {
+		return herdr.PaneSize{}, f.sizeErr
+	}
+	size, ok := f.sizes[paneID]
+	if !ok {
+		return herdr.PaneSize{}, errors.New("pane missing from layout")
+	}
+	return size, nil
 }
 func TestDiscoverExistingNativeTranscriptAndRejectOldBinding(t *testing.T) {
 	root := t.TempDir()
@@ -191,7 +202,7 @@ func TestTerminalRejectsPaneReplacedAfterClientOpened(t *testing.T) {
 
 func TestTerminalFrameCarriesPaneSizeAndSurvivesUnknownSize(t *testing.T) {
 	item := &Item{meta: Meta{ID: "claude:a", PaneID: "w1:p2", Binding: "A", Terminal: true, Active: true}}
-	f := &fakeHerdr{bindings: map[string]herdr.Binding{"w1:p2": {Token: "A", TerminalID: "term-a", NativeSessionID: "a", ProcessID: 12, Agent: "claude"}}, size: herdr.PaneSize{Cols: 161, Rows: 45}}
+	f := &fakeHerdr{bindings: map[string]herdr.Binding{"w1:p2": {Token: "A", TerminalID: "term-a", NativeSessionID: "a", ProcessID: 12, Agent: "claude"}}, sizes: map[string]herdr.PaneSize{"w1:p1": {Cols: 80, Rows: 24}, "w1:p2": {Cols: 161, Rows: 45}}}
 	r := &Registry{gateway: f, items: map[string]*Item{item.meta.ID: item}}
 	frame, err := r.Terminal(context.Background(), item.meta.ID, "A")
 	if err != nil || frame.Cols != 161 || frame.Rows != 45 {
@@ -201,6 +212,18 @@ func TestTerminalFrameCarriesPaneSizeAndSurvivesUnknownSize(t *testing.T) {
 	frame, err = r.Terminal(context.Background(), item.meta.ID, "A")
 	if err != nil || frame.Cols != 0 || frame.Rows != 0 || frame.PaneID != "w1:p2" {
 		t.Fatalf("unknown size broke frame: %+v %v", frame, err)
+	}
+}
+
+func TestTerminalRejectsBindingChangedAfterLayoutRead(t *testing.T) {
+	item := &Item{meta: Meta{ID: "claude:a", PaneID: "w1:p2", Binding: "A", Terminal: true, Active: true}}
+	f := &fakeHerdr{bindings: map[string]herdr.Binding{"w1:p2": {Token: "A", TerminalID: "term-a", NativeSessionID: "a", ProcessID: 12, Agent: "claude"}}, sizes: map[string]herdr.PaneSize{"w1:p2": {Cols: 161, Rows: 45}}}
+	f.afterSize = func() {
+		f.bindings["w1:p2"] = herdr.Binding{Token: "B", TerminalID: "term-b", NativeSessionID: "b", ProcessID: 22, Agent: "claude"}
+	}
+	r := &Registry{gateway: f, items: map[string]*Item{item.meta.ID: item}}
+	if frame, err := r.Terminal(context.Background(), item.meta.ID, "A"); err == nil {
+		t.Fatalf("frame of replaced process returned: %+v", frame)
 	}
 }
 
