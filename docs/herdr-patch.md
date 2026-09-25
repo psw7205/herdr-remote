@@ -1,8 +1,8 @@
 # Herdr patch 유지 runbook
 
 2026-09-24 기준. Backlog [P0-04](backlog.md#p0--배포와-핵심-안정성)의 운영 절차다.
-Herdr 연동 근거는 [Integration 조사](integration-findings.md), 실제 검증 기록은
-[구현 기록](implementation-plan.md)을 따른다.
+Herdr 연동 근거는 [Integration 조사](records/integration-findings.md), 실제 검증 기록은
+[검증 기록](records/verification.md)을 따른다.
 
 각 단계의 상태 표기는 다음과 같다.
 

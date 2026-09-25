@@ -1,7 +1,7 @@
 # 첫 vertical slice 구현 및 검증 기록
 
 2026-09-24 기준. 설계 기준은 `docs/prd.md`와 `docs/adr.md`, 실제 Herdr 조사 결과는
-`docs/integration-findings.md`다. 최초 실행 계획은 이전 commit에 남아 있다.
+`docs/records/integration-findings.md`다. 최초 실행 계획은 이전 commit에 남아 있다.
 
 ## 목표
 
@@ -69,7 +69,7 @@ conversation 본문을 저장하지 않는다.
 
 unit test로만 확인한 것: 다른 tailnet 사용자 identity 거부(단일 사용자 tailnet이라 실측 불가).
 확인하지 않은 것: 화면 잠금·네트워크 전환 후 WebSocket reconnect, PWA 홈 화면 설치. phone
-화면이 full screen이 아니었던 관찰은 원인을 진단하지 않았으며 [backlog](backlog.md)
+화면이 full screen이 아니었던 관찰은 원인을 진단하지 않았으며 [backlog](../backlog.md)
 P1-05/P1-06에 남겼다.
 
 ## 남은 범위

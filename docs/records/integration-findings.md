@@ -63,28 +63,7 @@ source-based 판단은 설치 버전의 [v0.9.1 source](https://github.com/herdr
 첫 adapter 선택: **Claude**. 의도는 실제 기존 process에서 가장 짧게 handoff를 검증하는 것이다.
 추천: Claude 하나부터 구현 — 이유는 foreground PID, native session metadata, transcript를 모두 실제로 연결했고 현재 Herdr에도 실행 중이기 때문이다.
 
-## B. PRD/ADR patch plan
-
-아래 결정은 이번 문서 patch에 반영한다. 구현 capability와 혼동하지 않는다.
-
-| 문제 | 현재 위치 | 결정 / 수정 |
-| --- | --- | --- |
-| MVP가 Proposed 기능을 필수로 포함 | PRD §16/20/25/30, ADR-015/016/017/032 | attachment/changes/notification은 optional 후속 단계. Accepted ADR의 필수 조건에서 제외. |
-| replay의 buffer 결정 미확정 | ADR-008/019 | bounded in-memory buffer를 Accepted로 확정. snapshot cursor 이후 replay와 live 등록을 같은 lock에서 처리. overflow는 snapshot 재동기화. |
-| command retry 의미 없음 | PRD §13, 신규 ADR-033 | ID/target/binding/type/payload digest 단위 deduplication. pending receipt를 PTY 전송 전에 durable하게 기록. crash/timeout은 unknown이며 자동 재전송 금지. |
-| stale pane write | PRD §8/13, ADR-003/034 | pane/terminal은 process incarnation이 아니다. Herdr가 발급하는 binding을 command 처리와 PTY dequeue 시 검증. 미지원이면 write disable. |
-| sequence restart 충돌 | PRD §23, ADR-008/019 | cursor는 epoch+sequence. restart/replacement/resync 시 epoch 교체, 이전 epoch는 fresh snapshot. |
-| browser security | PRD §21/22, ADR-024 | localhost bind, exact allowed Origin, mutation/WS 검증, wildcard CORS 금지, Tailnet ACL. |
-| 상태/수명 혼용 | PRD §4/8/17 | status enum 통일, lifecycle 별도. completed는 turn 완료이며 process 종료가 아니다. |
-| Terminal resize와 resume | PRD §19, ADR-013/035 | desktop가 size owner. mirror attach는 resize/resume/start하지 않고 detach는 observer만 제거. |
-| 기술 스택 미정 | ADR L1/L2/L4 | 사용자 지정 Go/React/TypeScript/Vite/pnpm/mise stack 확정. fsnotify + reconciliation. |
-
-## C. First vertical slice plan
-
-파일별 실행 순서와 acceptance matrix는 [구현 계획](implementation-plan.md)에 있다.
-핵심 순서는 Herdr capability gate → Claude projection → command path → mobile Chat → real handoff다.
-
-## D. Risks / blockers
+## B. Risks / blockers
 
 ### B1 — session 조건부 입력 없음
 
