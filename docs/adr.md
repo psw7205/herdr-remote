@@ -2412,3 +2412,10 @@ byte stream이 아니며 client는 frame을 교체 표시한다. intermediate fr
 이 경로는 attach owner를 점유하거나 resize/resume/start하지 않는다. `recent` text read의
 interactive history collection으로 대체하지 않는다. renderer만 붙여 interactive fallback 완료로
 표시하지 않으며 ADR-034 조건부 입력까지 검증해야 한다.
+
+Terminal frame 응답의 `cols`·`rows`는 additive field다. Bridge가 read-only `pane.layout`의
+pane `rect`(zoomed tab의 focused pane이면 tab `area`)에서 채우며, 읽지 못하면 생략한다.
+이 값은 client가 frame을 그릴 render grid이고 Herdr PTY resize나 PTY 크기 보장이 아니다.
+`rect`는 border·scrollbar를 포함한 상한이고 direct attach resize lock이 있으면 PTY와 다를 수
+있으므로 client는 이 값과 frame의 줄 수·가장 긴 줄 폭 중 큰 값을 grid로 쓴다. mobile viewport는
+font size와 horizontal scroll로만 맞추며 PTY 크기를 바꾸지 않는다.
