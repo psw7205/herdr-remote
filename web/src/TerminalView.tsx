@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { sendCommand, terminalFrame, type Session } from './api'
-import { DEFAULT_CELL_RATIO, fitFontSize, frameDimensions, gridSize, stepZoom, type GridSize } from './terminalSizing'
+import { singleFlight } from './singleFlight'
+import { DEFAULT_CELL_RATIO, fitFontSize, frameDimensions, gridSize, keyboardViewport, stepZoom, type GridSize } from './terminalSizing'
 import '@xterm/xterm/css/xterm.css'
 
 const FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
@@ -21,14 +22,16 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
   }
   useEffect(() => { zoomRef.current = zoom; refit.current() }, [zoom])
   // Keep the key bar above the on-screen keyboard: 100dvh does not shrink for
-  // it on iOS, but the visual viewport does.
+  // it on iOS, but the visual viewport does. Pinch zoom is not tracked.
   useEffect(() => {
     const viewport = window.visualViewport
     const element = layout.current
     if (!viewport || !element) return
     const update = () => {
-      element.style.setProperty('--terminal-height', `${viewport.height}px`)
-      element.style.setProperty('--terminal-top', `${viewport.offsetTop}px`)
+      const visible = keyboardViewport(viewport)
+      if (!visible) return
+      element.style.setProperty('--terminal-height', `${visible.height}px`)
+      element.style.setProperty('--terminal-top', `${visible.top}px`)
     }
     update()
     viewport.addEventListener('resize', update)
@@ -42,7 +45,7 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
     let timer: ReturnType<typeof setInterval> | undefined
     let input: { dispose(): void } | undefined
     let observer: ResizeObserver | undefined
-    let grid: GridSize | undefined
+    let recent: GridSize[] = []
     let cellRatio = DEFAULT_CELL_RATIO
     // Local xterm font size only; the Herdr PTY keeps the desktop size.
     const fit = () => {
@@ -70,16 +73,17 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
       observer.observe(container.current)
       const screen = term.element?.querySelector('.xterm-screen')
       if (screen) observer.observe(screen)
-      const refresh = async () => {
+      const refresh = singleFlight(async () => {
         try {
           const frame = await terminalFrame(session)
           if (!active || !term) return
-          const next = gridSize({ cols: frame.cols, rows: frame.rows }, frameDimensions(frame.text), grid)
-          grid = next
+          const sized = gridSize({ cols: frame.cols, rows: frame.rows }, frameDimensions(frame.text), recent)
+          const next = sized.grid
+          recent = sized.recent
           if (next.cols !== term.cols || next.rows !== term.rows) { term.resize(next.cols, next.rows); fit() }
           term.reset(); term.write(frame.text); setError('')
         } catch { if (active) setError('Terminal 화면을 읽을 수 없습니다. 세션을 다시 선택하세요.') }
-      }
+      })
       fit()
       void refresh()
       timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 1000)
