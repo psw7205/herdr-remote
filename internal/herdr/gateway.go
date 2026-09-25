@@ -80,6 +80,21 @@ type TerminalSnapshot struct {
 	Format    string `json:"format"`
 	Text      string `json:"text"`
 	Truncated bool   `json:"truncated"`
+	// Cols and Rows are the grid a client renders the frame into. They are not
+	// part of pane.read; the Bridge fills them from PaneSize and leaves them
+	// zero when the size is unknown.
+	Cols int `json:"cols,omitempty"`
+	Rows int `json:"rows,omitempty"`
+}
+
+// PaneSize is the display-cell size of a pane's layout rect. Herdr exposes no
+// PTY cols/rows on its public API, so this is the outer rect from pane.layout:
+// it includes pane borders and the scrollbar gutter and is an upper bound on the
+// PTY grid (exact when the pane has neither). A direct attach resize lock can
+// also make the PTY differ, so clients must still fit the frame's own lines.
+type PaneSize struct {
+	Cols int
+	Rows int
 }
 
 // Binding is issued by the Herdr server for one live native process/session.
@@ -151,6 +166,51 @@ func (g *Gateway) TerminalSnapshot(ctx context.Context, paneID string) (Terminal
 		return TerminalSnapshot{}, errors.New("invalid visible ANSI terminal snapshot")
 	}
 	return *result.Read, nil
+}
+
+// PaneSize reads pane.layout, which is read-only and never resizes the PTY.
+func (g *Gateway) PaneSize(ctx context.Context, paneID string) (PaneSize, error) {
+	if paneID == "" {
+		return PaneSize{}, ErrEmptyTarget
+	}
+	type rect struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	}
+	var result struct {
+		Type   string `json:"type"`
+		Layout *struct {
+			Zoomed        bool   `json:"zoomed"`
+			Area          rect   `json:"area"`
+			FocusedPaneID string `json:"focused_pane_id"`
+			Panes         []struct {
+				PaneID string `json:"pane_id"`
+				Rect   rect   `json:"rect"`
+			} `json:"panes"`
+		} `json:"layout"`
+	}
+	if err := g.read(ctx, "pane.layout", map[string]string{"pane_id": paneID}, &result); err != nil {
+		return PaneSize{}, err
+	}
+	if result.Type != "pane_layout" || result.Layout == nil {
+		return PaneSize{}, errors.New("invalid pane layout response")
+	}
+	layout := result.Layout
+	for _, pane := range layout.Panes {
+		if pane.PaneID != paneID {
+			continue
+		}
+		r := pane.Rect
+		// A zoomed tab renders only its focused pane, over the whole tab area.
+		if layout.Zoomed && layout.FocusedPaneID == paneID {
+			r = layout.Area
+		}
+		if r.Width <= 0 || r.Height <= 0 {
+			break
+		}
+		return PaneSize{Cols: r.Width, Rows: r.Height}, nil
+	}
+	return PaneSize{}, errors.New("pane missing from layout")
 }
 
 func (e *APIError) Error() string { return e.Code + ": " + e.Message }

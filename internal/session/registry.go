@@ -19,6 +19,7 @@ type Gateway interface {
 	Binding(context.Context, string) (herdr.Binding, error)
 	BoundInput(context.Context, string, string, string, string) error
 	TerminalSnapshot(context.Context, string) (herdr.TerminalSnapshot, error)
+	PaneSize(context.Context, string) (herdr.PaneSize, error)
 }
 type Message struct {
 	ID        string `json:"id"`
@@ -469,6 +470,11 @@ func (r *Registry) Terminal(ctx context.Context, id, binding string) (herdr.Term
 	}
 	if frame.PaneID != meta.PaneID {
 		return herdr.TerminalSnapshot{}, fmt.Errorf("terminal target changed")
+	}
+	// The size is a render hint only; an unknown size must not hide the frame.
+	frame.Cols, frame.Rows = 0, 0
+	if size, err := r.gateway.PaneSize(ctx, meta.PaneID); err == nil {
+		frame.Cols, frame.Rows = size.Cols, size.Rows
 	}
 	current, err = r.gateway.Binding(ctx, meta.PaneID)
 	if err != nil || current.Token != binding {

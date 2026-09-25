@@ -236,6 +236,36 @@ func TestTerminalSnapshotRejectsWrongSourceOrTarget(t *testing.T) {
 	}
 }
 
+func TestPaneSizeUsesLayoutRectOrZoomedArea(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		wire string
+		want PaneSize
+	}{
+		{"split", `{"type":"pane_layout","layout":{"zoomed":false,"area":{"x":0,"y":0,"width":200,"height":50},"focused_pane_id":"w1:p1","panes":[{"pane_id":"w1:p1","focused":true,"rect":{"x":0,"y":0,"width":100,"height":50}},{"pane_id":"w1:p2","focused":false,"rect":{"x":100,"y":0,"width":100,"height":50}}]}}`, PaneSize{Cols: 100, Rows: 50}},
+		{"zoomed", `{"type":"pane_layout","layout":{"zoomed":true,"area":{"x":0,"y":0,"width":161,"height":45},"focused_pane_id":"w1:p2","panes":[{"pane_id":"w1:p2","focused":true,"rect":{"x":80,"y":0,"width":81,"height":45}}]}}`, PaneSize{Cols: 161, Rows: 45}},
+	} {
+		path := socketServer(t, func(c net.Conn) { respond(t, c, "pane.layout", tc.wire) })
+		got, err := NewGateway(path).PaneSize(context.Background(), "w1:p2")
+		if err != nil || got != tc.want {
+			t.Fatalf("%s: got %+v %v, want %+v", tc.name, got, err, tc.want)
+		}
+	}
+}
+
+func TestPaneSizeRejectsMissingPaneOrEmptyRect(t *testing.T) {
+	for _, wire := range []string{
+		`{"type":"pane_layout","layout":{"zoomed":false,"area":{"width":200,"height":50},"focused_pane_id":"w1:p1","panes":[{"pane_id":"w1:p1","rect":{"width":200,"height":50}}]}}`,
+		`{"type":"pane_layout","layout":{"zoomed":false,"area":{"width":200,"height":50},"focused_pane_id":"w1:p2","panes":[{"pane_id":"w1:p2","rect":{"width":0,"height":50}}]}}`,
+		`{"type":"pane_layout","layout":null}`,
+	} {
+		path := socketServer(t, func(c net.Conn) { respond(t, c, "pane.layout", wire) })
+		if _, err := NewGateway(path).PaneSize(context.Background(), "w1:p2"); err == nil {
+			t.Fatalf("invalid layout accepted: %s", wire)
+		}
+	}
+}
+
 func TestBindingUsesNativeSessionAndRejectsWrongPane(t *testing.T) {
 	path := socketServer(t, func(c net.Conn) {
 		var req struct {
