@@ -1,21 +1,51 @@
-import { useEffect, useRef, useState } from 'react'
-import { listSessions, sessionCardText, supersededBy, type ConditionalInput, type Session } from './api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { listSessions, supersededBy, type ConditionalInput, type Session } from './api'
+import { backAction, followAlias, formatRoute, parseRoute, resolveTerminal, type Route } from './route'
 import { SessionChat } from './SessionChat'
+import { SessionList } from './SessionList'
 import { TerminalView } from './TerminalView'
+import { useVisualViewportShell } from './viewport'
 
-function hashSession(): string | null {
-  const match = location.hash.match(/^#session=(.+)$/)
-  try { return match ? decodeURIComponent(match[1]) : null } catch { return null }
+// History entries this app pushed above the current one (0 for a deep link).
+function historyDepth(): number {
+  const state: unknown = history.state
+  return state && typeof state === 'object' && 'herdrDepth' in state && typeof state.herdrDepth === 'number' ? state.herdrDepth : 0
 }
+function writeRoute(route: Route, replace: boolean) {
+  const url = `${location.pathname}${location.search}${formatRoute(route)}`
+  if (replace) history.replaceState(history.state, '', url)
+  else history.pushState({ herdrDepth: historyDepth() + 1 }, '', url)
+}
+
 export function App() {
+  const shell = useRef<HTMLDivElement>(null)
+  useVisualViewportShell(shell)
   const [sessions, setSessions] = useState<Session[]>([])
-  const [selected, setSelected] = useState<string | null>(hashSession)
+  const [loaded, setLoaded] = useState(false)
+  const [route, setRoute] = useState<Route>(() => parseRoute(location.hash))
+  // The Terminal keeps the binding it opened with. A later binding under the
+  // same id is not followed silently: for a pane: item it can be another process.
   const [terminal, setTerminal] = useState<Session | null>(null)
   const [error, setError] = useState('')
   const [conditionalInput, setConditionalInput] = useState<ConditionalInput>('unknown')
   const open = useRef<string | null>(null)
   const ended = useRef(new Set<string>())
-  open.current = terminal?.id ?? selected
+  // Superseded pane: ids mapped to their successors, for older history entries.
+  const aliases = useRef(new Map<string, string>())
+  open.current = route.session
+
+  const navigate = useCallback((next: Route, replace = false) => { writeRoute(next, replace); setRoute(next) }, [])
+  useEffect(() => {
+    const sync = () => {
+      const parsed = parseRoute(location.hash)
+      const next = followAlias(parsed, aliases.current)
+      if (next !== parsed) writeRoute(next, true)
+      setRoute(next)
+    }
+    window.addEventListener('popstate', sync)
+    window.addEventListener('hashchange', sync)
+    return () => { window.removeEventListener('popstate', sync); window.removeEventListener('hashchange', sync) }
+  }, [])
   useEffect(() => {
     let alive = true
     const refresh = async () => {
@@ -24,15 +54,21 @@ export function App() {
         const from = open.current
         const successor = await supersededBy(from, list.sessions, ended.current)
         if (!alive) return
-        setSessions(list.sessions); setConditionalInput(list.conditionalInput); setError('')
+        setSessions(list.sessions); setConditionalInput(list.conditionalInput); setError(''); setLoaded(true)
         if (successor) {
-          // Follow a pane: item re-keyed to its verified claude: session without
-          // a hashchange, which would close the Terminal.
-          if (hashSession() === from) history.replaceState(null, '', `#session=${encodeURIComponent(successor.id)}`)
-          setSelected(current => current === from ? successor.id : current)
-          setTerminal(current => current?.id === from ? (successor.terminal ? successor : null) : current)
+          // Follow a pane: item re-keyed to its verified claude: session, with
+          // the successor's own binding from the list. Replacing the entry
+          // keeps Back pointing where it pointed before.
+          if (from) aliases.current.set(from, successor.id)
+          const current = parseRoute(location.hash)
+          if (current.session === from) {
+            const next: Route = { session: successor.id, view: current.view === 'terminal' && successor.terminal ? 'terminal' : 'chat' }
+            writeRoute(next, true)
+            setRoute(next)
+          }
+          setTerminal(target => target?.id === from ? (successor.terminal ? successor : null) : target)
         }
-      } catch { if (alive) setError('Herdr 연결을 확인할 수 없습니다. 잠시 후 다시 시도합니다.') }
+      } catch { if (alive) { setError('Herdr에 연결할 수 없습니다. 잠시 후 자동으로 다시 시도합니다.'); setLoaded(true) } }
     }
     void refresh()
     const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 3000)
@@ -40,26 +76,38 @@ export function App() {
     document.addEventListener('visibilitychange', visible)
     return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', visible) }
   }, [])
+
+  const listed = route.session ? sessions.find(item => item.id === route.session) : undefined
+  // Decided during render so a reload on the Terminal never mounts the Chat
+  // first. The effect keeps that binding and drops it when the Terminal is left.
+  const terminalTarget = resolveTerminal(route, terminal, listed)
+  useEffect(() => { setTerminal(terminalTarget) }, [terminalTarget])
+  // A Terminal route whose session has no Terminal now (a binding lost across a
+  // reload) shows the Chat and says so in the URL, instead of switching later.
+  const fallbackToChat = route.view === 'terminal' && !terminalTarget && loaded && Boolean(listed)
   useEffect(() => {
-    const changed = () => { setSelected(hashSession()); setTerminal(null) }
-    window.addEventListener('hashchange', changed)
-    return () => window.removeEventListener('hashchange', changed)
-  }, [])
-  const session = selected ? sessions.find(item => item.id === selected) ?? terminal : null
-  if (terminal) return <TerminalView key={`${terminal.id}:${terminal.runtime_binding}`} session={terminal} onBack={() => setTerminal(null)} />
-  if (selected && session) return <SessionChat key={selected} initial={session} onBack={() => { location.hash = ''; setSelected(null) }} onTerminal={setTerminal} />
-  return <div className="home-layout">
-    <header className="home-header"><span className="mark">H<span>·</span></span><div><p className="eyebrow">HERDR MOBILE</p><h1>진행 중인 대화</h1></div></header>
-    {error && <div className="notice" role="alert">{error}</div>}
-    {conditionalInput === 'unsupported' && <div className="notice" role="status">현재 Herdr에 conditional input API가 없어 Chat 입력과 Terminal을 사용할 수 없습니다. agent는 계속 실행 중입니다. PC에서 Herdr patch 적용 여부를 확인하세요.</div>}
-    <main className="session-list">
-      {sessions.length === 0 && !error && <div className="empty-state"><strong>실행 중인 agent가 없습니다.</strong><p>PC의 Herdr에서 agent를 실행하면 이곳에 표시됩니다.</p></div>}
-      {sessions.map(item => <button type="button" className="session-card" key={item.id} onClick={() => { location.hash = `session=${encodeURIComponent(item.id)}`; setSelected(item.id) }}>
-        <span className="avatar">{item.agent === 'claude' ? 'C' : item.agent.slice(0, 1).toUpperCase()}</span>
-        <span className="session-card-body"><strong>{item.title || (item.agent === 'claude' ? 'Claude Code' : item.agent)}</strong><small>{item.agent === 'claude' ? 'Claude Code' : item.agent} · {item.project.split('/').filter(Boolean).at(-1) ?? item.project} · {item.pane_id}</small><span>{sessionCardText(item)}</span></span>
-        <span className={`status-dot ${item.status}`} aria-label={item.status} />
-      </button>)}
-    </main>
-    <footer>Herdr의 기존 세션과 연결됩니다.</footer>
-  </div>
+    if (fallbackToChat && route.session) navigate({ session: route.session, view: 'chat' }, true)
+  }, [fallbackToChat, route.session, navigate])
+
+  const back = useCallback(() => {
+    const action = backAction(route, historyDepth())
+    if (action.kind === 'history') history.back()
+    else navigate(action.route, true)
+  }, [route, navigate])
+  const openTerminal = useCallback((session: Session) => {
+    setTerminal(session)
+    navigate({ session: session.id, view: 'terminal' })
+  }, [navigate])
+
+  const chatSession = listed ?? (terminal?.id === route.session ? terminal : undefined)
+  let screen
+  if (terminalTarget) {
+    screen = <TerminalView key={`${terminalTarget.id}:${terminalTarget.runtime_binding}`} session={terminalTarget} onBack={back} />
+  } else if (route.session && chatSession && (route.view === 'chat' || fallbackToChat)) {
+    screen = <SessionChat key={route.session} initial={chatSession} onBack={back} onTerminal={openTerminal} />
+  } else {
+    // A deep link waits on the first list load under the list's own skeleton.
+    screen = <SessionList sessions={route.session && !loaded ? [] : sessions} loaded={loaded} error={error} conditionalInput={conditionalInput} onOpen={item => navigate({ session: item.id, view: 'chat' })} />
+  }
+  return <div className="app-shell" ref={shell}>{screen}</div>
 }

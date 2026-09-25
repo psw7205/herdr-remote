@@ -25,9 +25,9 @@ export function readPending(key: string): PendingCommand | null {
 export function pendingCommandCopy(terminal: boolean) {
   const place = terminal ? 'Terminal' : 'PC의 Herdr'
   return {
-    blocked: `이전 입력의 전달 여부를 ${place}에서 확인한 뒤 새 입력을 작성하세요.`,
-    action: `${place} 확인 후 새 입력`,
-    cleared: `${place}에서 이전 입력을 확인한 후 새 입력을 작성할 수 있습니다.`,
+    blocked: `이전 입력이 전달됐는지 아직 모릅니다. ${place}에서 확인한 뒤 새로 입력하세요.`,
+    action: `${place}에서 확인 후 새로 입력`,
+    cleared: `${place}에서 확인했다면 새로 입력할 수 있습니다.`,
   }
 }
 
@@ -35,10 +35,10 @@ export function rejectedMessage(code?: string): string {
   switch (code) {
     case 'SESSION_CHANGED':
     case 'RUNTIME_BINDING_MISMATCH':
-      return '세션이 바뀌었습니다. 목록에서 다시 선택하세요.'
+      return '세션이 바뀌어 전달하지 않았습니다. 목록에서 다시 여세요.'
     case 'HERDR_UNSUPPORTED':
-      return '현재 Herdr에 conditional input API가 없어 입력을 전달하지 않았습니다. PC에서 Herdr patch 적용 여부를 확인하세요.'
+      return '이 Herdr에는 원격 입력 기능이 없어 전달하지 않았습니다. PC에서 Herdr patch를 확인하세요.'
     default:
-      return `전달 거부: ${code ?? '확인 필요'}`
+      return `전달이 거부됐습니다 (${code ?? '알 수 없음'}).`
   }
 }

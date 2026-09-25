@@ -1,0 +1,40 @@
+.badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.badge[data-tone="attention"] { color: var(--attention-ink); font-weight: 600; }
+
+.mark {
+  --mark: 10px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--mark);
+  height: var(--mark);
+  border-radius: var(--radius-full);
+}
+.mark[data-size="large"] { --mark: 14px; }
+.mark[data-tone="attention"] {
+  background: var(--attention);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--attention) 24%, transparent);
+}
+.mark[data-tone="working"] {
+  border: 2px solid color-mix(in srgb, var(--working) 28%, transparent);
+  border-top-color: var(--working);
+  border-right-color: var(--working);
+  animation: spin 0.9s linear infinite;
+}
+.mark[data-tone="done"] { background: var(--done); }
+.mark[data-tone="idle"] { width: auto; height: auto; color: var(--idle); }
+.mark[data-tone="unknown"] { border: 2px solid var(--unknown); }
+.mark[data-tone="offline"] { border: 2px dashed var(--unknown); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .mark[data-tone="working"] { animation: none; border-color: var(--working); border-left-color: transparent; }
+}

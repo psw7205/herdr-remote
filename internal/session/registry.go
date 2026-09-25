@@ -42,7 +42,29 @@ type Meta struct {
 	Lifecycle string `json:"lifecycle"`
 	// SuccessorID names the claude:<native> item that replaced this pane: item.
 	SuccessorID string `json:"successor_id,omitempty"`
+	// LastActivity and LastMessage describe the newest visible Chat message;
+	// both are omitted without a valid Chat history.
+	LastActivity string          `json:"last_activity,omitempty"`
+	LastMessage  *MessagePreview `json:"last_message,omitempty"`
 }
+
+// MessagePreview is a single-line excerpt of at most previewRunes runes.
+type MessagePreview struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+}
+
+const previewRunes = 160
+
+func previewText(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	runes := []rune(text)
+	if len(runes) <= previewRunes {
+		return text
+	}
+	return string(runes[:previewRunes-1]) + "…"
+}
+
 type Item struct {
 	meta       Meta
 	stream     *stream.Session
@@ -401,6 +423,12 @@ func effectiveMeta(item *Item) Meta {
 	item.mu.Lock()
 	if item.invalid {
 		meta.Chat = false
+	}
+	// item.last survives invalidation, so the preview follows meta.Chat.
+	if n := len(item.last); meta.Chat && n > 0 {
+		last := item.last[n-1]
+		meta.LastActivity = last.Timestamp
+		meta.LastMessage = &MessagePreview{Role: last.Role, Text: previewText(last.Text)}
 	}
 	item.mu.Unlock()
 	return meta

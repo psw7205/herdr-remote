@@ -34,6 +34,15 @@ mise exec -- pnpm --dir web dev --strictPort
 기존 Bridge가 port를 사용 중이면 해당 process/service를 확인한 뒤 개발용 instance와 조정한다.
 Herdr server나 사용자 agent를 종료해서 port 문제를 해결하지 않는다.
 
+### Fixture 화면
+
+Herdr와 Bridge 없이 UI 상태를 확인할 때는 Vite만 띄우고 `http://127.0.0.1:5173/fixture.html`에
+접속한다. `?scenario=`로 `long`, `live`, `disconnected`, `delivery-unknown`, `rejected`, `empty`,
+`herdr-down`, `unsupported`, `slow`, `superseded`를 고를 수 있다. `/`로 시작하는 입력은 transcript에서
+숨는 slash command처럼 echo 없이 수락된다. 이 page는 fetch와 WebSocket만 가짜 Bridge로 바꾸고
+실제 client code를 그대로 실행한다. 데이터는 `web/src/fixtures/`의 익명 sample뿐이며 production
+build에는 포함되지 않는다. 실제 session으로 화면을 확인할 때는 screenshot을 추적 파일에 남기지 않는다.
+
 ## 변경별 검증
 
 | 변경 | 실행할 검증 |

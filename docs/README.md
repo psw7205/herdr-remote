@@ -10,7 +10,7 @@
 | [architecture.md](architecture.md) | 결정을 조합한 runtime 구조, data flow, invariant | ADR 변경이 구조에 영향을 주면 함께 고친다 |
 | [backlog.md](backlog.md) | 남은 작업, 우선순위, 완료 기준 | 기존 ID와 의존 관계를 유지한다 |
 | [herdr-patch.md](herdr-patch.md) | Herdr patch 운영 runbook | 절차가 바뀌면 현재 상태로 고친다. `cmd/doctor`가 이 경로를 참조한다 |
-| [plans/](plans/) | 진행 중인 작업 계획 | 작업이 끝나면 삭제한다 |
+| `plans/` | 진행 중인 작업 계획 | 작업이 끝나면 삭제한다. 남은 일은 backlog로 옮긴다 |
 | [records/integration-findings.md](records/integration-findings.md) | Herdr/Claude/Codex 코드·runtime 조사 | 날짜별 section으로 추가한다 |
 | [records/verification.md](records/verification.md) | 구현 경계와 실제 검증 결과 | 검증 날짜와 실측 여부를 구분해 추가한다 |
 

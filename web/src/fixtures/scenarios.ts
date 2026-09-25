@@ -1,0 +1,181 @@
+// Anonymous sample data for the dev-only fixture page. Nothing here comes from
+// a real transcript, pane or host; every name, path and message is invented.
+import type { ConditionalInput, Delivery, Message, Session } from '../api'
+
+export type FixtureSession = { session: Session; messages: Message[] }
+export type Scenario = {
+  name: ScenarioName
+  sessions: FixtureSession[]
+  conditionalInput: ConditionalInput
+  command: Delivery
+  // Milliseconds added to every HTTP answer.
+  latency: number
+  listFails: boolean
+  socketFails: boolean
+  // Interval of unsolicited assistant messages on the working session; 0 is off.
+  liveEvery: number
+  // A pane: item that Herdr later re-keys to a verified claude: session.
+  supersede?: { from: string; to: FixtureSession; after: number }
+}
+export const scenarioNames = ['default', 'long', 'live', 'disconnected', 'delivery-unknown', 'rejected', 'empty', 'herdr-down', 'unsupported', 'slow', 'superseded'] as const
+export type ScenarioName = typeof scenarioNames[number]
+
+const minute = 60_000
+const at = (ago: number) => new Date(Date.now() - ago).toISOString()
+let counter = 0
+const message = (role: Message['role'], text: string, ago: number): Message => ({ id: `fixture-${++counter}`, role, text, timestamp: at(ago) })
+
+function withPreview(session: Session, messages: Message[]): Session {
+  const last = messages.at(-1)
+  if (!last) return session
+  const text = last.text.replace(/\s+/g, ' ').trim()
+  return { ...session, last_activity: last.timestamp, last_message: { role: last.role, text: text.length > 160 ? `${text.slice(0, 159)}…` : text } }
+}
+
+const base = { agent: 'claude', chat: true, terminal: true, active: true, lifecycle: 'active' } as const
+
+const chartAnswer = `## 원인
+
+차트 데이터가 **1만 건**을 넘으면 매 frame마다 전체 path를 다시 계산합니다. 확대할 때마다 같은 작업이 반복돼 main thread가 600ms 넘게 막힙니다.
+
+| 단계 | 변경 전 | 변경 후 | 비고 |
+| --- | --- | --- | --- |
+| 첫 render | 1,840ms | 210ms | canvas로 전환 |
+| 확대/축소 | 620ms | 48ms | 구간별 cache |
+| memory | 312MB | 96MB | typed array 사용 |
+
+## 변경
+
+- 폭이 바뀔 때만 \`ResizeObserver\`에서 다시 계산합니다.
+- 1만 건 이상은 LTTB로 줄인 뒤 그립니다.
+- 확대 비율이 바뀌면 cache를 비웁니다.
+
+\`\`\`ts
+export function downsample(points: Point[], width: number): Point[] {
+  const bucket = Math.ceil(points.length / width)
+  if (bucket <= 1) return points
+  const out: Point[] = []
+  for (let start = 0; start < points.length; start += bucket) {
+    out.push(largestTriangle(points, start, Math.min(start + bucket, points.length)))
+  }
+  return out
+}
+\`\`\`
+
+> 참고: Safari는 \`OffscreenCanvas\`를 worker에서만 지원하므로 fallback을 남겼습니다.
+
+전체 test는 아래 명령으로 돌렸습니다.
+
+\`\`\`bash
+pnpm --filter dashboard test -- --run src/charts/downsample.test.ts src/charts/cache.test.ts --reporter=verbose --coverage --coverage.include=src/charts/**
+\`\`\`
+
+자세한 근거는 [LTTB 설명](https://example.com/lttb)을 참고하세요. 캡처는 첨부하지 않았습니다. ![차트 비교](https://example.invalid/chart.png)`
+
+function dashboardConversation(): Message[] {
+  return [
+    message('user', '대시보드 차트가 데이터가 많으면 너무 느려. 원인부터 찾아줘.', 26 * 60 * minute),
+    message('assistant', '먼저 profiler로 render 경로를 확인하겠습니다. 차트 component와 data hook을 읽고 있습니다.', 26 * 60 * minute - 40_000),
+    message('assistant', chartAnswer, 26 * 60 * minute - 6 * minute),
+    message('user', '좋아. 그럼 cache 무효화 조건만 다시 설명해 줘.\n\n특히 확대/축소를 빠르게 반복할 때가 궁금해.', 95 * minute),
+    message('assistant', '확대 비율(`scale`)과 표시 구간(`range`)을 key로 씁니다. 빠르게 반복하면 마지막 요청만 반영하고, 중간 결과는 버립니다.\n\n1. 입력이 들어오면 150ms debounce\n2. 같은 key면 cache hit\n3. 다른 key면 이전 계산을 취소', 94 * minute),
+    message('user', '테스트까지 해줘', 12 * minute),
+    message('assistant', 'test를 추가하고 전체를 실행하는 중입니다. `downsample`의 경계값(빈 배열, 폭 1px, 중복 좌표)을 먼저 확인합니다.', 11 * minute),
+  ]
+}
+
+function longConversation(size: number): Message[] {
+  const out: Message[] = []
+  for (let index = 0; index < size; index += 1) {
+    const ago = (size - index) * 3 * minute
+    if (index % 2 === 0) out.push(message('user', `${index / 2 + 1}번째 요청: 다음 module도 같은 방식으로 정리해 줘.`, ago))
+    else out.push(message('assistant', index % 10 === 1 ? chartAnswer : `정리했습니다. 바뀐 부분은 세 가지입니다.\n\n- 입력 검증을 한 곳으로 모았습니다.\n- 중복 요청을 막았습니다.\n- 실패하면 원인과 다음 행동을 안내합니다.\n\n다음 module로 넘어갈까요?`, ago))
+  }
+  return out
+}
+
+const terminalFrame = [
+  '\x1b[1;36m╭──────────────────────────────────────────────────────────────╮\x1b[0m',
+  `\x1b[1;36m│\x1b[0m \x1b[1mClaude Code\x1b[0m  sample-api${' '.repeat(38)}\x1b[1;36m│\x1b[0m`,
+  '\x1b[1;36m╰──────────────────────────────────────────────────────────────╯\x1b[0m',
+  '',
+  '\x1b[33m●\x1b[0m Bash(pnpm test -- --run payments)',
+  '  ⎿  테스트 DB를 초기화합니다. 계속할까요?',
+  '',
+  '   \x1b[1m1. 예\x1b[0m',
+  '   2. 아니요, 다른 방법을 알려 주세요',
+  '',
+  '\x1b[2m↑/↓ 선택 · Enter 확인 · Esc 취소\x1b[0m',
+].join('\r\n')
+
+function sessions(): FixtureSession[] {
+  counter = 0
+  const attention = [
+    message('user', '결제 API에 실패 case test를 보강해 줘.', 40 * minute),
+    message('assistant', '실패 case 여섯 가지를 추가했습니다. 실행하려면 테스트 DB를 초기화해야 해서 권한 확인이 필요합니다. Terminal에서 선택해 주세요.', 2 * minute),
+  ]
+  const working = dashboardConversation()
+  const done = [
+    message('user', '배포 전에 확인할 항목을 정리해 줘.', 70 * minute),
+    message('assistant', '배포 checklist를 정리했습니다.\n\n- [x] migration dry-run\n- [x] feature flag 기본값 확인\n- [ ] rollback 절차 공유\n\n마지막 항목은 담당자 확인이 필요합니다.', 18 * minute),
+  ]
+  const idle = [
+    message('user', 'README를 영어로 옮겨 줘.', 5 * 60 * minute),
+    message('assistant', '번역을 마쳤습니다. 용어는 기존 문서의 표기를 따랐습니다.', 4 * 60 * minute),
+  ]
+  const unverified = [
+    message('user', '로그 수집기 설정을 정리해 줘.', 3 * 60 * minute),
+    message('assistant', '설정 파일 세 개를 하나로 합치는 중입니다.', 170 * minute),
+  ]
+  return [
+    { session: withPreview({ ...base, id: 'claude:fixture-attention', pane_id: 'w1:p1', project: '/workspace/sample-api', title: '결제 API 실패 case 보강', status: 'needs_attention', runtime_binding: 'fixture-binding-attention' }, attention), messages: attention },
+    { session: withPreview({ ...base, id: 'claude:fixture-working', pane_id: 'w1:p2', project: '/workspace/sample-dashboard', title: '대시보드 차트 렌더링 개선', status: 'working', runtime_binding: 'fixture-binding-working' }, working), messages: working },
+    { session: withPreview({ ...base, id: 'claude:fixture-done', pane_id: 'w2:p1', project: '/workspace/infra-notes', title: '배포 checklist 정리', status: 'completed', runtime_binding: 'fixture-binding-done' }, done), messages: done },
+    { session: withPreview({ ...base, id: 'claude:fixture-idle', pane_id: 'w2:p2', project: '/workspace/docs-site', title: 'README 영문 번역', status: 'idle', runtime_binding: 'fixture-binding-idle' }, idle), messages: idle },
+    { session: withPreview({ ...base, id: 'claude:fixture-unverified', pane_id: 'w3:p1', project: '/workspace/log-agent', title: '로그 수집기 설정 정리', status: 'working', runtime_binding: undefined, terminal: false, lifecycle: 'unverified' }, unverified), messages: unverified },
+    { session: { ...base, id: 'pane:w3:p2', pane_id: 'w3:p2', project: '/workspace/scratch', title: '', status: 'idle', runtime_binding: undefined, chat: false, terminal: false, lifecycle: 'unbound' }, messages: [] },
+    { session: { ...base, id: 'claude:fixture-unknown', pane_id: 'w4:p1', project: '/workspace/misc', title: '상태를 알 수 없는 agent', status: 'error', runtime_binding: 'fixture-binding-unknown' }, messages: [] },
+  ]
+}
+
+export function scenario(name: ScenarioName): Scenario {
+  const out: Scenario = { name, sessions: sessions(), conditionalInput: 'supported', command: { status: 'accepted' }, latency: 60, listFails: false, socketFails: false, liveEvery: 0 }
+  switch (name) {
+    case 'long': {
+      const long = longConversation(400)
+      out.sessions[1] = { session: withPreview(out.sessions[1].session, long), messages: long }
+      break
+    }
+    case 'live': out.liveEvery = 4000; break
+    case 'disconnected': out.socketFails = true; break
+    case 'delivery-unknown': out.command = { status: 'delivery_unknown' }; break
+    case 'rejected': out.command = { status: 'rejected', code: 'SESSION_CHANGED' }; break
+    case 'empty': out.sessions = []; break
+    case 'herdr-down': out.listFails = true; break
+    case 'unsupported': {
+      out.conditionalInput = 'unsupported'
+      out.command = { status: 'rejected', code: 'HERDR_UNSUPPORTED' }
+      out.sessions = out.sessions.map(({ session, messages }) => ({ session: { ...session, runtime_binding: undefined, terminal: false, lifecycle: session.id.startsWith('pane:') ? 'unbound' : 'unverified' }, messages }))
+      break
+    }
+    case 'slow': out.latency = 2500; break
+    case 'superseded': {
+      const pane: Session = { ...base, id: 'pane:w5:p1', pane_id: 'w5:p1', project: '/workspace/new-agent', title: '새로 시작한 agent', status: 'working', runtime_binding: 'fixture-binding-pane', chat: false }
+      const next = [message('user', '방금 시작한 작업을 이어서 정리해 줘.', 2 * minute), message('assistant', '이어서 정리하고 있습니다.', minute)]
+      out.sessions.push({ session: pane, messages: [] })
+      out.supersede = { from: pane.id, to: { session: withPreview({ ...pane, id: 'claude:fixture-successor', runtime_binding: 'fixture-binding-successor', chat: true }, next), messages: next }, after: 4000 }
+      break
+    }
+    case 'default': break
+  }
+  return out
+}
+
+export function scenarioFromSearch(search: string): Scenario {
+  const name = new URLSearchParams(search).get('scenario')
+  return scenario(scenarioNames.find(item => item === name) ?? 'default')
+}
+
+export const fixtureTerminalFrame = { text: terminalFrame, cols: 66, rows: 12 }
+export const fixtureReply = '요청한 test를 추가하고 전체를 실행했습니다. **42개 모두 통과**했습니다.\n\n```text\n Test Files  8 passed (8)\n      Tests  42 passed (42)\n```'
+export const fixtureLiveMessage = (index: number) => `진행 상황 ${index}: \`src/charts\`의 다음 파일을 확인하고 있습니다.`

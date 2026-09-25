@@ -72,6 +72,59 @@ unit test로만 확인한 것: 다른 tailnet 사용자 identity 거부(단일 �
 화면이 full screen이 아니었던 관찰은 원인을 진단하지 않았으며 [backlog](../backlog.md)
 P1-05/P1-06에 남겼다.
 
+## UI/UX 개편 검증 (2026-09-25)
+
+범위는 backlog P1-03, P1-09~P1-11과 P1-04~P1-06의 일부다. 화면 확인에는 dev 전용 fixture
+page(`web/fixture.html`)와 headless Chrome(360·390·412폭, light/dark)을 썼다. fixture는 익명
+sample이며, 실제 session으로 찍은 screenshot은 추적 파일 밖에만 두었다.
+
+headless와 fixture로 실측한 것:
+
+- Chat은 긴 대화의 위·중간·아래 어디서나 header가 y=0에 있다. composer 하단은 viewport 하단과
+  같고 문서 자체는 scroll되지 않는다. 변경 전에는 맨 아래에서 header가 viewport 위 약 16,600px에
+  있었다.
+- 메시지 400개 대화를 약 550ms에 그리고 맨 아래에 도착한다. 맨 아래에서는 새 메시지를 따라가고,
+  위로 올린 상태에서는 위치가 움직이지 않으며 "새 메시지" 수를 보인다.
+- composer 글자 하나의 event 처리 시간이 224–336ms였다. 메시지 목록과 Markdown을 memo로
+  분리한 뒤 16ms로 줄었다.
+- Back은 Terminal → Chat → 목록 순서로 돌아간다. Terminal deep link에서는 부모 화면으로 교체된다.
+- Terminal key bar는 세로·가로 화면 모두 viewport 하단에 붙는다. light theme에서도 Terminal은
+  dark token으로 그려진다. xterm 크기 계산과 polling code는 바꾸지 않았다.
+- reduced motion에서 작업 중 spinner가 멈춘다.
+
+개발용 Bridge를 별도 port와 별도 receipt directory로 띄워 실제 Herdr session을 read-only로 확인했다.
+prompt와 Terminal 입력은 보내지 않았다.
+
+- 목록에 실제 session 3개가 상태 group과 preview로 표시됐다. 같은 project의 session 2개는 제목,
+  preview, 시간으로 구분됐다.
+- 같은 시점 main code Bridge와 비교하면, 작업 session에서 보이는 user message가 23개에서 2개로
+  줄었고 assistant message는 31개로 같았다. 남은 2개는 사용자가 직접 입력한 요청이었다.
+- 최종 filter 규칙으로 로컬 transcript 41개를 dry-run했다. invalid는 0건이고, 보이는 message는
+  user 220개, assistant 776개였다.
+
+독립 code review의 finding 6건을 고쳤다.
+
+- successor 전환 뒤 이전 history entry로 돌아가도 successor Chat으로 바로 간다.
+- Terminal xterm 영역에 가로 notch의 safe-area를 반영했다.
+- echo가 숨는 slash command를 보낸 뒤 전달 표시가 8초 안에 사라진다.
+- local command 기록은 그 요소만으로 이뤄졌을 때만 숨긴다. marker로 시작하는 실제 기록 94건은
+  모두 그런 형태였다.
+- Terminal을 쓸 수 없는 Terminal URL은 Chat URL로 바뀐다.
+- 중단을 보내기 버튼과 분리했다.
+
+1·3·5·6번은 fixture 흐름에서 다시 확인했다.
+
+자동 검증: `pnpm --dir web test`(152개), `pnpm --dir web build`, `mise run test`, `mise run vet`.
+
+확인하지 않은 것:
+
+- Android 실기기의 keyboard 동작(`interactive-widget=resizes-content`)과 설치형 PWA
+- iOS Safari
+- 소유자가 지정한 session에 실제 prompt를 보내 한 번만 도착하는지
+- 실기기의 code 복사와 text selection
+
+이 항목은 P0-02(화면 잠금 뒤 재연결), P0-06(실제 interrupt)과 같은 실기기 세션에서 함께 확인한다.
+
 ## 남은 범위
 
 첫 vertical slice 이후의 Codex adapter는 Herdr 안에서 실행 중인 Codex의 실제 CLI transcript와

@@ -389,14 +389,20 @@ Changes와 확장 Settings는 후속 단계다.
 
 세션을 상태 중심으로 표현한다.
 
-권장 그룹:
+그룹은 사용자가 먼저 해야 할 일의 순서를 따른다. Herdr의 `done`(아직 확인하지 않은 완료)과
+`idle`을 구분하고, 이 client에서 조작할 수 없는 session(연결 확인 중, 원격 입력 불가)과 상태를 알 수
+없는 session은 마지막에 둔다. 각 그룹 안에서는 최근 activity가 앞선다.
 
 ```text
-Needs Attention
+Needs Attention (입력 필요)
 
-Working
+Working (작업 중)
 
-Recent
+Done (완료)
+
+Idle (대기)
+
+Other (기타)
 ```
 
 각 session row는 최소한 다음 정보를 표시한다.
@@ -411,6 +417,10 @@ Recent
 | last message    | "Tests passed except..." |
 
 Workspace / tab / pane 같은 Herdr 내부 개념은 필요한 경우 secondary metadata로만 노출한다.
+
+latest activity와 last message는 Bridge가 native transcript에서 가장 최근에 보이는 message로 채운다.
+목록 응답의 additive field `last_activity`, `last_message`로 전달하고 terminal text로 추측하지 않는다.
+Chat history가 없거나 transcript가 invalid이면 두 field를 모두 생략한다.
 
 ---
 
@@ -621,6 +631,9 @@ Chat View
 * agent process와 transcript writer 간의 partial write를 안전하게 처리한다.
 * 동일 event가 중복 표시되지 않는다.
 * client reconnect와 transcript polling/watch가 독립적이어야 한다.
+* 사용자가 입력하지 않은 기록은 Chat message로 표시하지 않는다. 예를 들어 agent가 주입한 meta
+  안내, slash command·bash mode의 호출과 출력, background 작업 알림이 여기에 해당한다. 판정은 Agent
+  Adapter가 확인된 형식에만 적용하고, 식별하지 못한 형식은 표시한다.
 
 ---
 

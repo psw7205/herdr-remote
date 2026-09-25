@@ -188,3 +188,29 @@ Bridge 값과 frame의 줄 수·가장 긴 visible line 폭 중 큰 값을 grid�
 `pane.read`와 `pane.layout`은 별도 호출이라 그 사이의 resize를 구분하지 못한다. 정확한 값이
 필요하면 `pane.read` 응답에 frame과 같은 lock에서 읽은 실제 PTY cols/rows를 넣는 Herdr patch가
 필요하다(backlog P0-04, P1-05).
+
+## 2026-09-25 — Claude transcript의 비입력 user record와 transcript 이동
+
+로컬 Claude Code transcript 40개(13,740줄)의 record 형태를 개수로만 조사했다. 원문은 출력하거나
+저장하지 않았다. `type: "user"` record 가운데 사용자가 직접 입력하지 않은 형식은 다음과 같다.
+
+- `isMeta: true` 44건: `<local-command-caveat>` 안내, skill을 불러올 때 주입되는 본문, 그 밖의 meta 안내.
+- `isMeta: false`인 local command 기록: `<command-name>` 11건, `<command-message>` 2건,
+  `<local-command-stdout>` 10건. slash command 호출과 그 출력이다.
+- `isMeta: false`인 `<task-notification>` 69건: background 작업이 끝났다는 알림이다.
+- `<pasted_content id="…">` wrapper 8건은 사용자의 실제 입력을 감싼다. 닫는 태그에도 같은
+  `id` 속성이 붙는다. 7건은 입력 맨 앞에, 1건은 입력한 text 뒤에 있었다.
+- `[Request interrupted…]` 16건은 사용자 중단을 나타내는 plain text이다.
+- 이 version에서 `<system-reminder>`는 user text가 아니라 `attachment` record에 들어 있다.
+  `<command-args>`, `<local-command-stderr>`, bash mode 기록(`<bash-input>` 등), synthetic
+  `No response requested.`는 0건이었다. synthetic assistant record 3건은 모두 다른 오류 text였다.
+
+Claude adapter는 확인된 형식만 Chat message에서 빼고, 모르는 형식은 그대로 보인다
+(backlog P1-10). 같은 시점에 main code와 변경 code로 Bridge를 하나씩 띄워 비교했다. 실제 작업
+session에서 보이는 user message가 23개에서 2개로 줄었고, 남은 2개는 사용자가 직접 입력한 요청이었다.
+assistant message 수는 31개로 같았다.
+
+같은 날 Claude Code session이 worktree로 working directory를 옮기자, 그 session의 transcript 파일이
+새 working directory에 해당하는 project directory로 옮겨지고 원래 경로의 파일은 사라졌다. 이미 실행
+중이던 Bridge는 discovery 때 찾은 원래 경로를 계속 watch했다. 그래서 그 session의 Chat이 이동 시점
+이후로 갱신되지 않았다. 이후에 시작한 Bridge는 새 경로를 찾았다(backlog P1-12).

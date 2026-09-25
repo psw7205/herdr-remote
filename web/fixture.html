@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- Dev-only fixture page (`pnpm --dir web dev`, then /fixture.html?scenario=<name>).
+     Not a build input. Keep the head in sync with index.html. -->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f4ef" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#131312" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <title>Herdr Chat fixture</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/fixtures/main.tsx"></script>
+  </body>
+</html>

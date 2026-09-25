@@ -1,7 +1,10 @@
+// Global CSS first, so component modules imported through App come later
+// in the cascade and win at equal specificity.
+import './tokens.css'
+import './base.css'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
-import './styles.css'
 
 const element = document.getElementById('root')
 if (!element) throw new Error('Root element is missing')
