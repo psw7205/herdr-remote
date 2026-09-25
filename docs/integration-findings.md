@@ -188,3 +188,24 @@ record였으며 `internal_chat_message_metadata_passthrough.content_item_kinds`�
 Codex hook session ID가 현재 foreground process incarnation과 결합돼 있는지와
 같은 process에서 `/clear` 또는 resume할 때 binding이 어떻게 바뀌는지는 별도 검증이
 필요하다. 이 경계가 확인되기 전에는 Codex prompt를 pane ID만으로 보내지 않는다.
+
+## 2026-09-25 — Terminal grid 크기 조사
+
+Mobile Terminal의 xterm 로컬 grid를 Herdr pane 크기에 맞추기 위해 크기 source를 조사했다.
+Herdr `pane.read` 응답에는 크기 field가 없다. 정확한 rows는 `pane.get`/`session.snapshot`의
+`scroll.viewport_rows`로만 나오고, 정확한 PTY cols를 주는 공개 API는 없다.
+
+`pane.layout`의 pane별 `rect`는 stock Herdr에도 있다. 이 값은 border·scrollbar cell을 포함한
+바깥 크기라 실제 PTY 크기 이상이다. zoomed tab에서는 focused pane이 tab `area` 전체에 그려지므로
+`rect`와 다르고, direct attach resize lock이 있으면 PTY 크기와 어긋날 수 있다.
+실행 중 pane에 대한 read-only probe에서는 `rect` 128×40, visible frame 40줄, 가장 긴 줄 128 cell로
+일치했다.
+
+Bridge는 terminal frame을 읽을 때 read-only `pane.layout`도 호출해 해당 pane의 `rect`(zoomed tab의
+focused pane이면 `area`)를 frame 응답의 additive `cols`·`rows`로 넣는다
+(`internal/herdr/gateway.go`의 `PaneSize`). 크기를 읽지 못하면 두 field를 생략하고 frame은
+그대로 반환한다. 이 값은 client render grid이며 Herdr PTY resize를 호출하지 않는다. client는
+Bridge 값과 frame의 줄 수·가장 긴 visible line 폭 중 큰 값을 grid로 쓴다(ADR-035).
+`pane.read`와 `pane.layout`은 별도 호출이라 그 사이의 resize를 구분하지 못한다. 정확한 값이
+필요하면 `pane.read` 응답에 frame과 같은 lock에서 읽은 실제 PTY cols/rows를 넣는 Herdr patch가
+필요하다(backlog P0-04, P1-05).
