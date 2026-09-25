@@ -23,6 +23,7 @@
 - 신뢰 가능한 structured source가 없는 permission/question은 Terminal fallback으로 처리한다.
 - localhost bind, exact Host/Origin 검사, Tailscale Serve 소유자 identity 검증을 유지한다. Funnel과 wildcard CORS는 지원 범위가 아니다.
 - native transcript 원문, 실제 prompt, binding token을 fixture·로그·Git 문서에 복사하지 않는다. fixture는 실제 구조를 확인한 익명 sample로 작성한다.
+- 실제 hostname, tailnet 이름, IP, 계정, 기기 식별자는 Git 문서에 `<tailnet-host>` 같은 placeholder로 쓴다. 실제 host의 ACL 범위, 열린 port 같은 보안 상태는 기록하지 않고 필요한 조치만 일반 조건으로 backlog에 남긴다.
 - conversation DB, Redis, broker, 별도 agent runner는 추가하지 않는다.
 
 ## 코드 경계

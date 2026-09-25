@@ -85,8 +85,8 @@ incarnation에 결합하고 세션 교체 중 조건부 PTY input을 검증하�
 끝나기 전에는 Codex adapter를 write-enabled로 표시하지 않는다.
 
 Tailnet 배포에서는 localhost Bridge를 Tailscale Serve에 연결하고, `Tailscale-User-Login`
-소유자 검증과 exact browser Origin을 모두 적용한다. 추가로
-network ACL/grant도 이후 최소 권한으로 좁히는 것이 좋다. 전역 tailnet policy 수정은 이
+소유자 검증과 exact browser Origin을 모두 적용한다. network ACL/grant의 최소 권한 구성은
+[P0-03](../backlog.md#p0--배포와-핵심-안정성)에서 다루며, 전역 tailnet policy 수정은 이
 vertical slice의 변경 범위가 아니다. Serve는 2026-09-24에 Funnel 없이 활성화했다.
 Bridge 재시작 복구는 사용자 `launchd` job으로 실행하던 때 확인했다. 이 job은 이후 상시 실행이
 아니라 필요할 때만 시작하도록 바꿨으며, 실행 방식은 Git 밖의 host 설정이다.

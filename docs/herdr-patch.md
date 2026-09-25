@@ -108,8 +108,8 @@ just build
 
 ## 4. stock binary 백업과 patch 설치
 
-최초 설치 전 stock binary를 같은 directory에 남긴다. 현재 host에는
-`<install-dir>/herdr-remote-original-0.9.1`로 백업돼 있다. 이미 있는 백업은 덮어쓰지 않는다.
+최초 설치 전 stock binary를 같은 directory에 `<install-dir>/herdr-remote-original-0.9.1`로
+남긴다. 이미 있는 백업은 덮어쓰지 않는다.
 
 ```sh
 INSTALL_DIR="$(dirname "$(command -v herdr)")"
