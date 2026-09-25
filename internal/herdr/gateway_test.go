@@ -244,12 +244,34 @@ func TestPaneSizeUsesLayoutRectOrZoomedArea(t *testing.T) {
 	}{
 		{"split", `{"type":"pane_layout","layout":{"zoomed":false,"area":{"x":0,"y":0,"width":200,"height":50},"focused_pane_id":"w1:p1","panes":[{"pane_id":"w1:p1","focused":true,"rect":{"x":0,"y":0,"width":100,"height":50}},{"pane_id":"w1:p2","focused":false,"rect":{"x":100,"y":0,"width":100,"height":50}}]}}`, PaneSize{Cols: 100, Rows: 50}},
 		{"zoomed", `{"type":"pane_layout","layout":{"zoomed":true,"area":{"x":0,"y":0,"width":161,"height":45},"focused_pane_id":"w1:p2","panes":[{"pane_id":"w1:p2","focused":true,"rect":{"x":80,"y":0,"width":81,"height":45}}]}}`, PaneSize{Cols: 161, Rows: 45}},
+		{"zoomed other pane", `{"type":"pane_layout","layout":{"zoomed":true,"area":{"x":0,"y":0,"width":161,"height":45},"focused_pane_id":"w1:p1","panes":[{"pane_id":"w1:p1","focused":true,"rect":{"x":0,"y":0,"width":80,"height":45}},{"pane_id":"w1:p2","focused":false,"rect":{"x":80,"y":0,"width":81,"height":45}}]}}`, PaneSize{Cols: 81, Rows: 45}},
 	} {
 		path := socketServer(t, func(c net.Conn) { respond(t, c, "pane.layout", tc.wire) })
 		got, err := NewGateway(path).PaneSize(context.Background(), "w1:p2")
 		if err != nil || got != tc.want {
 			t.Fatalf("%s: got %+v %v, want %+v", tc.name, got, err, tc.want)
 		}
+	}
+}
+
+func TestPaneSizeRequestsLayoutForExplicitPane(t *testing.T) {
+	path := socketServer(t, func(c net.Conn) {
+		var req struct {
+			ID     string                     `json:"id"`
+			Method string                     `json:"method"`
+			Params map[string]json.RawMessage `json:"params"`
+		}
+		if err := json.NewDecoder(c).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		if req.Method != "pane.layout" || len(req.Params) != 1 || string(req.Params["pane_id"]) != `"w1:p2"` {
+			t.Errorf("request = %s %v", req.Method, req.Params)
+		}
+		json.NewEncoder(c).Encode(map[string]any{"id": req.ID, "result": json.RawMessage(`{"type":"pane_layout","layout":{"zoomed":false,"area":{"width":100,"height":40},"focused_pane_id":"w1:p2","panes":[{"pane_id":"w1:p2","rect":{"width":100,"height":40}}]}}`)})
+	})
+	if got, err := NewGateway(path).PaneSize(context.Background(), "w1:p2"); err != nil || got != (PaneSize{Cols: 100, Rows: 40}) {
+		t.Fatalf("got %+v %v", got, err)
 	}
 }
 
