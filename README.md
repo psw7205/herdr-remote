@@ -155,7 +155,7 @@ Tailscale CLI가 app bundle wrapper로만 있을 수 있으므로, 자동 탐색
 
 Herdr live handoff는 테스트에서 agent PID·native session을 보존했지만 terminal ID를
 재발급했고 desktop client가 끊긴 동안 geometry를 기본 120×40으로 변경했다. 이 동작은
-mobile Terminal의 resize와 별개다. 검증한 범위와 남은 조건은 [구현 기록](docs/implementation-plan.md)을 따른다.
+mobile Terminal의 resize와 별개다. 검증한 범위와 남은 조건은 [검증 기록](docs/records/verification.md)을 따른다.
 
 ## 문서
 
@@ -165,7 +165,8 @@ mobile Terminal의 resize와 별개다. 검증한 범위와 남은 조건은 [�
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 개발 server, 검증, 변경 제출 절차 |
 | [PRD](docs/prd.md) | 제품 요구와 범위 |
 | [ADR](docs/adr.md) | architecture 결정 |
-| [구현 기록](docs/implementation-plan.md) | 구현 경계와 실제 검증 결과 |
-| [Integration 조사](docs/integration-findings.md) | Herdr/Claude/Codex 코드·runtime 근거 |
+| [Architecture](docs/architecture.md) | 결정을 조합한 runtime 구조, data flow, invariant |
+| [검증 기록](docs/records/verification.md) | 구현 경계와 실제 검증 결과 |
+| [Integration 조사](docs/records/integration-findings.md) | Herdr/Claude/Codex 코드·runtime 근거 |
 | [Herdr patch runbook](docs/herdr-patch.md) | 조건부 입력 patch의 확인·설치·rollback·upgrade |
 | [Backlog](docs/backlog.md) | 남은 작업의 우선순위·의존 관계·완료 기준 |

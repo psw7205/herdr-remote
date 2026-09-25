@@ -1171,7 +1171,7 @@ Client connection loss가 agent process loss처럼 보이면 안 된다.
 첫 구현은 Claude 하나의 discovery → transcript Chat → 동일 PTY prompt → transcript 응답이며,
 interrupt/reconnect/동일 Terminal fallback을 포함한다. Herdr integration gate를 통과하기 전에는
 write-enabled UI를 구현 완료로 간주하지 않는다. 세부 gate와 미지원 사항은
-`docs/integration-findings.md`, 실행 순서는 `docs/implementation-plan.md`에 기록한다.
+`docs/records/integration-findings.md`, 실제 검증 결과는 `docs/records/verification.md`에 기록한다.
 
 | Area                         | MVP   |
 | ---------------------------- | ----- |

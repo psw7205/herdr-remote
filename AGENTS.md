@@ -5,7 +5,8 @@
 - 응답과 새 문서는 한국어로 작성한다. code, identifiers, API 이름은 English를 유지한다.
 - `README.md`로 실행 조건을, `docs/backlog.md`로 현재 범위를 확인한다.
 - 요구와 architecture 결정은 `docs/prd.md`, `docs/adr.md`를 기준으로 한다. 구현 사실은 code와 runtime에서 검증한다.
-- Herdr 연동을 바꾸기 전 `docs/integration-findings.md`를 읽는다. 과거 조사 결과를 현재 설치 버전의 지원 여부로 단정하지 않는다.
+- 문서 배치와 갱신 규칙은 `docs/README.md`를 따른다.
+- Herdr 연동을 바꾸기 전 `docs/records/integration-findings.md`를 읽는다. 과거 조사 결과를 현재 설치 버전의 지원 여부로 단정하지 않는다.
 - `git status --short`와 현재 branch를 확인한다. 기존 사용자 변경을 보존하고 요청 범위만 수정한다.
 - 검토·분석 요청은 read-only다. 구현 요청에는 성공 기준과 관련 검증을 먼저 정한다.
 
