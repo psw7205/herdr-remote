@@ -82,9 +82,9 @@ export async function sendCommand(session: Session, kind: 'prompt' | 'interrupt'
   })
   return response.json() as Promise<Delivery>
 }
-export async function terminalFrame(session: Session): Promise<{ text: string; pane_id: string; cols?: number; rows?: number }> {
+export async function terminalFrame(session: Session, signal?: AbortSignal): Promise<{ text: string; pane_id: string; cols?: number; rows?: number }> {
   return readJSON(await fetch(`/api/sessions/${encodeURIComponent(session.id)}/terminal`, {
-    headers: { 'X-Runtime-Binding': session.runtime_binding ?? '' }, cache: 'no-store',
+    headers: { 'X-Runtime-Binding': session.runtime_binding ?? '' }, cache: 'no-store', signal,
   }))
 }
 export function eventURL(id: string, cursor: Cursor): string {
