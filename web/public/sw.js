@@ -1,4 +1,4 @@
-const shell = 'herdr-chat-shell-v2'
+const shell = 'herdr-chat-shell-v3'
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(shell).then(cache => cache.addAll(['/', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-512-maskable.png'])))
 })

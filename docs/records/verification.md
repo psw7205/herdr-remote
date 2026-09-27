@@ -125,6 +125,28 @@ prompt와 Terminal 입력은 보내지 않았다.
 
 이 항목은 P0-02(화면 잠금 뒤 재연결), P0-06(실제 interrupt)과 같은 실기기 세션에서 함께 확인한다.
 
+## 배색 교체 검증 (2026-09-27)
+
+범위는 backlog P1-11의 배색과 P1-06의 icon이다. Herdr website의 warm neutral 바탕과 blue 채움
+버튼을 cool graphite로 바꿨다. 회색은 accent hue(OKLCH 255) 쪽으로 약간 기울이고, 주 버튼은 먹색,
+blue는 link·focus·눌린 상태에만 쓴다. 상태 색의 hue는 유지했고 `--unknown`만 같은 기준의 회색으로
+바꿨다.
+
+- `web/src/tokens.css`의 token 쌍으로 WCAG 대비를 계산했다. 글자는 light 4.90:1, dark 6.15:1
+  이상이고, 상태 표시와 focus는 light 3.11:1, dark 4.71:1 이상이다.
+- 계산 중 목록 group 제목 옆의 수가 비활성용 `--faint`(2.6:1)로 그려지는 것을 찾아 `--muted`로
+  바꿨다.
+- fixture를 390폭 light/dark로 다시 찍었다. 목록, Chat, 보내기, 입력 필요, Terminal에서 blue는
+  link와 Terminal "맞춤" 눌린 상태에만 보였다. 보내기 버튼은 light에서 먹색 바탕이고, Terminal은
+  light theme에서도 dark canvas와 같은 바탕으로 그려진다.
+- icon, manifest 색, light/dark `theme-color`를 새 값으로 바꾸고 service worker cache를
+  `herdr-chat-shell-v3`로 올렸다. PNG icon은 SVG에서 `rsvg-convert`로 다시 만들었다. 이전
+  `icon-192.png`는 headless Chrome으로 만들면서 icon 일부만 잘려 있었다.
+
+자동 검증: `pnpm --dir web test`(152개), `pnpm --dir web build`.
+
+확인하지 않은 것: 이미 설치한 PWA의 icon·`theme-color` 갱신, 실기기 화면의 색.
+
 ## 남은 범위
 
 첫 vertical slice 이후의 Codex adapter는 Herdr 안에서 실행 중인 Codex의 실제 CLI transcript와

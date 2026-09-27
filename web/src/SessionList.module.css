@@ -31,7 +31,7 @@
   font-weight: 600;
   color: var(--muted);
 }
-.count { font-weight: 500; color: var(--faint); font-variant-numeric: tabular-nums; }
+.count { font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
 .rows { margin: 0; padding: 0; list-style: none; }
 .rows li + li .row::before {
   content: "";
