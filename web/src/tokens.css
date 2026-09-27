@@ -8,10 +8,15 @@
    Components use these roles, never raw values.
 
    Colors are light-dark() pairs resolved by each element's color-scheme, so a
-   subtree can pin one scheme: the Terminal sets data-scheme="dark". */
-:root {
-  color-scheme: light dark;
+   subtree can pin one scheme: the Terminal sets data-scheme="dark". The tokens
+   are declared again on that subtree because the production build lowers
+   light-dark() to variables that resolve where a token is declared, not where
+   it is used. */
+:root { color-scheme: light dark; }
+[data-scheme="dark"] { color-scheme: dark; }
 
+:root,
+[data-scheme] {
   --canvas: light-dark(#f7f9fc, #0a0c10);
   --surface: light-dark(#f1f4f7, #111418);
   --surface-2: light-dark(#e5e9ed, #1c2024);
@@ -83,5 +88,3 @@
   --layer-float: 10;
   --layer-bar: 20;
 }
-
-[data-scheme="dark"] { color-scheme: dark; }
