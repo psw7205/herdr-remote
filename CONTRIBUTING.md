@@ -42,6 +42,8 @@ Herdr와 Bridge 없이 UI 상태를 확인할 때는 Vite만 띄우고 `http://1
 숨는 slash command처럼 echo 없이 수락된다. 이 page는 fetch와 WebSocket만 가짜 Bridge로 바꾸고
 실제 client code를 그대로 실행한다. 데이터는 `web/src/fixtures/`의 익명 sample뿐이며 production
 build에는 포함되지 않는다. 실제 session으로 화면을 확인할 때는 screenshot을 추적 파일에 남기지 않는다.
+dev server의 CSS는 build처럼 낮춰지지 않는다(`light-dark()` 등). 색이나 theme을 바꾸면 build한
+화면에서도 확인한다.
 
 ## 변경별 검증
 

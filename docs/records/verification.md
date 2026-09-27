@@ -139,6 +139,12 @@ blue는 link·focus·눌린 상태에만 쓴다. 상태 색의 hue는 유지했�
 - fixture를 390폭 light/dark로 다시 찍었다. 목록, Chat, 보내기, 입력 필요, Terminal에서 blue는
   link와 Terminal "맞춤" 눌린 상태에만 보였다. 보내기 버튼은 light에서 먹색 바탕이고, Terminal은
   light theme에서도 dark canvas와 같은 바탕으로 그려진다.
+- production build에서는 Terminal의 dark 고정이 풀려 light theme의 header·key bar가 밝게 그려졌다.
+  build의 lightningcss가 `light-dark()`를 token을 선언한 `:root`에서 해석되는 변수로 낮추기
+  때문이다. dev server는 native `light-dark()`를 써서 2026-09-25 fixture 확인에서는 드러나지 않았다.
+  color token을 `[data-scheme]` 요소에도 선언하도록 고쳤다. fixture를 같은 `vite.config.ts`로
+  build해 보면 light theme Terminal header 바탕이 고치기 전 `rgb(241, 244, 247)`, 고친 뒤
+  `rgb(17, 20, 24)`다.
 - icon, manifest 색, light/dark `theme-color`를 새 값으로 바꾸고 service worker cache를
   `herdr-chat-shell-v3`로 올렸다. PNG icon은 SVG에서 `rsvg-convert`로 다시 만들었다. 이전
   `icon-192.png`는 headless Chrome으로 만들면서 icon 일부만 잘려 있었다.
