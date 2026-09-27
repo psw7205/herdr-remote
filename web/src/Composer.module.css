@@ -55,8 +55,8 @@
   padding: 0;
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--primary);
+  color: var(--on-primary);
   transition: background-color var(--duration) var(--ease), transform var(--duration-fast) var(--ease);
 }
 .primary:active:not(:disabled) { transform: scale(0.94); }

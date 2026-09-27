@@ -60,7 +60,7 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
     refit.current = fit
     void import('@xterm/xterm').then(({ Terminal }) => {
       if (!active || !container.current) return
-      term = new Terminal({ cols: 120, rows: 40, convertEol: true, scrollback: 0, fontSize: 12, fontFamily: FONT_FAMILY, theme: { background: '#0c0c0b', foreground: '#dedad0' } })
+      term = new Terminal({ cols: 120, rows: 40, convertEol: true, scrollback: 0, fontSize: 12, fontFamily: FONT_FAMILY, theme: { background: '#0a0c10', foreground: '#cdd1d6' } })
       term.open(container.current)
       input = term.onData(text => emit('terminal_input', text))
       observer = new ResizeObserver(() => fit())
