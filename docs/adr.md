@@ -1,8 +1,8 @@
 # Herdr Mobile Chat — Architecture Decision Records
 
-**Related:** `docs/prd.md`, `docs/architecture.md`
+**Related:** [prd.md](prd.md), [architecture.md](architecture.md)
 
-각 ADR의 상태는 해당 ADR의 `Status`를 따른다. 결정을 조합한 전체 구조는 `docs/architecture.md`에 있다.
+각 ADR의 상태는 해당 ADR의 `Status`를 따른다. 결정을 조합한 전체 구조는 [architecture.md](architecture.md)에 있다.
 
 ---
 
@@ -149,8 +149,8 @@ Mobile backend는 conversation 자체를 소유하지 않는다.
 | Agent session identity | Herdr                   |
 | Conversation           | Claude/Codex transcript |
 | Terminal state         | PTY                     |
-| Mobile unread state    | Mobile backend          |
-| Client preferences     | Mobile backend          |
+| Mobile unread state    | Mobile backend (미구현) |
+| Client preferences     | Mobile backend (미구현) |
 
 ## Consequences
 
@@ -405,6 +405,9 @@ ClaudeCodeAdapter
 CodexAdapter
 ```
 
+현재 구현은 Claude adapter(`internal/claude`)뿐이다. `CodexAdapter`는 후속 작업이다
+(backlog P1-01/02).
+
 ## Adapter Responsibilities
 
 ### Session resolution
@@ -482,15 +485,24 @@ terminal.*
 file.*
 ```
 
-초기 event 종류:
+초기 event 종류는 현재 Bridge가 발행하는 구현됨 event와, 이름만 정하고 발행하지 않는
+예약(미구현) event로 나뉜다.
+
+구현됨:
 
 ```text
 session.snapshot
+session.error
 
 agent.status
 
 message.user
 message.assistant
+```
+
+예약(미구현):
+
+```text
 message.assistant.delta
 
 tool.started
@@ -506,7 +518,6 @@ question.resolved
 file.changed
 
 session.completed
-session.error
 ```
 
 ## Event Envelope
@@ -710,6 +721,8 @@ Bridge
 ```
 
 이들은 코드 구조상의 component이며 반드시 별도 process/service일 필요는 없다.
+`AttachmentService`와 `NotificationService`는 ADR-015/017(Proposed)에 따른 후속 component이며
+현재 구현되지 않았다.
 
 ## Persistence
 
@@ -723,6 +736,9 @@ read cursors
 notification subscription
 optional event cache
 ```
+
+현재 구현된 persistence는 command receipt(`internal/command`, `-receipts-dir`)뿐이다.
+UI preference, read cursor, notification subscription 저장은 해당 기능을 도입할 때 추가한다.
 
 MVP에서 별도의 외부 DB server는 도입하지 않는다.
 
@@ -836,7 +852,7 @@ MVP client는 mobile-first Web/PWA로 구현한다.
 * touch-first controls
 * offline shell
 * reconnect
-* Web Push 가능한 범위에서 지원
+* Web Push 가능한 범위에서 지원 (ADR-017 Proposed)
 
 ## Exit Criteria
 
@@ -875,7 +891,10 @@ Session
 └── Terminal
 ```
 
-세 화면 모두 동일한 SessionRef를 사용한다.
+`Changes`는 ADR-016(Proposed)이 채택될 때 추가하는 선택 화면이다. 현재 구현은 Chat과
+Terminal만 제공하며(`web/src/route.ts`) `view=changes` URL은 Chat으로 처리한다.
+
+모든 화면(Chat, Terminal, 추가될 경우 Changes)은 동일한 SessionRef를 사용한다.
 
 Terminal은 별도의 workspace/session을 생성하지 않는다.
 
@@ -913,7 +932,8 @@ agent 작업 결과를 모바일에서 확인할 필요는 있다.
 
 ## Decision
 
-MVP는 다음만 지원한다.
+Review·attachment 기능을 제공한다면 범위는 다음으로 제한한다. 이 기능들은
+ADR-015/016(Proposed)에 따르며 현재 어느 것도 구현되지 않았다.
 
 ```text
 changed files
@@ -1323,6 +1343,8 @@ attachments:
   file: true
 ```
 
+`attachments`는 ADR-015(Proposed)가 채택될 때의 capability 예시다.
+
 Client는 capability 기반으로 UI를 노출한다.
 
 ## Result
@@ -1346,10 +1368,12 @@ Accepted
 Bridge API에는 명시적인 interrupt command가 존재한다.
 
 ```text
-session.interrupt
+POST /api/sessions/{id}/commands
+command_type: "interrupt"
 ```
 
-Bridge가 이를 해당 Herdr PTY에 맞는 control sequence로 변환한다.
+ADR-033의 command envelope를 그대로 사용하며, Bridge는 이를 binding 검증 경로
+(`agent.bound_input`)로 Herdr에 전달하고 Herdr가 해당 PTY에 맞는 입력으로 변환한다.
 
 Client는:
 
@@ -1420,7 +1444,8 @@ Host도 명시한 배포 origin과 대조한다. README 배포 절차에 Tailsca
 
 ## Owner 자동 감지 기본값
 
-Status: Accepted (구현은 backlog P0-08)
+Status: Accepted (구현됨. 실제 mobile 검증의 남은 항목은
+[backlog P0-02](backlog.md#p0--배포와-핵심-안정성)에서 추적)
 
 설치자가 host와 login을 직접 맞추지 않도록 Bridge는 시작 시 한 번 `tailscale status --json`을
 조회한다. 기본 host는 `Self.DNSName`에서 끝의 점을 제거한 값이고, 기본 소유자는 이 Tailscale
@@ -1877,7 +1902,8 @@ receipt는 conversation 본문을 저장하는 DB가 아니며 command digest와
 
 ## Status
 
-Accepted (stock Herdr `0.9.1`에는 미포함, 현재 로컬 patch에서 구현)
+Accepted (stock Herdr `0.9.1`에는 미포함, 소유 fork `psw7205/herdr`의 `mobile-binding` patch에서
+구현. [ADR-036](#adr-036--herdr-patch는-소유-fork에서-유지한다))
 
 ## Decision
 
