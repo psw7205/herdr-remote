@@ -153,6 +153,27 @@ blue는 link·focus·눌린 상태에만 쓴다. 상태 색의 hue는 유지했�
 
 확인하지 않은 것: 이미 설치한 PWA의 icon·`theme-color` 갱신, 실기기 화면의 색.
 
+## 공개 전 보안 수정 검증 (2026-09-28)
+
+범위는 backlog P0-09의 공개 전 review에서 찾아 고친 결함이다. 아래 항목은 모두 unit test로
+확인했다. 실제 host의 Tailscale Serve나 설치된 PWA에서 다시 측정하지는 않았다.
+
+| 수정 | 경계 | unit test |
+| --- | --- | --- |
+| Serve는 client `Host`를 그대로 넘긴다. tailnet host가 확정되지 않은 동안 loopback `Host`를 위조한 요청이 통과하던 우회를 막았다. Serve가 붙이는 `X-Forwarded-*`·`Tailscale-User-*` header가 하나라도 있으면 원격 요청으로 보고, 진짜 Serve 요청은 tailnet host와 소유자 login을 모두 요구한다(ADR-024). | `internal/httpapi` | `TestForgedLoopbackHostWithServeHeadersIsRejected`, `TestServeRequestRequiresTailnetHostAndOwner` |
+| 모든 응답(거부 응답 포함)에 `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`을 싣고, static directory는 listing 대신 404를 반환한다. | `internal/httpapi` | `TestResponsesCarrySecurityHeadersAndStaticHasNoListing` |
+| `ended`·`superseded` item의 transcript watcher를 닫아, 본 적 있는 session 수에 비례하던 fd 증가를 없앴다. 취소된 watcher는 읽던 중이어도 item에 publish하지 않는다. | `internal/session` | `TestTranscriptWatcherFollowsItemLifecycle`, `TestCancelledWatcherPublishesNothing` |
+| Bridge listen 주소로 향하는 Serve raw TCP forward(background·foreground 설정)를 Funnel처럼 `doctor`의 blocker로 보고한다. 다른 port로 향하는 forward는 보고하지 않는다. | `internal/tailnet`, `cmd/doctor` | `TestServeConfigTCPForward`, `TestDoctorBlocksTCPForwardToBridge`, `TestDoctorIgnoresTCPForwardToOtherPort` |
+| service worker cache 이름을 build 산출물의 hash(build id)로 자동 갱신한다. placeholder가 없으면 build가 실패한다. | `web/plugins/swBuildId.ts` | `web/plugins/swBuildId.test.ts`의 `service worker build id` 4개 |
+
+자동 검증(2026-09-28): `mise run test`(`go test -race ./...`)에서 test가 있는 9개 package가
+모두 통과했다. `mise exec -- pnpm --dir web test`는 14개 file, 156개 test가 통과했다. 위 표의
+test는 `-run`으로 따로 실행해도 통과했다.
+
+확인하지 않은 것: 실제 Serve 경유로 위조 `Host` 요청이 거부되는지, 실제 browser에서 frame 삽입이
+막히는지, 장기 실행 Bridge의 실제 fd 수, 실제 `tailscale serve --tcp` 설정에서의 `doctor` 출력,
+이미 설치한 PWA의 cache 갱신. 남은 resource 한계는 backlog P1-13에서 추적한다.
+
 ## 남은 범위
 
 첫 vertical slice 이후의 Codex adapter는 Herdr 안에서 실행 중인 Codex의 실제 CLI transcript와
