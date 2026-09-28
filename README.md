@@ -1,25 +1,44 @@
 # Herdr Mobile Chat
 
+> **English summary.** Herdr Mobile Chat (`herdr-remote`) is a single-user companion for
+> [Herdr](https://github.com/herdrdev/herdr). It lets you read and continue Claude Code sessions
+> that are already running in Herdr panes from a phone browser, over localhost or Tailscale Serve.
+> The Bridge never starts or resumes agents: Herdr owns the processes and PTYs, and chat history
+> is read from Claude Code's native transcripts. It requires macOS, Claude Code, and a Herdr build
+> with the conditional input patch ([`psw7205/herdr`](https://github.com/psw7205/herdr/tree/mobile-binding),
+> branch `mobile-binding`); stock Herdr `0.9.1` lacks the required API. Codex is not supported yet.
+> This is a personal project, not affiliated with Herdr. The documentation is in Korean.
+
 Herdr에서 이미 실행 중인 coding agent를 모바일 브라우저에서 확인하고 같은 session에
 입력하는 single-user, single-host client다. Herdr가 process와 PTY를 소유하고,
 Chat은 native transcript를 읽어 표시한다. Bridge가 agent를 start/resume하지 않는다.
+repo와 Go module 이름은 `herdr-remote`다.
 
-[Herdr](https://github.com/ogulcancelik/herdr)의 공식 project가 아닌 개인 companion tool이다.
+[Herdr](https://github.com/herdrdev/herdr)는 여러 coding agent를 terminal pane에서 실행하고
+관리하는 도구다. 이 repo는 Herdr의 공식 project가 아닌 개인 companion tool이다.
+
+<p align="center">
+  <img src="docs/images/sessions.png" width="240" alt="상태별로 묶인 session 목록">
+  <img src="docs/images/chat.png" width="240" alt="작업 중인 session의 Chat 화면">
+  <img src="docs/images/terminal.png" width="240" alt="같은 pane의 Terminal 화면과 특수 키">
+</p>
+
+화면은 익명 sample을 쓰는 dev 전용 fixture page(`web/fixture.html`)에서 캡처했다.
 
 ## 현재 지원 범위
 
 | 항목 | 상태 |
 | --- | --- |
-| Claude Code / macOS | 기존 session 발견, Chat, prompt, interrupt API, Terminal fallback 구현 |
-| 대화 복구 | incremental JSONL, snapshot/replay/live, epoch, reconnect 구현 |
-| 입력 보호 | Herdr 조건부 binding 검증, durable command receipt, browser retry ID 유지 |
-| 모바일 UI | 고정 header·composer의 Chat, 상태별 session 목록과 마지막 message preview, light/dark theme, code 복사, 특수 키가 있는 xterm.js Terminal, PWA shell·설치 icon. 실기기 keyboard·설치형 PWA 확인은 [P1-09](docs/backlog.md#p1--핵심-ux와-다음-agent) |
-| Tailnet | Serve 소유자 identity·Host/Origin 검증 구현. host·owner 자동 감지와 `doctor` 진단은 [P0-08](docs/backlog.md#p0--배포와-핵심-안정성), Serve HTTPS와 소유자 phone의 Chat·prompt·Terminal은 확인(P0-01), WebSocket reconnect·다른 사용자 거부 실측·PWA 설치는 미검증(P0-02) |
-| Codex | Herdr CLI/native transcript 조사 완료. Chat/write adapter는 미구현 |
-| Tool cards·Changed Files·attachment·notification | 후속 optional 기능 |
+| Claude Code / macOS | 기존 session 발견, Chat, prompt, interrupt, Terminal fallback |
+| 대화 복구 | incremental JSONL, snapshot/replay/live, Bridge 재시작 뒤 복구 |
+| 입력 보호 | Herdr binding 검증, durable command receipt, 같은 command 재전송 방지 |
+| 모바일 UI | 상태별 session 목록, Chat, light/dark theme, code 복사, 특수 키가 있는 Terminal, PWA. 실기기 keyboard와 설치형 PWA는 미검증 |
+| Tailnet | Serve 경유 소유자 phone에서 Chat·prompt·Terminal 확인. 화면 잠금·네트워크 전환 뒤 reconnect와 다른 사용자 거부의 실측은 미검증 |
+| Codex | 미지원. native transcript 구조만 조사했다 |
+| Tool card·Changed Files·attachment·notification | 미구현 |
 
 Claude의 localhost handoff와 Bridge 재시작 복구는 실제 process에서 검증했다.
-실기기·process 교체 등 아직 확인하지 않은 scenario는 [Backlog](docs/backlog.md)에 구분했다.
+미검증 scenario와 우선순위는 [Backlog](docs/backlog.md)에 있다.
 
 ## 기술 스택
 
@@ -48,20 +67,24 @@ binary를 설치하면 조건부 입력이 비활성화되며 Bridge는 입력�
 
 ## 빠른 시작
 
-먼저 localhost에서 동작을 확인한다. 저장소 root에서 실행한다.
+먼저 localhost에서 동작을 확인한다.
 
-```sh
-mise install
-mise exec -- pnpm --dir web install --frozen-lockfile
-mise exec -- pnpm --dir web build
+1. patched Herdr를 준비한다. [Herdr patch runbook](docs/herdr-patch.md)의 §3–5(build, stock
+   binary 백업·설치, live handoff)를 따른다. 실행 중인 Herdr server를 종료하지 않는다.
+2. 저장소 root에서 client를 build하고 `doctor`로 확인한 뒤 Bridge를 실행한다.
 
-export HERDR_SOCKET_PATH="$(herdr status server | sed -n 's/^socket: *//p')"
-test -S "$HERDR_SOCKET_PATH"
-mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
-mise exec -- go run ./cmd/bridge -herdr-socket "$HERDR_SOCKET_PATH"
-```
+   ```sh
+   mise install
+   mise exec -- pnpm --dir web install --frozen-lockfile
+   mise exec -- pnpm --dir web build
 
-같은 machine의 브라우저에서 [http://127.0.0.1:8787](http://127.0.0.1:8787)로 접속한다.
+   export HERDR_SOCKET_PATH="$(herdr status server | sed -n 's/^socket: *//p')"
+   test -S "$HERDR_SOCKET_PATH"
+   mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
+   mise exec -- go run ./cmd/bridge -herdr-socket "$HERDR_SOCKET_PATH"
+   ```
+
+3. 같은 machine의 브라우저에서 [http://127.0.0.1:8787](http://127.0.0.1:8787)로 접속한다.
 
 `doctor`는 read-only이며 transcript 원문이나 binding token을 출력하지 않는다. 종료 코드 0은
 조회 성공이고, 모든 handoff acceptance의 완료를 의미하지 않는다. `blockers`가 비어 있는지,
@@ -89,19 +112,14 @@ Bridge는 항상 loopback에만 bind하고, Serve가 tailnet HTTPS 요청을 Bri
    정하고, host와 login이 모두 확정된 경우에만 `https://<tailnet-host>`를 Origin allowlist에
    추가한다. 시작 log에 확정된 host·login과 그 출처가 남는다. Tailscale 상태를 바꾼 뒤에는
    Bridge를 재시작해야 반영된다.
-4. `doctor`를 다시 실행해 `tailnet.issues`가 비어 있는지 확인한다. Bridge `-listen`이
-   `127.0.0.1:8787`이 아니면 같은 주소를 `-bridge-listen`으로 넘긴다. 그렇지 않으면
-   `serve_proxy`가 거짓 음성이 된다. CLI 경로는 Bridge와 같이 `-tailscale-bin`으로 명시할 수
-   있다. `tailnet` section은
-   `cli_available`, `backend_state`, `host`, `login`, `https_certificates`, `serve_proxy`, `funnel`, `tcp_forward`를
-   보여 주며, 문제가 있으면 `issues`에 조치 방법을 적는다. `serve_proxy`는 Serve가
-   `<tailnet-host>:443`을 Bridge listen 주소로 proxy하는지 나타내며 `--bg` 설정만 인정한다.
-   `funnel`은 모든 port와 `--bg` 없이 실행한 foreground 설정까지 확인하고, 켜져 있으면
-   top-level blocker다. `tcp_forward`는 Bridge 주소를 향한 `--tcp`/`--tls-terminated-tcp` forward를
-   foreground까지 확인한다. 이 forward는 identity header 없이 Bridge에 닿아 소유자 검증을 우회하므로
-   있으면 blocker다.
-5. 소유자 계정으로 로그인한 mobile device에서 `https://<tailnet-host>`에 접속한다.
-   이 end-to-end 경로는 아직 실기기에서 검증하지 않았다(P0-02).
+4. `doctor`를 다시 실행해 `tailnet.issues`가 비어 있는지 확인한다. `issues`는 문제마다 조치
+   방법을 적는다. Bridge `-listen`이 `127.0.0.1:8787`이 아니면 같은 주소를 `-bridge-listen`으로
+   넘긴다. 그렇지 않으면 Serve proxy 확인(`serve_proxy`)이 거짓 음성이 된다. CLI 경로는 Bridge와
+   같이 `-tailscale-bin`으로 명시할 수 있다. Funnel이 켜져 있거나, identity header 없이 Bridge에
+   닿는 Serve TCP forward(`--tcp`/`--tls-terminated-tcp`)가 있으면 top-level blocker다. 둘 다
+   `--bg` 없이 실행한 foreground 설정까지 확인한다.
+5. 소유자 계정으로 로그인한 mobile device에서 `https://<tailnet-host>`에 접속한다. 화면 잠금·
+   네트워크 전환 뒤 WebSocket reconnect는 아직 실기기에서 검증하지 않았다.
 
 Tailscale CLI가 없거나 실패하거나 Tailscale이 실행 중이 아니면 Bridge는 종료하지 않고
 localhost 전용으로 동작한다. 단, `-tailnet-host`를 명시했는데 `auto` login만 확정하지 못했다면
@@ -116,17 +134,17 @@ Bridge는 Serve가 검증해 추가한 `Tailscale-User-Login`을 소유자 login
 검사한다. Serve는 client의 `Host`를 그대로 넘기므로 Bridge는 `X-Forwarded-*`나
 `Tailscale-User-*` header가 있는 요청을 `Host`와 무관하게 tailnet 요청으로 보고, tailnet host와
 소유자 login이 확정되지 않았으면 거부한다. 그래서 Serve 외의 local reverse proxy를 앞에 두는
-구성은 지원하지 않는다. 모든 응답은 frame 삽입을 금지한다. 자체 password/OAuth/JWT는 없다. network 경계도 좁히도록 tailnet ACL/grant로 Bridge
-host의 HTTPS 접근을 필요한 device로 제한한다. [Serve identity 동작](https://tailscale.com/docs/features/tailscale-serve)과
+구성은 지원하지 않는다. 모든 응답은 frame 삽입을 금지한다. 자체 password/OAuth/JWT는 없다.
+network 경계도 좁히도록 tailnet ACL/grant로 Bridge host의 HTTPS 접근을 필요한 device로 제한한다. [Serve identity 동작](https://tailscale.com/docs/features/tailscale-serve)과
 [Tailscale 접근 정책](https://tailscale.com/docs/features/access-control/acls)을 참고한다.
 
 ## Bridge 설정
 
 | Flag | 기본값·역할 |
 | --- | --- |
-| `-herdr-socket` | 사용자 기본 Herdr socket. 다른 named session은 명시적으로 지정 |
-| `-claude-dir` | 사용자 Claude native data directory |
-| `-receipts-dir` | 사용자 state directory의 durable command receipts |
+| `-herdr-socket` | `$HOME/.config/herdr/herdr.sock`. 다른 named session은 명시적으로 지정 |
+| `-claude-dir` | `$HOME/.claude`. Claude native transcript root |
+| `-receipts-dir` | `$HOME/.local/state/herdr-remote/receipts`. durable command receipts |
 | `-listen` | `127.0.0.1:8787`. loopback만 허용 |
 | `-static` | `web/dist`. 시작 시 `index.html` 존재 확인 |
 | `-origins` | `http://127.0.0.1:8787`. comma-separated exact Origin 목록. 지정하면 기본값을 대체하므로 localhost 접속이 필요하면 `http://127.0.0.1:8787`도 직접 포함한다. Tailnet Origin은 host와 login이 모두 확정되면 자동 추가된다 |
