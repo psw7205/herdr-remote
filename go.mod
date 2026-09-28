@@ -1,4 +1,4 @@
-module herdr-remote
+module github.com/psw7205/herdr-remote
 
 go 1.25.0
 
