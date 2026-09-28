@@ -11,10 +11,12 @@ import (
 	"herdr-remote/internal/session"
 	"herdr-remote/internal/stream"
 	"io"
+	"io/fs"
 	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -40,7 +42,7 @@ type Server struct {
 func New(registry Sessions, receipts *command.Store, origins []string, staticDir string) *Server {
 	var files http.Handler
 	if staticDir != "" {
-		files = http.FileServer(http.Dir(staticDir))
+		files = http.FileServer(noListingFS{http.Dir(staticDir)})
 	}
 	return &Server{registry: registry, receipts: receipts, origins: origins, static: files}
 }
@@ -63,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 		s.static.ServeHTTP(w, r)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setSecurityHeaders(w.Header())
 		localHost := strings.HasPrefix(r.Host, "127.0.0.1:") || strings.HasPrefix(r.Host, "localhost:") || strings.HasPrefix(r.Host, "[::1]:")
 		remoteHost := s.tailnetHost != "" && (r.Host == s.tailnetHost || r.Host == s.tailnetHost+":443")
 		if !localHost && !remoteHost {
@@ -98,6 +101,36 @@ func proxied(r *http.Request) bool {
 		}
 	}
 	return false
+}
+func setSecurityHeaders(h http.Header) {
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+}
+
+// noListingFS hides directories without index.html so http.FileServer returns
+// 404 instead of a directory listing.
+type noListingFS struct{ http.FileSystem }
+
+func (f noListingFS) Open(name string) (http.File, error) {
+	file, err := f.FileSystem.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		index, err := f.FileSystem.Open(path.Join(name, "index.html"))
+		if err != nil {
+			file.Close()
+			return nil, fs.ErrNotExist
+		}
+		index.Close()
+	}
+	return file, nil
 }
 func jsonResponse(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
