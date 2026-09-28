@@ -4,15 +4,54 @@
 
 각 ADR의 상태는 해당 ADR의 `Status`를 따른다. 결정을 조합한 전체 구조는 [architecture.md](architecture.md)에 있다.
 
+| ID | 제목 | Status |
+| --- | --- | --- |
+| [ADR-001](#adr-001--herdr를-runtime-owner로-유지한다) | ADR-001 — Herdr를 Runtime Owner로 유지한다 | Accepted |
+| [ADR-002](#adr-002--chat은-새로운-conversation이-아니라-projection이다) | ADR-002 — Chat은 새로운 Conversation이 아니라 Projection이다 | Accepted |
+| [ADR-003](#adr-003--native-agent-session-id를-conversation-identity로-사용한다) | ADR-003 — Native Agent Session ID를 Conversation Identity로 사용한다 | Accepted |
+| [ADR-004](#adr-004--read-path와-write-path를-분리한다) | ADR-004 — Read Path와 Write Path를 분리한다 | Accepted |
+| [ADR-005](#adr-005--pty를-interactive-truth로-유지한다) | ADR-005 — PTY를 Interactive Truth로 유지한다 | Accepted |
+| [ADR-006](#adr-006--agent-adapter-boundary를-둔다) | ADR-006 — Agent Adapter Boundary를 둔다 | Accepted |
+| [ADR-007](#adr-007--unified-event-protocol을-client-contract로-사용한다) | ADR-007 — Unified Event Protocol을 Client Contract로 사용한다 | Accepted |
+| [ADR-008](#adr-008--snapshot--live-event-모델을-사용한다) | ADR-008 — Snapshot + Live Event 모델을 사용한다 | Accepted |
+| [ADR-009](#adr-009--websocket은-transport일-뿐-session이-아니다) | ADR-009 — WebSocket은 Transport일 뿐 Session이 아니다 | Accepted |
+| [ADR-010](#adr-010--bridge는-single-process-control-plane으로-시작한다) | ADR-010 — Bridge는 Single Process Control Plane으로 시작한다 | Accepted |
+| [ADR-011](#adr-011--client는-thin-client로-유지한다) | ADR-011 — Client는 Thin Client로 유지한다 | Accepted |
+| [ADR-012](#adr-012--webpwa를-첫-client로-사용한다) | ADR-012 — Web/PWA를 첫 Client로 사용한다 | Accepted |
+| [ADR-013](#adr-013--terminal은-chat과-동일-session의-secondary-view다) | ADR-013 — Terminal은 Chat과 동일 Session의 Secondary View다 | Accepted |
+| [ADR-014](#adr-014--file-editing은-제공하지-않고-review까지만-지원한다) | ADR-014 — File Editing은 제공하지 않고 Review까지만 지원한다 | Accepted |
+| [ADR-015](#adr-015--attachment는-host-file로-변환한-뒤-existing-agent에-전달한다) | ADR-015 — Attachment는 Host File로 변환한 뒤 Existing Agent에 전달한다 | Proposed |
+| [ADR-016](#adr-016--changed-files는-git을-read-only-source로-사용한다) | ADR-016 — Changed Files는 Git을 Read-only Source로 사용한다 | Proposed |
+| [ADR-017](#adr-017--push-notification은-derived-event로-취급한다) | ADR-017 — Push Notification은 Derived Event로 취급한다 | Proposed |
+| [ADR-018](#adr-018--attention-state는-domain-level-derived-state로-관리한다) | ADR-018 — Attention State는 Domain-level Derived State로 관리한다 | Accepted |
+| [ADR-019](#adr-019--local-event-buffer는-제한적으로-유지한다) | ADR-019 — Local Event Buffer는 제한적으로 유지한다 | Accepted |
+| [ADR-020](#adr-020--transcript-watcher는-incremental-parsing을-사용한다) | ADR-020 — Transcript Watcher는 Incremental Parsing을 사용한다 | Accepted |
+| [ADR-021](#adr-021--full-transcript는-필요할-때-snapshot으로-재구성한다) | ADR-021 — Full Transcript는 필요할 때 Snapshot으로 재구성한다 | Accepted |
+| [ADR-022](#adr-022--structured-actions에는-capability-negotiation을-사용한다) | ADR-022 — Structured Actions에는 Capability Negotiation을 사용한다 | Accepted |
+| [ADR-023](#adr-023--interrupt는-prompt와-별도-command로-모델링한다) | ADR-023 — Interrupt는 Prompt와 별도 Command로 모델링한다 | Accepted |
+| [ADR-024](#adr-024--tailnet을-primary-security-boundary로-사용한다) | ADR-024 — Tailnet을 Primary Security Boundary로 사용한다 | Accepted |
+| [ADR-025](#adr-025--host는-mvp에서-하나만-지원한다) | ADR-025 — Host는 MVP에서 하나만 지원한다 | Accepted |
+| [ADR-026](#adr-026--bridge-api는-ui-프레임워크에-독립적이어야-한다) | ADR-026 — Bridge API는 UI 프레임워크에 독립적이어야 한다 | Accepted |
+| [ADR-027](#adr-027--resthttp--websocket-hybrid-transport를-사용한다) | ADR-027 — REST/HTTP + WebSocket Hybrid Transport를 사용한다 | Accepted |
+| [ADR-028](#adr-028--terminal-stream과-semantic-event-stream을-논리적으로-분리한다) | ADR-028 — Terminal Stream과 Semantic Event Stream을 논리적으로 분리한다 | Accepted |
+| [ADR-029](#adr-029--server-restart를-agent-session-failure로-취급하지-않는다) | ADR-029 — Server Restart를 Agent Session Failure로 취급하지 않는다 | Accepted |
+| [ADR-030](#adr-030--graceful-degradation을-핵심-compatibility-strategy로-사용한다) | ADR-030 — Graceful Degradation을 핵심 Compatibility Strategy로 사용한다 | Accepted |
+| [ADR-031](#adr-031--mvp-구현-순서는-vertical-slice를-따른다) | ADR-031 — MVP 구현 순서는 Vertical Slice를 따른다 | Accepted |
+| [ADR-032](#adr-032--mvp-완료-기준은-architecture가-아니라-실제-handoff-flow다) | ADR-032 — MVP 완료 기준은 Architecture가 아니라 실제 Handoff Flow다 | Accepted |
+| [ADR-033](#adr-033--command-receipt로-retry-중복-실행을-방지한다) | ADR-033 — Command receipt로 retry 중복 실행을 방지한다 | Accepted |
+| [ADR-034](#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다) | ADR-034 — Herdr가 runtime binding을 검증한 command만 전달한다 | Accepted |
+| [ADR-035](#adr-035--mobile-terminal은-기존-pty의-passive-mirror다) | ADR-035 — Mobile Terminal은 기존 PTY의 passive mirror다 | Accepted |
+| [ADR-036](#adr-036--herdr-patch는-소유-fork에서-유지한다) | ADR-036 — Herdr patch는 소유 fork에서 유지한다 | Accepted |
+
 ---
 
-# ADR-001 — Herdr를 Runtime Owner로 유지한다
+## ADR-001 — Herdr를 Runtime Owner로 유지한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Herdr는 이미 다음 책임을 수행한다.
 
@@ -45,7 +84,7 @@ Mobile backend
 * terminal과 mobile conversation divergence
 * agent version / config 차이
 
-## Decision
+### Decision
 
 Herdr를 유일한 agent runtime owner로 유지한다.
 
@@ -62,9 +101,9 @@ Herdr
 
 모바일에서 보내는 입력도 기존 Herdr pane을 통해 실행 중 process로 전달한다.
 
-## Consequences
+### Consequences
 
-### Positive
+#### Positive
 
 * 기존 Herdr workflow 유지
 * PC ↔ mobile seamless handoff
@@ -72,15 +111,15 @@ Herdr
 * agent config / env / cwd 일관성 유지
 * runtime 구현 중복 제거
 
-### Negative
+#### Negative
 
 * Herdr가 실행 중이지 않으면 앱이 독립적으로 agent를 실행할 수 없음
 * Herdr API capability에 일부 기능이 종속됨
 * 모바일에서 완전 독립적인 agent lifecycle을 제공할 수 없음
 
-## Rejected Alternatives
+### Rejected Alternatives
 
-### 자체 agent runner
+#### 자체 agent runner
 
 Mobile backend가 Claude/Codex를 직접 실행한다.
 
@@ -88,7 +127,7 @@ Mobile backend가 Claude/Codex를 직접 실행한다.
 
 Herdr와 책임이 중복된다.
 
-### Herdr session을 모바일 접속 시 resume
+#### Herdr session을 모바일 접속 시 resume
 
 모바일에서 기존 native session ID를 이용해 새로운 process를 생성한다.
 
@@ -98,13 +137,13 @@ Herdr와 책임이 중복된다.
 
 ---
 
-# ADR-002 — Chat은 새로운 Conversation이 아니라 Projection이다
+## ADR-002 — Chat은 새로운 Conversation이 아니라 Projection이다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 실행 중인 Claude/Codex는 이미 자체 conversation state와 transcript를 가지고 있다.
 
@@ -120,7 +159,7 @@ Mobile Conversation DB
 
 두 데이터를 완벽하게 동기화하기 어렵다.
 
-## Decision
+### Decision
 
 Mobile Chat은 기존 native agent session의 **projection/read model**로 정의한다.
 
@@ -141,7 +180,7 @@ Chat View
 
 Mobile backend는 conversation 자체를 소유하지 않는다.
 
-## Source of Truth
+### Source of Truth
 
 | Data                   | Source                  |
 | ---------------------- | ----------------------- |
@@ -152,16 +191,16 @@ Mobile backend는 conversation 자체를 소유하지 않는다.
 | Mobile unread state    | Mobile backend (미구현) |
 | Client preferences     | Mobile backend (미구현) |
 
-## Consequences
+### Consequences
 
-### Positive
+#### Positive
 
 * PC와 모바일 history가 자연스럽게 동일
 * duplicate persistence 제거
 * mobile backend 장애가 conversation 유실로 이어지지 않음
 * transcript migration 불필요
 
-### Negative
+#### Negative
 
 * agent transcript format에 의존
 * transcript format 변경에 adapter 유지보수 필요
@@ -169,13 +208,13 @@ Mobile backend는 conversation 자체를 소유하지 않는다.
 
 ---
 
-# ADR-003 — Native Agent Session ID를 Conversation Identity로 사용한다
+## ADR-003 — Native Agent Session ID를 Conversation Identity로 사용한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Transcript를 찾는 방법으로 다음 후보가 있다.
 
@@ -188,7 +227,7 @@ Transcript를 찾는 방법으로 다음 후보가 있다.
 
 cwd 기반 추측은 여러 session이 같은 repository에서 실행되는 경우 잘못된 transcript를 선택할 수 있다.
 
-## Decision
+### Decision
 
 가능한 경우 native agent session ID를 conversation의 canonical identity로 사용한다.
 
@@ -210,7 +249,7 @@ agent_session_id
 
 Herdr pane identity는 runtime target을 찾는 데 사용한다.
 
-## Fallback
+### Fallback
 
 native session ID가 없는 agent에 대해서만 제한적으로 fallback discovery를 허용한다.
 
@@ -239,19 +278,19 @@ Open Terminal
 
 을 제공한다.
 
-## Consequences
+### Consequences
 
 잘못된 transcript를 다른 pane에 연결하는 위험을 최소화한다.
 
 ---
 
-# ADR-004 — Read Path와 Write Path를 분리한다
+## ADR-004 — Read Path와 Write Path를 분리한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Chat UI를 만들기 위해서는 두 가지 별도 문제가 있다.
 
@@ -262,11 +301,11 @@ Transcript는 읽기에 적합하지만 직접 수정해서는 안 된다.
 
 PTY는 쓰기에 적합하지만 terminal output을 conversation source로 사용하기에는 불안정하다.
 
-## Decision
+### Decision
 
 다음 구조를 사용한다.
 
-### Read path
+#### Read path
 
 ```text
 Native Transcript
@@ -278,7 +317,7 @@ Normalized Events
 Chat
 ```
 
-### Write path
+#### Write path
 
 ```text
 Chat Composer
@@ -294,7 +333,7 @@ Agent
 
 이를 **read-rich / write-raw** 모델로 정의한다.
 
-## Explicit Rule
+### Explicit Rule
 
 Transcript에는 절대 사용자 입력을 직접 append하지 않는다.
 
@@ -302,13 +341,13 @@ Transcript에는 절대 사용자 입력을 직접 append하지 않는다.
 
 ---
 
-# ADR-005 — PTY를 Interactive Truth로 유지한다
+## ADR-005 — PTY를 Interactive Truth로 유지한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Claude Code와 Codex CLI는 일반 메시지만 출력하지 않는다.
 
@@ -325,7 +364,7 @@ Claude Code와 Codex CLI는 일반 메시지만 출력하지 않는다.
 
 Transcript가 이러한 상태를 항상 완전히 표현한다고 보장할 수 없다.
 
-## Decision
+### Decision
 
 현재 interaction state에 대한 최종 source of truth는 PTY다.
 
@@ -339,7 +378,7 @@ PTY
 
 Chat UI가 interaction을 안전하게 표현할 수 없으면 Terminal View로 fallback한다.
 
-## Rule
+### Rule
 
 불확실한 terminal output을 regex로 분석하여 임의의 structured action으로 만들지 않는다.
 
@@ -354,19 +393,19 @@ Choose option
 
 등 실제 side effect를 발생시키는 interaction은 확실한 structured source가 있을 때만 native UI로 제공한다.
 
-## Consequences
+### Consequences
 
 일부 interaction에서 Terminal로 이동해야 하지만 잘못된 command 입력보다 안전하고 유지보수성이 높다.
 
 ---
 
-# ADR-006 — Agent Adapter Boundary를 둔다
+## ADR-006 — Agent Adapter Boundary를 둔다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Claude Code와 Codex는 transcript 구조, session 위치, tool representation 등이 서로 다르다.
 
@@ -380,7 +419,7 @@ Web UI
 
 형태로 coupling이 발생한다.
 
-## Decision
+### Decision
 
 agent별 차이는 server-side Adapter로 격리한다.
 
@@ -408,21 +447,21 @@ CodexAdapter
 현재 구현은 Claude adapter(`internal/claude`)뿐이다. `CodexAdapter`는 후속 작업이다
 (backlog P1-01/02).
 
-## Adapter Responsibilities
+### Adapter Responsibilities
 
-### Session resolution
+#### Session resolution
 
 Herdr native session identity에서 실제 transcript를 찾는다.
 
-### Transcript decoding
+#### Transcript decoding
 
 agent-specific record를 읽는다.
 
-### Normalization
+#### Normalization
 
 공통 event model로 변환한다.
 
-### Capabilities
+#### Capabilities
 
 해당 agent/version이 제공할 수 있는 기능을 노출한다.
 
@@ -437,7 +476,7 @@ interrupt
 attachments
 ```
 
-## Non-Responsibility
+### Non-Responsibility
 
 Adapter가:
 
@@ -449,19 +488,19 @@ Adapter가:
 
 ---
 
-# ADR-007 — Unified Event Protocol을 Client Contract로 사용한다
+## ADR-007 — Unified Event Protocol을 Client Contract로 사용한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Client가 Claude/Codex native transcript schema에 의존하면 agent update가 UI까지 전파된다.
 
 또 reconnect, replay, notification 처리를 위해 일관된 event identity가 필요하다.
 
-## Decision
+### Decision
 
 Bridge와 Client 사이에는 normalized domain event protocol을 둔다.
 
@@ -520,7 +559,7 @@ file.changed
 session.completed
 ```
 
-## Event Envelope
+### Event Envelope
 
 모든 event에는 개념적으로 다음 metadata가 존재한다.
 
@@ -534,21 +573,21 @@ payload
 source
 ```
 
-## Requirements
+### Requirements
 
-### Stable ordering
+#### Stable ordering
 
 하나의 session 내에서 deterministic ordering을 제공해야 한다.
 
-### Idempotency
+#### Idempotency
 
 같은 event가 재전송되더라도 Client가 중복 rendering하지 않아야 한다.
 
-### Extensibility
+#### Extensibility
 
 Client는 알 수 없는 event type을 무시할 수 있어야 한다.
 
-### Versioning
+#### Versioning
 
 protocol version을 독립적으로 관리할 수 있어야 한다.
 
@@ -560,19 +599,19 @@ protocol_version: 1
 
 ---
 
-# ADR-008 — Snapshot + Live Event 모델을 사용한다
+## ADR-008 — Snapshot + Live Event 모델을 사용한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 모바일 client가 접속할 때 모든 과거 event를 처음부터 replay할 필요는 없다.
 
 반대로 live event만 보내면 reconnect 후 누락 데이터를 복구하기 어렵다.
 
-## Decision
+### Decision
 
 Client sync는 두 단계로 구성한다.
 
@@ -581,7 +620,7 @@ Client sync는 두 단계로 구성한다.
 2. Live Events
 ```
 
-### Initial connection
+#### Initial connection
 
 ```text
 Client
@@ -595,7 +634,7 @@ Current cursor
 WebSocket subscribe
 ```
 
-### Reconnect
+#### Reconnect
 
 ```text
 Client
@@ -617,19 +656,19 @@ Bridge restart, transcript identity replacement, 복구 불가능한 resync, `en
 다른 epoch, 미래 sequence, buffer miss는 fresh snapshot으로 복구한다.
 이 결정은 Accepted ADR-019의 bounded buffer를 사용한다.
 
-## Why
+### Why
 
 모든 상태를 event sourcing으로 만들 필요 없이 reconnect 안정성을 확보할 수 있다.
 
 ---
 
-# ADR-009 — WebSocket은 Transport일 뿐 Session이 아니다
+## ADR-009 — WebSocket은 Transport일 뿐 Session이 아니다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 모바일 browser에서는 다음 일이 일반적이다.
 
@@ -641,7 +680,7 @@ Accepted
 
 따라서 WebSocket connection은 자주 종료된다.
 
-## Decision
+### Decision
 
 WebSocket lifetime과 agent session lifetime을 완전히 분리한다.
 
@@ -667,7 +706,7 @@ WebSocket disconnect는:
 
 를 발생시키지 않는다.
 
-## Client Behavior
+### Client Behavior
 
 disconnect 시 UI는:
 
@@ -682,13 +721,13 @@ Agent continues running
 
 ---
 
-# ADR-010 — Bridge는 Single Process Control Plane으로 시작한다
+## ADR-010 — Bridge는 Single Process Control Plane으로 시작한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 초기 제품은:
 
@@ -700,7 +739,7 @@ Accepted
 
 Redis, message broker, distributed worker 등의 infrastructure는 필요하지 않다.
 
-## Decision
+### Decision
 
 초기 Bridge는 하나의 long-running server process로 구성한다.
 
@@ -724,7 +763,7 @@ Bridge
 `AttachmentService`와 `NotificationService`는 ADR-015/017(Proposed)에 따른 후속 component이며
 현재 구현되지 않았다.
 
-## Persistence
+### Persistence
 
 최소 persistence만 사용한다.
 
@@ -744,7 +783,7 @@ MVP에서 별도의 외부 DB server는 도입하지 않는다.
 
 필요한 경우 embedded persistence를 우선한다.
 
-## Rejected Alternative
+### Rejected Alternative
 
 ```text
 API server
@@ -761,17 +800,17 @@ event bus
 
 ---
 
-# ADR-011 — Client는 Thin Client로 유지한다
+## ADR-011 — Client는 Thin Client로 유지한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Agent별 parsing logic이나 Herdr-specific logic이 browser에 들어가면 향후 native client를 추가할 때 동일 코드를 다시 구현해야 한다.
 
-## Decision
+### Decision
 
 Client는 normalized API만 사용한다.
 
@@ -797,7 +836,7 @@ agent process lookup
 transcript parsing
 ```
 
-## Consequence
+### Consequence
 
 나중에:
 
@@ -812,13 +851,13 @@ client를 추가하더라도 같은 Bridge contract를 사용할 수 있다.
 
 ---
 
-# ADR-012 — Web/PWA를 첫 Client로 사용한다
+## ADR-012 — Web/PWA를 첫 Client로 사용한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 후보:
 
@@ -837,13 +876,13 @@ Accepted
 * 빠른 iteration 중요
 * native distribution 불필요
 
-## Decision
+### Decision
 
 MVP client는 mobile-first Web/PWA로 구현한다.
 
 웹사이트가 아니라 installable application처럼 설계한다.
 
-## Requirements
+### Requirements
 
 * standalone PWA
 * mobile-first viewport
@@ -854,7 +893,7 @@ MVP client는 mobile-first Web/PWA로 구현한다.
 * reconnect
 * Web Push 가능한 범위에서 지원 (ADR-017 Proposed)
 
-## Exit Criteria
+### Exit Criteria
 
 다음 문제가 실제 사용에서 핵심 장애가 될 경우 native client를 검토한다.
 
@@ -869,17 +908,17 @@ Bridge/API는 native migration과 독립적이어야 한다.
 
 ---
 
-# ADR-013 — Terminal은 Chat과 동일 Session의 Secondary View다
+## ADR-013 — Terminal은 Chat과 동일 Session의 Secondary View다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Terminal을 별도 화면이나 별도 connection 대상으로 취급하면 사용자가 같은 session인지 혼동할 수 있다.
 
-## Decision
+### Decision
 
 Session detail은 다음 구조를 가진다.
 
@@ -898,7 +937,7 @@ Terminal만 제공하며(`web/src/route.ts`) `view=changes` URL은 Chat으로 �
 
 Terminal은 별도의 workspace/session을 생성하지 않는다.
 
-## UX Principle
+### UX Principle
 
 기본 진입:
 
@@ -918,19 +957,19 @@ CTA를 제공한다.
 
 ---
 
-# ADR-014 — File Editing은 제공하지 않고 Review까지만 지원한다
+## ADR-014 — File Editing은 제공하지 않고 Review까지만 지원한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 agent 작업 결과를 모바일에서 확인할 필요는 있다.
 
 그러나 editor까지 추가하면 제품이 빠르게 mobile IDE가 된다.
 
-## Decision
+### Decision
 
 Review·attachment 기능을 제공한다면 범위는 다음으로 제한한다. 이 기능들은
 ADR-015/016(Proposed)에 따르며 현재 어느 것도 구현되지 않았다.
@@ -952,21 +991,21 @@ merge conflict resolution
 repository browser IDE
 ```
 
-## Reason
+### Reason
 
 제품 목적은 coding agent와의 interaction이지 mobile coding environment가 아니다.
 
 ---
 
-# ADR-015 — Attachment는 Host File로 변환한 뒤 Existing Agent에 전달한다
+## ADR-015 — Attachment는 Host File로 변환한 뒤 Existing Agent에 전달한다
 
-## Status
+### Status
 
 Proposed
 
 후속 optional capability. 첫 slice 및 핵심 MVP의 필수 전제가 아니다.
 
-## Context
+### Context
 
 모바일에서는 다음을 보내고 싶을 수 있다.
 
@@ -978,7 +1017,7 @@ Proposed
 
 하지만 이미 실행 중인 CLI agent에게 browser file object를 직접 전달할 방법은 없다.
 
-## Decision
+### Decision
 
 attachment는 Bridge host에 먼저 저장한다.
 
@@ -1008,7 +1047,7 @@ Please inspect this file:
 
 Agent가 native image/file interaction을 지원한다면 adapter가 더 적합한 입력 방식으로 변환할 수 있다.
 
-## Security
+### Security
 
 attachment path는:
 
@@ -1019,25 +1058,25 @@ attachment path는:
 
 를 적용한다.
 
-## Lifecycle
+### Lifecycle
 
 MVP에서는 temporary attachment로 취급하며 retention 정책은 추후 확정한다.
 
 ---
 
-# ADR-016 — Changed Files는 Git을 Read-only Source로 사용한다
+## ADR-016 — Changed Files는 Git을 Read-only Source로 사용한다
 
-## Status
+### Status
 
 Proposed
 
 후속 optional capability. 첫 slice 및 핵심 MVP의 필수 전제가 아니다.
 
-## Context
+### Context
 
 Conversation transcript만으로는 agent가 실제 어떤 파일을 수정했는지 정확하게 알기 어렵다.
 
-## Decision
+### Decision
 
 Changes View는 repository Git state를 직접 읽는다.
 
@@ -1053,7 +1092,7 @@ line additions/deletions
 
 Agent transcript의 tool event에서 변경 파일을 추론하지 않는다.
 
-## Important Boundary
+### Important Boundary
 
 Git state 전체가 특정 agent 작업만을 의미한다고 가정하지 않는다.
 
@@ -1077,21 +1116,21 @@ Herdr가 agent별 worktree isolation을 보장하는 경우 추후 더 정확한
 
 ---
 
-# ADR-017 — Push Notification은 Derived Event로 취급한다
+## ADR-017 — Push Notification은 Derived Event로 취급한다
 
-## Status
+### Status
 
 Proposed
 
 후속 optional capability. 첫 slice 및 핵심 MVP의 필수 전제가 아니다.
 
-## Context
+### Context
 
 notification 자체가 session state의 source가 되어서는 안 된다.
 
 notification delivery는 실패할 수 있다.
 
-## Decision
+### Decision
 
 notification은 normalized event에서 파생한다.
 
@@ -1114,25 +1153,25 @@ Web Push
 
 notification을 탭하면 해당 `session_id`로 deep-link한다.
 
-## Rule
+### Rule
 
 notification을 받지 못하더라도 앱을 열면 모든 상태를 정상 복구할 수 있어야 한다.
 
 ---
 
-# ADR-018 — Attention State는 Domain-level Derived State로 관리한다
+## ADR-018 — Attention State는 Domain-level Derived State로 관리한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Herdr state와 transcript event를 그대로 UI에 노출하면 사용자는 여러 기술적 상태를 해석해야 한다.
 
 모바일에서는 "내가 지금 해야 할 일이 있는가?"가 더 중요하다.
 
-## Decision
+### Decision
 
 Bridge에서 presentation-oriented status를 계산한다.
 
@@ -1154,7 +1193,7 @@ recent normalized events
 adapter capabilities
 ```
 
-## Priority
+### Priority
 
 ```text
 error
@@ -1166,25 +1205,25 @@ idle
 
 정확한 priority는 실제 사용 후 조정 가능하다.
 
-## Constraint
+### Constraint
 
 불확실한 terminal text parsing만으로 `needs_attention`을 발생시키지 않는다.
 
 ---
 
-# ADR-019 — Local Event Buffer는 제한적으로 유지한다
+## ADR-019 — Local Event Buffer는 제한적으로 유지한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 reconnect replay를 위해 최근 event를 보존할 필요가 있다.
 
 하지만 전체 conversation을 새로운 event-store DB에 복제하고 싶지는 않다.
 
-## Decision
+### Decision
 
 Bridge는 bounded event buffer를 유지한다.
 
@@ -1222,25 +1261,25 @@ cursor expired
 new snapshot
 ```
 
-## Consequence
+### Consequence
 
 event sourcing infrastructure 없이 reconnect를 구현할 수 있다.
 
 ---
 
-# ADR-020 — Transcript Watcher는 Incremental Parsing을 사용한다
+## ADR-020 — Transcript Watcher는 Incremental Parsing을 사용한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Agent transcript가 커질 경우 매 polling마다 전체 파일을 재parse하는 것은 비효율적이다.
 
 또 agent가 파일에 데이터를 append하는 중 partial record를 읽을 수 있다.
 
-## Decision
+### Decision
 
 각 active transcript에 대해 incremental cursor를 유지한다.
 
@@ -1264,7 +1303,7 @@ Watcher는:
 
 을 수행한다.
 
-## File Replacement
+### File Replacement
 
 agent가 transcript rotate/rewrite를 할 가능성을 고려한다.
 
@@ -1272,17 +1311,17 @@ file identity가 바뀌면 adapter가 재동기화한다.
 
 ---
 
-# ADR-021 — Full Transcript는 필요할 때 Snapshot으로 재구성한다
+## ADR-021 — Full Transcript는 필요할 때 Snapshot으로 재구성한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Bridge가 모든 conversation을 별도 DB에 복제하지 않기 때문에 initial load를 처리하는 방식이 필요하다.
 
-## Decision
+### Decision
 
 Session 진입 시 adapter가 native transcript에서 현재 conversation snapshot을 생성한다.
 
@@ -1298,7 +1337,7 @@ snapshot
 
 이후 live update는 incremental watcher를 사용한다.
 
-## Optimization
+### Optimization
 
 실제 성능 문제가 확인될 때만:
 
@@ -1312,19 +1351,19 @@ snapshot
 
 ---
 
-# ADR-022 — Structured Actions에는 Capability Negotiation을 사용한다
+## ADR-022 — Structured Actions에는 Capability Negotiation을 사용한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Claude와 Codex의 version에 따라 structured permission/question event 지원 수준이 다를 수 있다.
 
 UI가 항상 기능이 있다고 가정해서는 안 된다.
 
-## Decision
+### Decision
 
 각 session은 capability 정보를 제공한다.
 
@@ -1347,23 +1386,23 @@ attachments:
 
 Client는 capability 기반으로 UI를 노출한다.
 
-## Result
+### Result
 
 새 agent/version을 추가해도 unsupported functionality를 억지로 구현할 필요가 없다.
 
 ---
 
-# ADR-023 — Interrupt는 Prompt와 별도 Command로 모델링한다
+## ADR-023 — Interrupt는 Prompt와 별도 Command로 모델링한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 `Ctrl-C` 문자열을 일반 prompt와 동일하게 취급하면 semantic 의미가 사라진다.
 
-## Decision
+### Decision
 
 Bridge API에는 명시적인 interrupt command가 존재한다.
 
@@ -1386,19 +1425,19 @@ Stop
 
 ---
 
-# ADR-024 — Tailnet을 Primary Security Boundary로 사용한다
+## ADR-024 — Tailnet을 Primary Security Boundary로 사용한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 MVP는 개인이 자신의 Herdr host에 접속하는 도구다.
 
 공개 인터넷 exposure가 필요하지 않다.
 
-## Decision
+### Decision
 
 기본 topology:
 
@@ -1418,7 +1457,7 @@ Tailnet HTTPS
 
 Bridge를 `0.0.0.0`으로 직접 공개하는 구성을 기본으로 하지 않는다.
 
-## Application Authentication
+### Application Authentication
 
 MVP에서는:
 
@@ -1431,7 +1470,7 @@ MVP에서는:
 
 추가 app lock은 별도 threat model이 필요할 경우 검토한다.
 
-## Security Assumption
+### Security Assumption
 
 Tailnet membership만으로 browser control API 호출을 신뢰하지 않는다.
 보안 경계는 Tailnet + 최소 권한 ACL + exact browser Origin 검증이다.
@@ -1442,7 +1481,7 @@ localhost bind를 기본으로 하며 mutation과 WS handshake는 explicit Origi
 wildcard CORS/null Origin을 허용하지 않는다. HTTP mutation은 JSON content type을 요구하고
 Host도 명시한 배포 origin과 대조한다. README 배포 절차에 Tailscale ACL 최소 권한 구성을 포함한다.
 
-## Owner 자동 감지 기본값
+### Owner 자동 감지 기본값
 
 Status: Accepted (구현됨. 실제 mobile 검증의 남은 항목은
 [backlog P0-02](backlog.md#p0--배포와-핵심-안정성)에서 추적)
@@ -1475,13 +1514,13 @@ allowlist에 추가되며, login이 없는 동안 `-origins`로 넣은 tailnet H
 
 ---
 
-# ADR-025 — Host는 MVP에서 하나만 지원한다
+## ADR-025 — Host는 MVP에서 하나만 지원한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 multi-host를 지원하면 모든 identity에 host routing이 필요해진다.
 
@@ -1494,7 +1533,7 @@ multi-host를 지원하면 모든 identity에 host routing이 필요해진다.
 
 등이 추가된다.
 
-## Decision
+### Decision
 
 MVP deployment는:
 
@@ -1510,17 +1549,17 @@ MVP deployment는:
 
 ---
 
-# ADR-026 — Bridge API는 UI 프레임워크에 독립적이어야 한다
+## ADR-026 — Bridge API는 UI 프레임워크에 독립적이어야 한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 첫 client는 PWA지만 향후 native app 전환 가능성을 남겨야 한다.
 
-## Decision
+### Decision
 
 Bridge API에서 다음을 사용하지 않는다.
 
@@ -1553,21 +1592,21 @@ client에서도 동일 API를 사용할 수 있다.
 
 ---
 
-# ADR-027 — REST/HTTP + WebSocket Hybrid Transport를 사용한다
+## ADR-027 — REST/HTTP + WebSocket Hybrid Transport를 사용한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 모든 요청을 WebSocket RPC로 처리할 수도 있지만 snapshot, upload, diff 등은 request-response 형태가 더 자연스럽다.
 
-## Decision
+### Decision
 
 두 transport를 역할에 따라 나눈다.
 
-### HTTP
+#### HTTP
 
 사용:
 
@@ -1580,7 +1619,7 @@ attachment upload
 commands requiring request/response
 ```
 
-### WebSocket
+#### WebSocket
 
 사용:
 
@@ -1594,19 +1633,19 @@ terminal stream
 
 Terminal stream은 필요에 따라 별도 WebSocket channel을 사용할 수 있다.
 
-## Reason
+### Reason
 
 WebSocket 하나에 모든 API를 억지로 넣는 것보다 debugging과 client 구현이 단순하다.
 
 ---
 
-# ADR-028 — Terminal Stream과 Semantic Event Stream을 논리적으로 분리한다
+## ADR-028 — Terminal Stream과 Semantic Event Stream을 논리적으로 분리한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Terminal output은:
 
@@ -1623,7 +1662,7 @@ Terminal output은:
 
 특성이 다르다.
 
-## Decision
+### Decision
 
 두 stream을 별도 logical channel로 다룬다.
 
@@ -1645,19 +1684,19 @@ Terminal Channel
 
 ---
 
-# ADR-029 — Server Restart를 Agent Session Failure로 취급하지 않는다
+## ADR-029 — Server Restart를 Agent Session Failure로 취급하지 않는다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Bridge는 projection layer이므로 restart될 수 있다.
 
 Herdr와 agent는 계속 살아 있을 수 있다.
 
-## Decision
+### Decision
 
 Bridge startup 시 현재 Herdr state를 다시 discover한다.
 
@@ -1677,25 +1716,25 @@ reattach transcript watchers
 
 Bridge persistence가 없더라도 conversation을 native transcript에서 다시 구성할 수 있어야 한다.
 
-## Goal
+### Goal
 
 Bridge를 언제든 재시작할 수 있어야 한다.
 
 ---
 
-# ADR-030 — Graceful Degradation을 핵심 Compatibility Strategy로 사용한다
+## ADR-030 — Graceful Degradation을 핵심 Compatibility Strategy로 사용한다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Agent CLI는 자주 업데이트될 수 있다.
 
 Transcript format이나 interactive UI가 변경될 수 있다.
 
-## Decision
+### Decision
 
 기능 실패를 session 전체 실패로 확대하지 않는다.
 
@@ -1723,7 +1762,7 @@ terminal
 
 이 살아 있다면 session은 계속 사용할 수 있다.
 
-## Compatibility Hierarchy
+### Compatibility Hierarchy
 
 ```text
 Rich Chat
@@ -1735,21 +1774,21 @@ Terminal
 
 ---
 
-# ADR-031 — MVP 구현 순서는 Vertical Slice를 따른다
+## ADR-031 — MVP 구현 순서는 Vertical Slice를 따른다
 
-## Status
+### Status
 
 Accepted
 
-## Context
+### Context
 
 Bridge, transcript parser, UI를 각각 완성한 뒤 통합하면 실제 사용 검증이 늦어진다.
 
-## Decision
+### Decision
 
 다음 순서로 vertical slice를 구현한다.
 
-### Slice 1 — Session discovery
+#### Slice 1 — Session discovery
 
 ```text
 Herdr
@@ -1761,7 +1800,7 @@ Success:
 
 실행 중 agent를 모바일에서 정확하게 확인할 수 있다.
 
-### Slice 2 — Read-only Chat
+#### Slice 2 — Read-only Chat
 
 ```text
 Herdr session ID
@@ -1775,7 +1814,7 @@ Success:
 
 PC에서 진행한 conversation을 모바일에서 읽을 수 있다.
 
-### Slice 3 — Write
+#### Slice 3 — Write
 
 ```text
 Composer
@@ -1790,7 +1829,7 @@ Success:
 
 모바일 메시지가 기존 session에 나타난다.
 
-### Slice 4 — Live updates
+#### Slice 4 — Live updates
 
 ```text
 transcript watcher
@@ -1798,27 +1837,27 @@ transcript watcher
  → live UI
 ```
 
-### Slice 5 — Reconnect
+#### Slice 5 — Reconnect
 
 background / foreground recovery.
 
-### Slice 6 — Terminal fallback
+#### Slice 6 — Terminal fallback
 
-### Slice 7 — Changes / diff
+#### Slice 7 — Changes / diff
 
-### Slice 8 — Notifications
+#### Slice 8 — Notifications
 
 각 단계는 실제 모바일 사용이 가능한 상태로 유지한다.
 
 ---
 
-# ADR-032 — MVP 완료 기준은 Architecture가 아니라 실제 Handoff Flow다
+## ADR-032 — MVP 완료 기준은 Architecture가 아니라 실제 Handoff Flow다
 
-## Status
+### Status
 
 Accepted
 
-## Decision
+### Decision
 
 첫 vertical slice가 성공했다고 판단하려면 다음 end-to-end scenario가 동작해야 한다.
 
@@ -1872,13 +1911,13 @@ client disconnect kills process
 
 ---
 
-# ADR-033 — Command receipt로 retry 중복 실행을 방지한다
+## ADR-033 — Command receipt로 retry 중복 실행을 방지한다
 
-## Status
+### Status
 
 Accepted
 
-## Decision
+### Decision
 
 Command envelope는 `command_id`, `session_id`, `runtime_binding`, `command_type`,
 `payload`다. `prompt`, `interrupt`, `terminal_input`은 별도 command type이다.
@@ -1898,14 +1937,16 @@ agent turn 성공이나 conversation 저장 완료를 뜻하지 않는다. messa
 receipt는 conversation 본문을 저장하는 DB가 아니며 command digest와 최소 상태만 유지한다.
 이 설계는 at-most-once dispatch이며 원격 process의 exactly-once 실행을 주장하지 않는다.
 
-# ADR-034 — Herdr가 runtime binding을 검증한 command만 전달한다
+---
 
-## Status
+## ADR-034 — Herdr가 runtime binding을 검증한 command만 전달한다
+
+### Status
 
 Accepted (stock Herdr `0.9.1`에는 미포함, 소유 fork `psw7205/herdr`의 `mobile-binding` patch에서
 구현. [ADR-036](#adr-036--herdr-patch는-소유-fork에서-유지한다))
 
-## Decision
+### Decision
 
 Herdr가 native session, foreground process incarnation, terminal을 결합한 opaque binding을
 발급한다. 모든 semantic/raw write는 client가 본 binding을 전달하며 mismatch/ended는 reject한다.
@@ -1921,7 +1962,7 @@ Bridge는 실행 중 server의 조건부 입력 지원을 `supported`/`unsupport
 process 종료와 OS PTY 수신 사이 race까지 무조건 해결했다고 가정하지 않으며
 실제 process 교체 acceptance를 통과하기 전에는 write-enabled handoff 완료로 표시하지 않는다.
 
-### Binding·capability 손실은 lifecycle 종료가 아니다
+#### Binding·capability 손실은 lifecycle 종료가 아니다
 
 Herdr capability 부재(`ErrUnsupported`)나 일시적 binding 오류로 검증된 binding을 잃어도 기존
 `claude:<native-id>` session은 목록에 남고 lifecycle은 `unverified`다. `runtime_binding`을 비우므로
@@ -1958,13 +1999,15 @@ successor로 전환한다. snapshot이 같은 pane을 중복 보고했거나 한
 * supersession은 pane 단위 판정이다. `pane:` item의 process가 같은 pane의 다른 process로 바뀐 뒤
   검증되어도 `superseded`로 보인다. write는 successor 자신의 binding으로만 가능하다.
 
-# ADR-035 — Mobile Terminal은 기존 PTY의 passive mirror다
+---
 
-## Status
+## ADR-035 — Mobile Terminal은 기존 PTY의 passive mirror다
+
+### Status
 
 Accepted (관찰은 기존 visible ANSI snapshot, 입력은 ADR-034 필요)
 
-## Decision
+### Decision
 
 Herdr/desktop이 PTY size owner다. mobile observer attach는 start, resume, resize, takeover를
 수행하지 않고 여러 observer를 허용한다. detach는 observer만 제거한다.
@@ -1986,19 +2029,19 @@ font size와 horizontal scroll로만 맞추며 PTY 크기를 바꾸지 않는다
 
 ---
 
-# ADR-036 — Herdr patch는 소유 fork에서 유지한다
+## ADR-036 — Herdr patch는 소유 fork에서 유지한다
 
-## Status
+### Status
 
 Accepted (2026-09-28)
 
-## Context
+### Context
 
 ADR-034의 조건부 입력에는 stock Herdr에 없는 `agent.binding`·`agent.bound_input`이 필요하다.
 Herdr 원본(`herdrdev/herdr`)은 승인되지 않은 외부 contributor의 feature PR을 자동으로 닫고,
 기능 제안은 maintainer 승인을 거쳐야 한다. upstream 반영을 전제로 할 수 없다.
 
-## Decision
+### Decision
 
 patch는 소유 fork `psw7205/herdr`에서 유지한다. fork `master`는 `upstream/master`의
 fast-forward mirror이고, patch는 최신 stable tag 위의 `mobile-binding` branch에 둔다.
@@ -2010,7 +2053,7 @@ stable release마다 rebase와 `just ci`·설치 검증을 거쳐 갱신한다. 
 - upstream PR: contribution 정책상 받아들여질 경로가 없다.
 - stock `agent.prompt`·raw pane input 사용: stale binding 보호가 없어 ADR-034를 위반한다.
 
-## Consequences
+### Consequences
 
 사용자는 fork의 patched Herdr를 직접 build·설치해야 한다. Herdr release를 따라가는 rebase
 비용은 이 project가 진다. Bridge는 patch 유무를 version이 아니라 `doctor`의
