@@ -18,7 +18,7 @@
 | P0-06 | 실제 interrupt·blocked interaction | `todo`. Terminal Esc 전달과 API/unit 경로는 검증했다. 작업 중 interrupt와 permission/question 대기 화면은 실측하지 않았다. | 격리 agent에서 Stop이 기존 process에만 전달되고, 구조를 모르는 CLI 대기는 Chat이 임의 Allow/Deny를 만들지 않고 같은 pane의 Terminal에서 처리된다. 연결 종료는 agent를 중단하지 않는다. |
 | P0-07 | Binding·capability 손실과 agent 종료 구분 | `done (2026-09-24)`, P0-04와 연결. binding·capability를 잃은 `claude:<native-id>` session은 `unverified`로 남아 prompt·interrupt·Terminal을 fail closed하고, `pane:<pane-id>` item은 같은 pane에서 native session이 검증되면 `superseded`+`successor_id`로 바뀐다. 근거는 `internal/session` unit test와 `web/src/api.test.ts`이며, 실제 stock binary 실행과 App의 successor 전환 render test는 P0-04의 격리 환경 검증에 남는다. 남은 한계: `agent_session` 없이 같은 pane의 claude→claude 교체를 구분하지 못하고, agent 감지가 순간적으로 빠지면 `ended`가 된다. [근거](records/verification.md#p0-07-bindingcapability-손실과-agent-종료-구분) | Capability 손실이나 binding 손실을 agent lifecycle 종료로 표시하지 않는다. PRD §8의 `ended`는 process 종료가 확인된 경우에만 표시한다. |
 | P0-08 | Tailnet 설정 자동 감지·진단 | `done (2026-09-24)`. `-tailnet-host`·`-tailnet-login` 기본값 `auto`, Origin 자동 추가, `doctor`의 `tailnet` section을 구현했고 P0-01/P0-02에서 실제 접속을 확인했다. 남은 mobile 확인은 P0-02에서 추적한다. 알려진 한계: host·login은 시작 시 한 번만 해석하며 background 재해석은 구현하지 않았다. [근거](records/verification.md#p0-08-tailnet-설정-자동-감지진단) | `auto` 기본값이 시작 시 `tailscale status --json`에서 host와 소유자 login을 얻고, 둘 다 확정된 경우에만 tailnet Origin을 추가한다. 감지가 실패해도 Bridge는 종료하지 않고 localhost 전용이나 tailnet 거부로 동작한다. `doctor`는 `tailnet` 설정 문제를 조치 방법과 함께 보고하고 Funnel·identity 우회 forward를 blocker로 둔다. 세부 규칙은 [ADR-024](adr.md#owner-자동-감지-기본값)와 [완료 기준 원문](records/verification.md#p0-08-tailnet-설정-자동-감지진단)을 따른다. |
-| P0-09 | 공개 전 점검 | `todo`, 소유자 주도. GitHub에 공개해 다른 사용자가 자신의 tailnet에 설치하기 전 단계다. 2026-09-28에 공개 전 review의 결함 수정([test 근거](records/verification.md#공개-전-보안-수정-검증-2026-09-28)), LICENSE와 Go module 경로, history 치환, `herdr` patch branch 공개(ADR-036), 문서 review를 마쳤다. 남은 것: repo를 공개한다. [근거](records/verification.md#p0-09-공개-전-점검) | (1) Host/Origin/identity 경계, command receipt, fixture, log를 포함한 전체 security review를 완료한다. (2) 모든 tracked 문서에서 개인·host 전제가 남지 않았는지 다시 확인한다. (3) 공개 전에 Git history에서 host 보안 상태 서술을 제거하고, `refs/codex/*` 같은 tool snapshot ref는 push 대상에서 제외한다. (4) LICENSE를 둔다. (5) README·runbook이 참조하는 `herdr` patch branch를 public fork에 공개한다. |
+| P0-09 | 공개 전 점검 | `done (2026-09-28)`. `psw7205/herdr-remote`를 public으로 공개하고 private vulnerability reporting을 켰다. 2026-09-28에 공개 전 review의 결함 수정([test 근거](records/verification.md#공개-전-보안-수정-검증-2026-09-28)), LICENSE와 Go module 경로, history 치환, `herdr` patch branch 공개(ADR-036), 문서 review를 마쳤다. [근거](records/verification.md#p0-09-공개-전-점검) | (1) Host/Origin/identity 경계, command receipt, fixture, log를 포함한 전체 security review를 완료한다. (2) 모든 tracked 문서에서 개인·host 전제가 남지 않았는지 다시 확인한다. (3) 공개 전에 Git history에서 host 보안 상태 서술을 제거하고, `refs/codex/*` 같은 tool snapshot ref는 push 대상에서 제외한다. (4) LICENSE를 둔다. (5) README·runbook이 참조하는 `herdr` patch branch를 public fork에 공개한다. |
 
 ## P1 — 핵심 UX와 다음 agent
 
@@ -58,7 +58,7 @@ full IDE·source editor, mobile Git commit/push/merge는 현 PRD의 non-goal이�
 이 목록에서 우선순위를 받은 기능이 아니다.
 
 **의도:** 기존 Herdr session의 무결성과 모바일에서의 복구 가능성을 먼저 완성한다.
-**추천:** P0-09로 repo를 공개하고, P0-02의 남은 실기기 확인(reconnect, PWA)을 닫은 뒤
+**추천:** P0-02의 남은 실기기 확인(reconnect, PWA)을 닫은 뒤
 P0-03~06을 격리 환경에서 검증한다. 이어서 P1-01/02 Codex adapter로 확장한다 — 이유는
 remote 사용 경로와 잘못된 process 입력 방지가 Rich Chat 기능보다 먼저 증명돼야 하기 때문이다.
 UI/UX 개편(P1-03, P1-09~P1-11)은 2026-09-25 소유자 요청으로 이 순서보다 먼저 진행했다.
