@@ -1,10 +1,12 @@
 # Herdr Mobile Chat — Product Requirements Document
 
-**Status:** Draft v0.1
+**Status:** Claude Code / macOS slice 구현. 현재 지원 범위는 [`README.md` 현재 지원 범위](../README.md#현재-지원-범위), 남은 작업은 [`backlog.md`](backlog.md)를 따른다.
+**Name:** repo와 Go module 이름은 `herdr-remote`, 제품 이름은 Herdr Mobile Chat이다.
+**Upstream:** [Herdr](https://github.com/herdrdev/herdr)는 여러 coding agent를 terminal pane에서 동시에 실행하고 workspace·tab·pane, PTY, agent status를 관리하는 도구다.
 **Product type:** Self-hosted mobile-first Herdr client
 **Primary client:** Web / PWA
-**Network scope:** Private Tailnet only
-**First vertical slice:** Claude Code (integration gate 통과 후)
+**Network scope:** localhost 또는 Tailnet(Tailscale Serve)
+**First vertical slice:** Claude Code
 **Follow-up agent:** Codex
 **Target user:** Single user / developer
 
@@ -108,8 +110,9 @@ Chat UI를 위해 별도의 conversation database를 source of truth로 만들�
 | agent process                      | Herdr / PTY             |
 | conversation history               | Native agent transcript |
 | current interactive terminal state | PTY                     |
+| durable command receipt            | Herdr Mobile Chat Bridge (`-receipts-dir`) |
 | mobile presentation state          | Herdr Mobile Chat       |
-| unread / UI preferences            | Herdr Mobile Chat       |
+| unread / UI preferences            | Herdr Mobile Chat (후속 후보) |
 
 Chat은 원본 session의 **projection/read model**이다.
 
@@ -279,10 +282,9 @@ MVP 지원 대상:
 
 ```text
 Claude Code
-Codex
 ```
 
-다른 agent는 adapter 확장으로 추후 지원한다.
+Codex는 다음 adapter다([P1-01/P1-02](backlog.md#p1--핵심-ux와-다음-agent)). 다른 agent는 adapter 확장으로 추후 지원한다.
 
 ---
 
@@ -369,7 +371,7 @@ notification (후속 optional)
 # 7. Information Architecture
 
 전체 화면 구조는 다음과 같다. 첫 slice는 Sessions, Chat, Terminal에 한정하고
-Changes와 확장 Settings는 후속 단계다.
+Changes와 Settings는 후속 단계다. 현재 route는 `web/src/route.ts`의 Chat과 Terminal뿐이다.
 
 ```text
 /
@@ -377,10 +379,10 @@ Changes와 확장 Settings는 후속 단계다.
 │
 ├── Session
 │   ├── Chat
-│   ├── Changes
+│   ├── Changes (후속)
 │   └── Terminal
 │
-└── Settings
+└── Settings (후속)
 ```
 
 ## 7.1 Sessions
@@ -410,7 +412,7 @@ Other (기타)
 | Field           | Example                  |
 | --------------- | ------------------------ |
 | agent           | Codex                    |
-| project         | my-app            |
+| project         | my-app                   |
 | status          | Working                  |
 | latest activity | 12 sec ago               |
 | attention       | Permission required      |
@@ -481,11 +483,11 @@ identity가 불명확하거나 조건부 입력을 지원하지 않으면 prompt
 | `unverified` | 검증됐던 `claude:<native-id>` session의 binding이나 capability를 잃었지만 Herdr가 같은 pane에서 agent를 계속 보고한다 | agent는 계속 실행 중으로 표시한다. prompt, interrupt, Terminal read/input은 fail closed한다 |
 | `unbound` | native session을 식별하지 못한 `pane:<pane-id>` item에 검증된 binding이 없다(stock Herdr, binding 오류) | 입력과 Terminal을 비활성화한다. 복구 대기 안내 대신 conditional input 지원 여부로 설명한다 |
 | `superseded` | 같은 `pane_id`에서 `claude:<native-id>` session이 새로 검증되어 `pane:` item을 대체했다. `successor_id`가 그 session이다 | 종료로 표시하지 않고 열린 Chat·Terminal을 successor와 successor의 binding으로 전환한다 |
-| `ended/unavailable` | pane이 사라졌거나 agent가 더 이상 보고되지 않거나 pane이 다른 native session을 가리킨다 | 종료로 표시하고 입력과 Terminal 제어를 비활성화한다 |
+| `ended`(process 종료 확인) | pane이 사라졌거나 agent가 더 이상 보고되지 않거나 pane이 다른 native session을 가리킨다 | 종료로 표시하고 입력과 Terminal 제어를 비활성화한다 |
 
 Herdr patch 누락, 일시적 binding 오류 같은 binding·capability 손실은 process 종료의 증거가
-아니므로 `ended/unavailable`로 표시하지 않는다. `unverified`는 같은 native ID의 binding이 다시
-검증되면 `active`로 돌아간다. 판정 규칙은 ADR-034를 따른다.
+아니므로 `ended`로 표시하지 않는다. `unverified`는 같은 native ID의 binding이 다시
+검증되면 `active`로 돌아간다. 판정 규칙은 [ADR-034](adr.md#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다)를 따른다.
 `completed`는 turn 완료 상태이며 살아 있는 process에서 후속 prompt가 가능하다.
 historical transcript만 남은 session을 탐색하는 기능은 첫 slice에서 제외한다.
 
@@ -529,10 +531,18 @@ native session metadata
 
 다음 정보만 자체 관리한다.
 
+현재 구현:
+
+```text
+durable command receipt   Bridge disk (-receipts-dir). 유일한 disk persistence
+event cursor              connection 단위 runtime state. 저장하지 않는다
+draft / pending command   browser sessionStorage
+```
+
+후속 후보:
+
 ```text
 last read position
-event cursor
-UI state
 notification state
 favorites
 local preferences
@@ -548,7 +558,10 @@ conversation 전체를 별도 DB에 복제하는 것은 기본 설계가 아니�
 
 Agent마다 transcript 형식과 interaction 방식이 다르기 때문에 adapter 계층을 둔다.
 
-개념적으로 다음 interface를 만족한다.
+아래는 개념적 경계이며 code에 `AgentAdapter` interface는 없다. 현재 Claude 해석은
+`internal/claude`, `internal/transcript`, `internal/session`에 나뉘어 있다.
+
+개념적으로 다음 책임을 만족한다.
 
 ```text
 AgentAdapter
@@ -562,11 +575,11 @@ interrupt()
 getCapabilities()
 ```
 
-초기 구현:
+Adapter 현황:
 
 ```text
-ClaudeCodeAdapter
-CodexAdapter
+Claude Code   구현 (internal/claude)
+Codex         후속 (P1-01/P1-02)
 ```
 
 Adapter는 agent native event를 공통 domain event로 변환한다.
@@ -579,19 +592,20 @@ Adapter는 agent native event를 공통 domain event로 변환한다.
 
 Bridge에서 다음과 같은 semantic event로 normalize한다.
 
-| Event                     | 의미                |
-| ------------------------- | ----------------- |
-| `message.user`            | 사용자 입력            |
-| `message.assistant`       | assistant message |
-| `message.assistant.delta` | streaming update  |
-| `tool.started`            | tool 실행 시작        |
-| `tool.completed`          | tool 실행 완료        |
-| `tool.failed`             | tool 실패           |
-| `permission.requested`    | permission 필요     |
-| `question.requested`      | user input 필요     |
-| `agent.status`            | agent 상태 변경. `status`와 `lifecycle`(`active` \| `unverified` \| `unbound` \| `superseded` \| `ended`)을 담고, `superseded`이면 `successor_id`를 함께 담는다. 종료 시 `status`도 `completed`이므로 turn 완료와 process 종료는 `lifecycle`로 구분한다 |
-| `session.completed`       | 작업 완료             |
-| `session.error`           | session 오류        |
+| Event                     | 의미                | 상태 |
+| ------------------------- | ----------------- | ---- |
+| `session.snapshot`        | 연결 시점의 session 상태와 cursor. 다른 epoch나 replay 범위 밖 cursor에도 반환한다 | 구현 |
+| `message.user`            | 사용자 입력            | 구현 |
+| `message.assistant`       | assistant message | 구현 |
+| `message.assistant.delta` | streaming update  | 후속 ([P1-07](backlog.md#p1--핵심-ux와-다음-agent)) |
+| `tool.started`            | tool 실행 시작        | 후속 |
+| `tool.completed`          | tool 실행 완료        | 후속 |
+| `tool.failed`             | tool 실패           | 후속 |
+| `permission.requested`    | permission 필요     | 후속 |
+| `question.requested`      | user input 필요     | 후속 |
+| `agent.status`            | agent 상태 변경. `status`와 `lifecycle`(`active` \| `unverified` \| `unbound` \| `superseded` \| `ended`)을 담고, `superseded`이면 `successor_id`를 함께 담는다. 종료 시 `status`도 `completed`이므로 turn 완료와 process 종료는 `lifecycle`로 구분한다 | 구현 |
+| `session.completed`       | 작업 완료             | 후속 |
+| `session.error`           | session 오류        | 구현 |
 
 초기 단계에서는 transcript에서 안정적으로 식별할 수 있는 event만 structured event로 노출한다.
 
@@ -690,14 +704,14 @@ Conversation
 │
 ├ User Message
 ├ Assistant Message
-├ Tool Card
+├ Tool Card (후속)
 ├ Status Event
-├ Permission Card
+├ Permission Card (후속)
 └ Error
 
 Composer
 │
-├ Attachment
+├ Attachment (후속)
 ├ Textarea
 ├ Stop
 └ Send
@@ -726,6 +740,8 @@ Code block에는 모바일에서 쉽게 사용할 수 있는 copy action을 제�
 ---
 
 ## Tool Card
+
+후속 optional 기능이다. 현재 Chat은 tool 기록을 표시하지 않는다.
 
 tool call은 기본적으로 compact하게 표시한다.
 
@@ -874,7 +890,7 @@ Terminal은 동일 Herdr pane의 실제 PTY를 보여준다.
 
 * terminal rendering
 * desktop/Herdr의 PTY 크기를 유지하는 mirror
-* scroll
+* visible screen의 가로 scroll (visible ANSI snapshot이며 scrollback은 없다. `scrollback: 0`)
 * text input
 * Esc
 * Tab
@@ -1086,9 +1102,9 @@ event normalization
 WebSocket/API
 prompt forwarding
 terminal proxy
-attachment handling
+attachment handling (후속)
 reconnect support
-notification trigger
+notification trigger (후속)
 ```
 
 Bridge가 해야 하지 않는 것:
@@ -1113,10 +1129,10 @@ Client는 thin presentation layer를 지향한다.
 session list
 conversation rendering
 composer
-tool cards
+tool cards (후속)
 attention UX
 terminal UI
-diff viewer
+diff viewer (후속)
 connection status
 local presentation preferences
 ```
@@ -1184,7 +1200,8 @@ Client connection loss가 agent process loss처럼 보이면 안 된다.
 첫 구현은 Claude 하나의 discovery → transcript Chat → 동일 PTY prompt → transcript 응답이며,
 interrupt/reconnect/동일 Terminal fallback을 포함한다. Herdr integration gate를 통과하기 전에는
 write-enabled UI를 구현 완료로 간주하지 않는다. 세부 gate와 미지원 사항은
-`docs/records/integration-findings.md`, 실제 검증 결과는 `docs/records/verification.md`에 기록한다.
+[`records/integration-findings.md`](records/integration-findings.md), 실제 검증 결과는
+[`records/verification.md`](records/verification.md)에 기록한다.
 
 | Area                         | MVP   |
 | ---------------------------- | ----- |
@@ -1198,7 +1215,8 @@ write-enabled UI를 구현 완료로 간주하지 않는다. 세부 gate와 미�
 | Transcript chat              | Yes   |
 | Markdown / code              | Yes   |
 | Tool cards                   | 후속 optional |
-| Streaming / live updates     | Yes   |
+| Live updates (완성된 message 단위) | Yes   |
+| Streaming delta              | 후속 ([P1-07](backlog.md#p1--핵심-ux와-다음-agent)) |
 | Send prompt to existing pane | Yes   |
 | Interrupt                    | Yes   |
 | Reconnect                    | Yes   |
@@ -1391,7 +1409,7 @@ MVP의 핵심 질문은 항상 다음이어야 한다.
 | Chat model                  | Projection over existing session |
 | User input path             | Existing Herdr pane              |
 | First client                | Web / PWA                        |
-| Network                     | Tailscale-only                   |
+| Network                     | localhost 또는 Tailscale Serve     |
 | User model                  | Single user                      |
 | Host model                  | Single host                      |
 | Primary UX                  | Chat-first                       |
@@ -1437,7 +1455,7 @@ MVP의 핵심 질문은 항상 다음이어야 한다.
        │
        ├ Chat
        ├ Attention
-       ├ Changes
+       ├ Changes (후속)
        └ Terminal fallback
 ```
 
