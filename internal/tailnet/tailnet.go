@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -320,10 +321,15 @@ func (id Identity) unverifiedTailnetOrigin(origin string) bool {
 }
 
 // ServeConfig is the subset of Tailscale's ipn.ServeConfig used here. The
-// top-level Web and AllowFunnel hold background (`--bg`) config. A foreground
-// `tailscale serve`/`funnel` run stores its own config in Foreground, keyed
-// by CLI session ID, for as long as that CLI process lives.
+// top-level TCP, Web, and AllowFunnel hold background (`--bg`) config. A
+// foreground `tailscale serve`/`funnel` run stores its own config in
+// Foreground, keyed by CLI session ID, for as long as that CLI process lives.
+// TCP is keyed by the exposed port; `--tcp` and `--tls-terminated-tcp` store
+// their host:port (or unix:path) target in TCPForward.
 type ServeConfig struct {
+	TCP map[string]*struct {
+		TCPForward string
+	}
 	Web map[string]*struct {
 		Handlers map[string]*struct {
 			Proxy string
@@ -372,6 +378,34 @@ func (c ServeConfig) FunnelEnabled(host string) bool {
 		}
 	}
 	return false
+}
+
+// TCPForwardsTo returns the sorted exposed ports whose raw TCP forward, in
+// background or any foreground config, targets the Bridge listen address.
+// Such a forward bypasses the Serve web proxy: peers reach Bridge from
+// loopback with client-controlled Host and headers.
+func (c ServeConfig) TCPForwardsTo(listen string) []string {
+	seen := map[string]bool{}
+	c.collectTCPForwards(listen, seen)
+	ports := make([]string, 0, len(seen))
+	for port := range seen {
+		ports = append(ports, port)
+	}
+	sort.Strings(ports)
+	return ports
+}
+
+func (c ServeConfig) collectTCPForwards(listen string, seen map[string]bool) {
+	for port, h := range c.TCP {
+		if h != nil && h.TCPForward != "" && proxyTargets(h.TCPForward, listen) {
+			seen[port] = true
+		}
+	}
+	for _, fg := range c.Foreground {
+		if fg != nil {
+			fg.collectTCPForwards(listen, seen)
+		}
+	}
 }
 
 // proxyTargets accepts the forms Tailscale stores or accepts for a proxy

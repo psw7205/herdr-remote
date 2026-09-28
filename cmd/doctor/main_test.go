@@ -202,6 +202,64 @@ func TestDoctorBlocksFunnel(t *testing.T) {
 	}
 }
 
+// Source-derived from ipn.TCPPortHandler, not observed: the HTTPS proxy plus
+// one extra raw TCP forward (`tailscale serve --bg --tcp <port> <target>`).
+const doctorServeTCP = `{"TCP":{"443":{"HTTPS":true},%s},"Web":{"node.example-tailnet.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8787"}}}}}`
+
+// Raw TCP forwards to the Bridge listen address, in background and foreground
+// config, must block like Funnel.
+func TestDoctorBlocksTCPForwardToBridge(t *testing.T) {
+	certs := `["node.example-tailnet.ts.net"]`
+	status := fmt.Sprintf(doctorStatus, certs, "", "owner@example.com")
+	cases := []struct {
+		name, serve string
+		port        string
+	}{
+		{"background", fmt.Sprintf(doctorServeTCP, `"10000":{"TCPForward":"127.0.0.1:8787"}`), "10000"},
+		{"foreground", fmt.Sprintf(doctorServeBridge, `,"Foreground":{"0123456789abcdef":{"TCP":{"8787":{"TCPForward":"localhost:8787","TerminateTLS":"node.example-tailnet.ts.net"}}}}`), "8787"},
+	}
+	for _, tc := range cases {
+		tn := inspectTailnet(context.Background(), tailnetRunner(status, tc.serve), nil, "127.0.0.1:8787")
+		if !tn.TCPForward || len(tn.TCPForwardPorts) != 1 || tn.TCPForwardPorts[0] != tc.port || !tn.ServeProxy || len(tn.Issues) != 0 {
+			t.Fatalf("%s: TCP forward missed: %+v", tc.name, tn)
+		}
+		var out bytes.Buffer
+		if err := diagnose(context.Background(), fixtureReader{binding: true}, tn, &out); err != nil {
+			t.Fatal(err)
+		}
+		var got report
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Blockers) != 1 || !strings.Contains(got.Blockers[0], tc.port) || !strings.Contains(got.Blockers[0], "--tcp=<port> off") || !strings.Contains(got.Blockers[0], "tailscale serve --bg") {
+			t.Fatalf("%s: TCP forward must be a blocker: %v", tc.name, got.Blockers)
+		}
+		if !bytes.Contains(out.Bytes(), []byte(`"tcp_forward": true`)) {
+			t.Fatalf("%s: tcp_forward not reported: %s", tc.name, out.Bytes())
+		}
+	}
+}
+
+func TestDoctorIgnoresTCPForwardToOtherPort(t *testing.T) {
+	certs := `["node.example-tailnet.ts.net"]`
+	serve := fmt.Sprintf(doctorServeTCP, `"5432":{"TCPForward":"127.0.0.1:5432"}`)
+	tn := inspectTailnet(context.Background(), tailnetRunner(fmt.Sprintf(doctorStatus, certs, "", "owner@example.com"), serve), nil, "127.0.0.1:8787")
+	if tn.TCPForward || len(tn.TCPForwardPorts) != 0 || !tn.ServeProxy || len(tn.Issues) != 0 {
+		t.Fatalf("unrelated TCP forward reported: %+v", tn)
+	}
+	var out bytes.Buffer
+	if err := diagnose(context.Background(), fixtureReader{binding: true}, tn, &out); err != nil {
+		t.Fatal(err)
+	}
+	var got report
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Blockers) != 0 {
+		t.Fatalf("unexpected blockers: %v", got.Blockers)
+	}
+}
+
 func TestInspectTailnetWithoutCLI(t *testing.T) {
 	tn := inspectTailnet(context.Background(), nil, errors.New("tailscale CLI not found"), "127.0.0.1:8787")
 	if tn.CLIAvailable || tn.Host != "" || len(tn.Issues) != 1 {

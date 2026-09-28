@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 )
 
@@ -57,6 +58,8 @@ type tailnetReport struct {
 	HTTPSCertificates bool     `json:"https_certificates"`
 	ServeProxy        bool     `json:"serve_proxy"`
 	Funnel            bool     `json:"funnel"`
+	TCPForward        bool     `json:"tcp_forward"`
+	TCPForwardPorts   []string `json:"tcp_forward_ports,omitempty"`
 	Issues            []string `json:"issues"`
 }
 
@@ -101,6 +104,9 @@ func inspectTailnet(ctx context.Context, run tailnet.Runner, cliErr error, liste
 	}
 	r.ServeProxy = serve.ProxiesTo(host, listen)
 	r.Funnel = serve.FunnelEnabled(host)
+	if ports := serve.TCPForwardsTo(listen); len(ports) > 0 {
+		r.TCPForward, r.TCPForwardPorts = true, ports
+	}
 	if !r.ServeProxy {
 		port := listen
 		if _, p, err := net.SplitHostPort(listen); err == nil {
@@ -157,6 +163,9 @@ func diagnose(ctx context.Context, gateway reader, tn tailnetReport, out io.Writ
 	}
 	if tn.Funnel {
 		r.Blockers = append(r.Blockers, fmt.Sprintf("Tailscale Funnel is enabled for %s and would expose Bridge to the public internet; clear it with `tailscale funnel reset` (this resets all Serve config), then re-create the tailnet-only proxy with `tailscale serve --bg <Bridge port>`.", tn.Host))
+	}
+	if tn.TCPForward {
+		r.Blockers = append(r.Blockers, fmt.Sprintf("Tailscale Serve forwards raw TCP port(s) %s to Bridge; tailnet peers would reach Bridge from loopback without Tailscale identity headers. Remove each with `tailscale serve --tcp=<port> off` (or `--tls-terminated-tcp=<port> off`), stop any foreground `tailscale serve` process, and expose Bridge only through the HTTPS proxy `tailscale serve --bg <Bridge port>`.", strings.Join(tn.TCPForwardPorts, ", ")))
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")

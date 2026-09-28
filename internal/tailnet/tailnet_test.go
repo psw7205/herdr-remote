@@ -216,6 +216,53 @@ func TestServeConfigProxyAndFunnel(t *testing.T) {
 		if c.FunnelEnabled("other.example-tailnet.ts.net") {
 			t.Errorf("%s: Funnel matched another host", tc.name)
 		}
+		if ports := c.TCPForwardsTo("127.0.0.1:8787"); len(ports) != 0 {
+			t.Errorf("%s: HTTPS handler reported as TCP forward: %v", tc.name, ports)
+		}
+	}
+}
+
+// Source-derived from ipn.TCPPortHandler and the CLI's SetTCPForwarding, not
+// observed: `tailscale serve --bg --tcp 10000 tcp://127.0.0.1:8787` and
+// `--tls-terminated-tcp 8443 8787` next to the HTTPS proxy, plus forwards to
+// an unrelated port and a unix socket. The CLI stores the target's host:port.
+const serveTCPBridge = `{
+  "TCP": {
+    "443": {"HTTPS": true},
+    "10000": {"TCPForward": "127.0.0.1:8787"},
+    "8443": {"TCPForward": "127.0.0.1:8787", "TerminateTLS": "node.example-tailnet.ts.net"},
+    "5432": {"TCPForward": "127.0.0.1:5432"},
+    "9000": {"TCPForward": "unix:/tmp/bridge.sock"}
+  },
+  "Web": {"node.example-tailnet.ts.net:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8787"}}}}
+}`
+
+// Source-derived, not observed: `tailscale serve --tcp 8787 tcp://localhost:8787`
+// without --bg.
+const serveForegroundTCP = `{
+  "Foreground": {
+    "0123456789abcdef": {"TCP": {"8787": {"TCPForward": "localhost:8787"}}}
+  }
+}`
+
+func TestServeConfigTCPForward(t *testing.T) {
+	cases := []struct {
+		name, fixture, listen string
+		want                  []string
+	}{
+		{"background", serveTCPBridge, "127.0.0.1:8787", []string{"10000", "8443"}},
+		{"foreground", serveForegroundTCP, "127.0.0.1:8787", []string{"8787"}},
+		{"other listen port", serveTCPBridge, "127.0.0.1:8788", []string{}},
+		{"other listen family", serveTCPBridge, "[::1]:8787", []string{}},
+	}
+	for _, tc := range cases {
+		c, err := ReadServeConfig(context.Background(), fixedRunner(map[string]string{"serve status --json": tc.fixture}, nil))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got := c.TCPForwardsTo(tc.listen); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: TCPForwardsTo = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 
