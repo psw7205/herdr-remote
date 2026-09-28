@@ -601,7 +601,8 @@ Cursor는 `{epoch, sequence}`이며 snapshot과 cursor를 같은 session lock에
 `subscribe(after=C)`는 같은 lock에서 replay C+1…current를 확보하고 live 등록을 완료한다.
 network 전송은 lock 밖에서 한다. queue overflow를 조용히 drop하지 않는다.
 
-Bridge restart, transcript identity replacement, 복구 불가능한 resync 시 epoch를 교체한다.
+Bridge restart, transcript identity replacement, 복구 불가능한 resync, `ended` session의 revive(watcher를
+다시 열고 transcript를 처음부터 읽는다) 시 epoch를 교체한다.
 다른 epoch, 미래 sequence, buffer miss는 fresh snapshot으로 복구한다.
 이 결정은 Accepted ADR-019의 bounded buffer를 사용한다.
 

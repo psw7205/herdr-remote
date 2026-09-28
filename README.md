@@ -93,11 +93,13 @@ Bridge는 항상 loopback에만 bind하고, Serve가 tailnet HTTPS 요청을 Bri
    `127.0.0.1:8787`이 아니면 같은 주소를 `-bridge-listen`으로 넘긴다. 그렇지 않으면
    `serve_proxy`가 거짓 음성이 된다. CLI 경로는 Bridge와 같이 `-tailscale-bin`으로 명시할 수
    있다. `tailnet` section은
-   `cli_available`, `backend_state`, `host`, `login`, `https_certificates`, `serve_proxy`, `funnel`을
+   `cli_available`, `backend_state`, `host`, `login`, `https_certificates`, `serve_proxy`, `funnel`, `tcp_forward`를
    보여 주며, 문제가 있으면 `issues`에 조치 방법을 적는다. `serve_proxy`는 Serve가
    `<tailnet-host>:443`을 Bridge listen 주소로 proxy하는지 나타내며 `--bg` 설정만 인정한다.
    `funnel`은 모든 port와 `--bg` 없이 실행한 foreground 설정까지 확인하고, 켜져 있으면
-   top-level blocker다.
+   top-level blocker다. `tcp_forward`는 Bridge 주소를 향한 `--tcp`/`--tls-terminated-tcp` forward를
+   foreground까지 확인한다. 이 forward는 identity header 없이 Bridge에 닿아 소유자 검증을 우회하므로
+   있으면 blocker다.
 5. 소유자 계정으로 로그인한 mobile device에서 `https://<tailnet-host>`에 접속한다.
    이 end-to-end 경로는 아직 실기기에서 검증하지 않았다(P0-02).
 
@@ -111,7 +113,10 @@ tailnet HTTPS Origin은 경고 log와 함께 제외되고 Bridge는 계속 시�
 
 Bridge는 Serve가 검증해 추가한 `Tailscale-User-Login`을 소유자 login과 대조한다. 다른
 사용자나 누락된 identity는 읽기·제어 모두 거부한다. HTTP mutation과 WS는 exact Origin도
-검사한다. 자체 password/OAuth/JWT는 없다. network 경계도 좁히도록 tailnet ACL/grant로 Bridge
+검사한다. Serve는 client의 `Host`를 그대로 넘기므로 Bridge는 `X-Forwarded-*`나
+`Tailscale-User-*` header가 있는 요청을 `Host`와 무관하게 tailnet 요청으로 보고, tailnet host와
+소유자 login이 확정되지 않았으면 거부한다. 그래서 Serve 외의 local reverse proxy를 앞에 두는
+구성은 지원하지 않는다. 모든 응답은 frame 삽입을 금지한다. 자체 password/OAuth/JWT는 없다. network 경계도 좁히도록 tailnet ACL/grant로 Bridge
 host의 HTTPS 접근을 필요한 device로 제한한다. [Serve identity 동작](https://tailscale.com/docs/features/tailscale-serve)과
 [Tailscale 접근 정책](https://tailscale.com/docs/features/access-control/acls)을 참고한다.
 
