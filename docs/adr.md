@@ -3,6 +3,7 @@
 **Related:** [prd.md](prd.md), [architecture.md](architecture.md)
 
 각 ADR의 상태는 해당 ADR의 `Status`를 따른다. 결정을 조합한 전체 구조는 [architecture.md](architecture.md)에 있다.
+`runtime_binding`, epoch, fail closed 같은 용어는 [용어](architecture.md#용어)를 따른다.
 
 | ID | 제목 | Status |
 | --- | --- | --- |
