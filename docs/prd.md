@@ -1,14 +1,15 @@
 # Herdr Mobile Chat — Product Requirements Document
 
-**Status:** Claude Code / macOS slice 구현. 현재 지원 범위는 [`README.md` 현재 지원 범위](../README.md#현재-지원-범위), 남은 작업은 [`backlog.md`](backlog.md)를 따른다.
-**Name:** repo와 Go module 이름은 `herdr-remote`, 제품 이름은 Herdr Mobile Chat이다.
-**Upstream:** [Herdr](https://github.com/herdrdev/herdr)는 여러 coding agent를 terminal pane에서 동시에 실행하고 workspace·tab·pane, PTY, agent status를 관리하는 도구다.
-**Product type:** Self-hosted mobile-first Herdr client
-**Primary client:** Web / PWA
-**Network scope:** localhost 또는 Tailnet(Tailscale Serve)
-**First vertical slice:** Claude Code
-**Follow-up agent:** Codex
-**Target user:** Single user / developer
+- **Status:** Claude Code / macOS slice 구현. 현재 지원 범위는 [`README.md` 현재 지원 범위](../README.md#현재-지원-범위), 남은 작업은 [`backlog.md`](backlog.md)를 따른다.
+- **Name:** repo와 Go module 이름은 `herdr-remote`, 제품 이름은 Herdr Mobile Chat이다.
+- **Upstream:** [Herdr](https://github.com/herdrdev/herdr)는 여러 coding agent를 terminal pane에서 동시에 실행하고 workspace·tab·pane, PTY, agent status를 관리하는 도구다.
+- **Product type:** Self-hosted mobile-first Herdr client
+- **Primary client:** Web / PWA
+- **Network scope:** localhost 또는 Tailnet(Tailscale Serve)
+- **First vertical slice:** Claude Code
+- **Follow-up agent:** Codex
+- **Target user:** Single user / developer
+- **Terms:** `runtime_binding`, epoch, fail closed 같은 용어는 [용어](architecture.md#용어)를 따른다.
 
 **목차**
 
