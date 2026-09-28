@@ -16,7 +16,7 @@ Herdr 연동 근거는 [Integration 조사](records/integration-findings.md), �
 
 | Placeholder | 의미 |
 | --- | --- |
-| `<herdr-repo>` | `herdr` repo checkout |
+| `<herdr-repo>` | fork `psw7205/herdr` checkout. `origin`=fork, `upstream`=`herdrdev/herdr` |
 | `<patch-worktree>` | `mobile-binding` branch를 checkout한 `herdr` worktree |
 | `<install-dir>` | 설치된 `herdr` binary의 directory. `dirname "$(command -v herdr)"`로 확인한다 |
 
@@ -209,7 +209,7 @@ UI 안내는 실행해 보지 않았다. 사용자 agent가 있는 server에서 
 새 Herdr release를 반영하는 절차:
 
 ```sh
-git -C <herdr-repo> fetch origin --tags
+git -C <herdr-repo> fetch upstream --tags
 git -C <patch-worktree> rebase --onto <new-tag> v0.9.1 mobile-binding
 # <patch-worktree>에서
 just ci
@@ -236,3 +236,34 @@ just build
 6. stock backup도 새 version의 stock으로 갱신할지 결정하고 파일명에 version을 넣는다.
 
 상태: **미검증**. rebase, 새 version build, version 간 handoff를 end-to-end로 실행한 적이 없다.
+
+## 8. fork 관리
+
+Herdr 원본은 승인되지 않은 외부 contributor의 feature PR을 받지 않으므로 patch는 fork
+`psw7205/herdr`에서 유지한다([ADR-036](adr.md#adr-036--herdr-patch는-소유-fork에서-유지한다)).
+
+| branch | 규칙 |
+| --- | --- |
+| `master` | `upstream/master`의 mirror. 자체 commit을 두지 않고 fast-forward로만 갱신한다 |
+| `mobile-binding` | 최신 stable tag 위의 patch. README·runbook이 이 이름을 가리킨다 |
+
+`master` sync:
+
+```sh
+git -C <herdr-repo> fetch upstream --tags
+git -C <herdr-repo> switch master
+git -C <herdr-repo> merge --ff-only upstream/master
+git -C <herdr-repo> push origin master
+```
+
+새 stable release가 나오면 §7 절차로 `mobile-binding`을 rebase·검증한 뒤 push한다.
+
+```sh
+git -C <herdr-repo> tag mobile-binding-<old-tag> <old-head>
+git -C <herdr-repo> push origin mobile-binding-<old-tag>
+git -C <herdr-repo> push --force-with-lease origin mobile-binding
+```
+
+- rebase된 branch push는 공개 history를 바꾸므로 매번 소유자가 확인한다. 이전 head는
+  `mobile-binding-<old-tag>` tag로 남겨 이미 설치한 사용자가 재현할 수 있게 한다.
+- `master` sync는 patch branch와 독립적이다. stable release가 없으면 `mobile-binding`은 그대로 둔다.
