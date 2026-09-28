@@ -83,6 +83,21 @@ mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
 architecture 의미가 바뀔 때만 ADR을 수정한다. 실제 구현과 문서가 다르면 차이를 확인한 뒤
 완료 상태를 갱신한다. 기능 아이디어를 구현 완료로 바꾸지 않는다.
 
-검증된 논리 단위로 commit하고 사용자 변경을 함께 stage하지 않는다. commit subject는
-`type(scope): 설명` 형식으로 작성한다. push는 명시 요청이 있을 때만 하며 main merge는
-사용자와 합의된 절차를 따른다. 이 repo의 권한이 별도 `herdr` upstream 기여 권한을 뜻하지 않는다.
+검증된 논리 단위로 commit한다. commit subject는 `type(scope): 설명` 형식으로 작성한다.
+coding agent로 작업할 때의 push·main integration 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
+
+## Issue와 Pull Request
+
+개인 project이며 응답과 merge는 보장하지 않는다. 범위는 single-user, single-host다.
+multi-user, public internet 노출, 자체 agent runner, conversation DB 같은
+[PRD non-goal](docs/prd.md#5-non-goals)과 [계속 범위 밖인 항목](docs/backlog.md#계속-범위-밖인-항목)은 받지 않는다.
+
+- 보안 취약점은 issue로 올리지 않고 [SECURITY.md](SECURITY.md)의 비공개 경로로 신고한다.
+- bug report에는 재현 절차, 이 repo의 commit, Herdr patch commit, Claude Code version을 적는다.
+  `doctor` 출력은 [진단 출력 공유](README.md#진단-출력-공유)처럼 식별 정보를 placeholder로 바꾼다.
+- transcript 원문, 실제 prompt, binding token, screenshot의 실제 session 내용을 issue·PR·fixture에
+  넣지 않는다. fixture는 실제 구조를 확인한 익명 sample로 만든다.
+- PR은 한 가지 변경에 집중하고, 위 [변경별 검증](#변경별-검증)을 통과시키고, 관련 backlog ID를 적는다.
+  [AGENTS.md](AGENTS.md)의 제품 불변식을 바꾸는 변경은 먼저 issue로 논의한다.
+- Herdr 조건부 입력 patch의 변경은 이 repo가 아니라 fork `psw7205/herdr`의 `mobile-binding` branch를
+  대상으로 한다([Herdr patch runbook](docs/herdr-patch.md#8-fork-관리)).
