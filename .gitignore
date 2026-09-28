@@ -1,4 +1,20 @@
+# Web build
 web/node_modules/
 web/dist/
 web/tsconfig.tsbuildinfo
+web/coverage/
+
+# Go build output (`go build ./cmd/...` without `-o`)
+/bridge
+/doctor
+*.test
+*.out
+
+# Local tool and editor state
 .vscode/
+.idea/
+.claude/
+mise.local.toml
+.env
+.env.*
+.DS_Store
