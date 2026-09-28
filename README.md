@@ -194,7 +194,8 @@ prompt와 transcript 본문은 log에 쓰지 않는다.
 | 문서 | 용도 |
 | --- | --- |
 | [AGENTS.md](AGENTS.md) | agent 작업 규칙과 제품 불변식 |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | 개발 server, 검증, 변경 제출 절차 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 개발 server, 검증, issue·PR 정책 |
+| [SECURITY.md](SECURITY.md) | 취약점 비공개 신고와 보안 범위 |
 | [PRD](docs/prd.md) | 제품 요구와 범위 |
 | [ADR](docs/adr.md) | architecture 결정 |
 | [Architecture](docs/architecture.md) | 결정을 조합한 runtime 구조, data flow, invariant |
