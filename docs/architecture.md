@@ -405,6 +405,8 @@ hybrid
 
 `fsnotify`를 주 경로로 하고 event 유실/rename 복구를 위한 제한적 reconciliation을 병행한다.
 읽기는 offset 이후 incremental 방식이며 전체 transcript를 polling마다 parse하지 않는다.
+Watcher는 session이 active(`unverified` 포함)인 동안만 유지하고 `ended`·`superseded`가 되면 닫는다.
+`active`로 복귀하면 transcript를 처음부터 다시 읽고 epoch을 교체한 snapshot으로 동기화한다.
 
 ---
 
