@@ -10,6 +10,24 @@ projection하며, 입력은 Herdr가 현재 `runtime_binding`을 검증하는 `a
 전달한다. Bridge는 agent를 start/resume하지 않고 conversation을 저장하지 않는다. 결정의 근거는
 각 ADR을, 검증 범위는 [검증 기록](records/verification.md)을, 남은 작업은 [Backlog](backlog.md)를 따른다.
 
+### 용어
+
+| 용어 | 뜻 |
+| --- | --- |
+| Bridge | `cmd/bridge`의 Go process. Herdr socket과 native transcript를 읽어 browser에 HTTP/WS로 제공한다 |
+| native transcript | agent가 직접 쓰는 대화 기록 파일. Claude Code에서는 session별 JSONL이다. Bridge는 읽기만 한다 |
+| `runtime_binding` | Herdr `agent.binding`이 발급한 token. pane의 terminal, foreground process, native session을 묶는다. 입력은 이 값이 아직 유효할 때만 전달된다 |
+| 조건부 입력 (conditional input) | `agent.bound_input`처럼 Herdr가 binding을 다시 검증한 뒤에만 PTY에 쓰는 입력. stock Herdr에는 없고 patch가 추가한다 |
+| incarnation | 같은 pane에서 실행된 특정 process의 한 번의 생애. PID만으로는 구분하지 않고 시작 시각과 native session으로 확인한다 |
+| fail closed | 검증할 수 없으면 허용하지 않는 동작. binding이나 capability가 없으면 입력과 Terminal을 막는다 |
+| Refresh | Bridge가 2초마다 Herdr에서 agent 목록과 binding을 다시 읽어 session item을 갱신하는 주기 |
+| item | 목록의 session 단위. 검증된 native session은 `claude:<native-id>`, 식별 전 pane은 `pane:<pane-id>`다 |
+| `lifecycle` / `status` | `lifecycle`은 item의 검증·종료 상태(`active`, `unverified`, `ended` 등), `status`는 agent의 작업 상태(`working`, `idle` 등)다 |
+| cursor (epoch, sequence) | client가 받은 마지막 event 위치. epoch는 Bridge restart나 transcript 재동기화 때 바뀐다 |
+| snapshot / replay | 재연결 시 buffer에 남은 event를 이어 보내면 replay, 그렇지 못하면 전체 대화를 다시 보내면 snapshot이다 |
+| command receipt | `command_id`별 전달 결과를 disk에 남긴 기록. 같은 ID의 재전송을 막는다. 대화 본문은 저장하지 않는다 |
+| `delivery_unknown` | PTY 전달 여부를 확정할 수 없는 결과. 자동으로 다시 보내지 않는다 |
+
 ## 2. Runtime 구성도
 
 ```text
