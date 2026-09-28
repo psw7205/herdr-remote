@@ -12,6 +12,8 @@ import (
 	"herdr-remote/internal/stream"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -313,6 +315,61 @@ func TestServeRequestRequiresTailnetHostAndOwner(t *testing.T) {
 		local := gateServer(t, host, "owner@example.com", "")
 		if out := serveGate(local, http.MethodGet, "127.0.0.1:8787", map[string]string{"Origin": "http://127.0.0.1:5173"}); out.Code != 200 {
 			t.Fatalf("tailnet host %q: local request rejected: %d %s", host, out.Code, out.Body.String())
+		}
+	}
+}
+func TestResponsesCarrySecurityHeadersAndStaticHasNoListing(t *testing.T) {
+	dir := t.TempDir()
+	if e := os.MkdirAll(filepath.Join(dir, "assets"), 0o755); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.MkdirAll(filepath.Join(dir, "empty"), 0o755); e != nil {
+		t.Fatal(e)
+	}
+	for name, body := range map[string]string{"index.html": "<!doctype html>", "assets/app.js": "export {}"} {
+		if e := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); e != nil {
+			t.Fatal(e)
+		}
+	}
+	h := gateServer(t, "", "", dir)
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{"/", 200},
+		{"/assets/app.js", 200},
+		{"/assets/", 404},
+		{"/assets", 404},
+		{"/empty/", 404},
+		{"/missing", 404},
+		{"/api/sessions", 200},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8787"+tc.path, nil)
+		out := httptest.NewRecorder()
+		h.ServeHTTP(out, req)
+		if out.Code != tc.want {
+			t.Fatalf("%s: %d want %d body %q", tc.path, out.Code, tc.want, out.Body.String())
+		}
+		if tc.path == "/" && !strings.Contains(out.Body.String(), "<!doctype html>") {
+			t.Fatalf("index not served: %q", out.Body.String())
+		}
+		assertSecurityHeaders(t, tc.path, out.Header())
+	}
+	rejected := serveGate(h, http.MethodGet, "127.0.0.1:8787", map[string]string{"X-Forwarded-For": "100.64.0.2"})
+	if rejected.Code != 403 {
+		t.Fatalf("proxied request accepted: %d", rejected.Code)
+	}
+	assertSecurityHeaders(t, "rejected", rejected.Header())
+}
+func assertSecurityHeaders(t *testing.T, label string, header http.Header) {
+	t.Helper()
+	for name, want := range map[string]string{
+		"X-Content-Type-Options":  "nosniff",
+		"X-Frame-Options":         "DENY",
+		"Content-Security-Policy": "frame-ancestors 'none'",
+	} {
+		if got := header.Get(name); got != want {
+			t.Fatalf("%s: %s = %q", label, name, got)
 		}
 	}
 }
