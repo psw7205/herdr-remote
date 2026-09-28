@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"herdr-remote/internal/herdr"
-	"herdr-remote/internal/tailnet"
+	"github.com/psw7205/herdr-remote/internal/herdr"
+	"github.com/psw7205/herdr-remote/internal/tailnet"
 	"strings"
 	"testing"
 )
