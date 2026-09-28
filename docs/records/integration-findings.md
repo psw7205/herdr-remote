@@ -1,12 +1,12 @@
 # Herdr integration 조사
 
-조사일: 2026-09-22. 기준: `docs/prd.md`, `docs/adr.md`, 제공된 implementation prompt.
+조사일: 2026-09-22. 기준: `docs/prd.md`, `docs/adr.md`.
 이 문서는 구현 사실과 차단 조건을 기록한다. 제품 요구사항의 source of truth는 PRD/ADR이다.
 
 ## A. Repository findings
 
 `herdr-remote`는 초기 commit `90d7327`에 PRD/ADR만 있으며 frontend/backend,
-manifest, toolchain 설정, 테스트가 없다. 미추적 `.vscode/`는 기존 사용자 파일이다.
+manifest, toolchain 설정, 테스트가 없다.
 
 Herdr의 로컬 checkout은 `1491b7d`, package version `0.7.5`다. 설치된 client와
 실행 중 server는 모두 `0.9.1`, private protocol `22`다. 버전 차이가 있으므로 아래
@@ -119,7 +119,7 @@ integration 설치, 새 session 생성 모두 수행하지 않았다.
 ## 2026-09-23 — Herdr capability 확장과 실제 handoff
 
 첫 조사 시의 B1/B3는 stock Herdr `0.9.1`을 기준으로 한다. `herdr` repo의
-`codex/mobile-binding` branch에는 `agent.binding`과 `agent.bound_input`이 추가됐다.
+`codex/mobile-binding` branch(현재 fork `psw7205/herdr`의 `mobile-binding`, ADR-036)에는 `agent.binding`과 `agent.bound_input`이 추가됐다.
 macOS Claude foreground process의 시작 시각과 PID별 native session metadata를 대조해
 session token을 발급한다. Herdr는 입력 queue에서 text 및 Enter byte를 쓰기 직전에도
 binding을 재검증한다. metadata와 process가 불명확한 경우 입력을 거부한다.

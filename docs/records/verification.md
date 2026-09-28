@@ -21,7 +21,7 @@ session에 전달 → transcript 응답을 Chat에서 확인한다. Bridge는 ag
 | durable command receipt와 retry 차단 | `internal/command/receipts.go` |
 | localhost HTTP/WS, Origin/Host/Tailscale owner 검증 | `internal/httpapi/server.go`, `cmd/bridge/main.go` |
 | Sessions/Chat/Terminal/PWA | `web/src/`, `web/public/` |
-| Herdr native process binding과 PTY queue 검증 | `herdr` repo의 `codex/mobile-binding` branch |
+| Herdr native process binding과 PTY queue 검증 | fork `psw7205/herdr`의 `mobile-binding` branch(기록 당시 local `codex/mobile-binding`, ADR-036) |
 
 Herdr patch는 stock `0.9.1`에 없는 `agent.binding` 및 `agent.bound_input`을 추가한다.
 macOS Claude process의 PID/start time/native metadata를 확인한다. text와 Enter를 PTY에
