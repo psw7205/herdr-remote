@@ -17,14 +17,15 @@ Herdr 연동 근거는 [Integration 조사](records/integration-findings.md), �
 | Placeholder | 의미 |
 | --- | --- |
 | `<herdr-repo>` | `herdr` repo checkout |
-| `<patch-worktree>` | `codex/mobile-binding` branch를 checkout한 `herdr` worktree |
+| `<patch-worktree>` | `mobile-binding` branch를 checkout한 `herdr` worktree |
 | `<install-dir>` | 설치된 `herdr` binary의 directory. `dirname "$(command -v herdr)"`로 확인한다 |
 
 ## 1. patch가 필요한 이유와 fail-closed 범위
 
 Bridge의 Chat prompt, interrupt, Terminal 입력은 Herdr socket method `agent.binding`과
 `agent.bound_input`이 있어야 한다([ADR-034](adr.md#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다)).
-두 method는 `herdr` repo의 `codex/mobile-binding` branch, commit `0e672c5e`에만 있다.
+두 method는 fork [`psw7205/herdr`의 `mobile-binding` branch](https://github.com/psw7205/herdr/tree/mobile-binding),
+commit `0e672c5e`에만 있다.
 stock `0.9.1`에는 없다. patch는 macOS Claude foreground process의 PID·시작 시각·native
 session metadata를 대조해 binding을 발급하고, PTY queue가 text와 Enter를 쓰기 직전에도
 binding을 다시 검증한다.
@@ -86,8 +87,11 @@ PTY handoff나 race 통과를 뜻하지 않는다.
 ## 3. patch build
 
 `<patch-worktree>`에서 실행한다. branch는 `v0.9.1`(`065ef9d6`) 위의 단일 commit
-`0e672c5e`이며 upstream이 설정되지 않은 local branch다. 이 checkout을 잃으면 patch도 잃으므로
-`<herdr-repo>`를 지우거나 정리하기 전에 branch를 보존한다.
+`0e672c5e`다. 새로 준비할 때는 fork를 clone한다.
+
+```sh
+git clone --branch mobile-binding https://github.com/psw7205/herdr.git <patch-worktree>
+```
 
 ```sh
 git -C <patch-worktree> status --short
@@ -206,7 +210,7 @@ UI 안내는 실행해 보지 않았다. 사용자 agent가 있는 server에서 
 
 ```sh
 git -C <herdr-repo> fetch origin --tags
-git -C <patch-worktree> rebase --onto <new-tag> v0.9.1 codex/mobile-binding
+git -C <patch-worktree> rebase --onto <new-tag> v0.9.1 mobile-binding
 # <patch-worktree>에서
 just ci
 just build

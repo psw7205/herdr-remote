@@ -4,6 +4,8 @@ Herdr에서 이미 실행 중인 coding agent를 모바일 브라우저에서 �
 입력하는 single-user, single-host client다. Herdr가 process와 PTY를 소유하고,
 Chat은 native transcript를 읽어 표시한다. Bridge가 agent를 start/resume하지 않는다.
 
+[Herdr](https://github.com/ogulcancelik/herdr)의 공식 project가 아닌 개인 companion tool이다.
+
 ## 현재 지원 범위
 
 | 항목 | 상태 |
@@ -37,8 +39,9 @@ Claude의 localhost handoff와 Bridge 재시작 복구는 실제 process에서 �
 | Tailscale | 모바일 원격 접속에만 필요하다. Bridge host와 mobile device가 같은 tailnet에 로그인돼 있어야 한다 |
 
 Bridge는 Herdr가 꺼졌을 때 대신 시작하지 않는다. stock Herdr `0.9.1`에는 필수 API인
-`agent.binding`과 `agent.bound_input`이 없다. 필요한 patch는 `herdr` repo의
-`codex/mobile-binding` branch, commit `0e672c5e`다. build·설치·rollback·upgrade 절차는
+`agent.binding`과 `agent.bound_input`이 없다. 필요한 patch는 fork
+[`psw7205/herdr`의 `mobile-binding` branch](https://github.com/psw7205/herdr/tree/mobile-binding)
+(`v0.9.1` 위의 단일 commit `0e672c5e`)다. build·설치·rollback·upgrade 절차는
 [Herdr patch runbook](docs/herdr-patch.md)을 따른다. stock과 patched binary가 같은 version
 문자열을 사용할 수 있으므로 version이 아니라 `doctor`로 확인한다. Herdr updater가 stock
 binary를 설치하면 조건부 입력이 비활성화되며 Bridge는 입력을 fail closed한다.
@@ -157,6 +160,12 @@ Herdr live handoff는 테스트에서 agent PID·native session을 보존했지�
 재발급했고 desktop client가 끊긴 동안 geometry를 기본 120×40으로 변경했다. 이 동작은
 mobile Terminal의 resize와 별개다. 검증한 범위와 남은 조건은 [검증 기록](docs/records/verification.md)을 따른다.
 
+### 진단 출력 공유
+
+`doctor` JSON과 Bridge log에는 tailnet host, 소유자 login, socket·transcript 절대 경로가 들어갈 수
+있다. issue 등에 붙일 때는 이 값을 `<tailnet-host>`, `<login>`, `<path>` 같은 placeholder로 바꾼다.
+prompt와 transcript 본문은 log에 쓰지 않는다.
+
 ## 문서
 
 | 문서 | 용도 |
@@ -170,3 +179,7 @@ mobile Terminal의 resize와 별개다. 검증한 범위와 남은 조건은 [�
 | [Integration 조사](docs/records/integration-findings.md) | Herdr/Claude/Codex 코드·runtime 근거 |
 | [Herdr patch runbook](docs/herdr-patch.md) | 조건부 입력 patch의 확인·설치·rollback·upgrade |
 | [Backlog](docs/backlog.md) | 남은 작업의 우선순위·의존 관계·완료 기준 |
+
+## License
+
+[Apache License 2.0](LICENSE)
