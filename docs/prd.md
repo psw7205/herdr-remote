@@ -10,9 +10,48 @@
 **Follow-up agent:** Codex
 **Target user:** Single user / developer
 
----
+**목차**
 
-# 1. Overview
+1. [Overview](#1-overview)
+2. [Problem](#2-problem)
+3. [Product Principles](#3-product-principles)
+4. [Goals](#4-goals)
+5. [Non-Goals](#5-non-goals)
+6. [Primary User Journey](#6-primary-user-journey)
+7. [Information Architecture](#7-information-architecture)
+8. [Session Model](#8-session-model)
+9. [Data Ownership](#9-data-ownership)
+10. [Agent Adapter](#10-agent-adapter)
+11. [Unified Conversation Model](#11-unified-conversation-model)
+12. [Read Path](#12-read-path)
+13. [Write Path](#13-write-path)
+14. [Chat UI](#14-chat-ui)
+15. [Message Rendering](#15-message-rendering)
+16. [Composer](#16-composer)
+17. [Attention Model](#17-attention-model)
+18. [Permission / Question Handling](#18-permission--question-handling)
+19. [Terminal View](#19-terminal-view)
+20. [Changes View](#20-changes-view)
+21. [Connectivity](#21-connectivity)
+22. [Authentication](#22-authentication)
+23. [Reconnection Model](#23-reconnection-model)
+24. [Background Behavior](#24-background-behavior)
+25. [Notifications](#25-notifications)
+26. [PWA Requirements](#26-pwa-requirements)
+27. [Bridge Responsibilities](#27-bridge-responsibilities)
+28. [Client Responsibilities](#28-client-responsibilities)
+29. [Error Handling](#29-error-handling)
+30. [MVP Scope](#30-mvp-scope)
+31. [Post-MVP Candidates](#31-post-mvp-candidates)
+32. [Explicitly Deferred](#32-explicitly-deferred)
+33. [Success Criteria](#33-success-criteria)
+34. [Quality Criteria](#34-quality-criteria)
+35. [Major Risks](#35-major-risks)
+36. [Architecture Decision Summary](#36-architecture-decision-summary)
+37. [Core Product Definition](#37-core-product-definition)
+38. [MVP Product Boundary](#38-mvp-product-boundary)
+
+## 1. Overview
 
 Herdr Mobile Chat은 Herdr에서 이미 실행 중인 AI coding agent를 모바일에서 자연스럽게 확인하고 대화하기 위한 **chat-first remote client**다.
 
@@ -36,9 +75,7 @@ Herdr는 계속 다음을 담당한다.
 
 모바일에서 생성되는 별도의 AI conversation이나 별도의 agent process는 존재하지 않는다.
 
----
-
-# 2. Problem
+## 2. Problem
 
 Herdr는 여러 coding agent를 동시에 실행하고 관리하기 좋은 환경이지만, 모바일에서 agent와 상호작용하기에는 terminal UI의 제약이 크다.
 
@@ -65,19 +102,15 @@ Herdr는 여러 coding agent를 동시에 실행하고 관리하기 좋은 환�
 
 이다.
 
----
+## 3. Product Principles
 
-# 3. Product Principles
-
-## 3.1 Chat first
+### 3.1 Chat first
 
 기본 interaction surface는 terminal이 아니라 conversation이다.
 
 Terminal은 모든 interaction의 fallback이며 primary UI가 아니다.
 
----
-
-## 3.2 Existing session first
+### 3.2 Existing session first
 
 새로운 agent process나 conversation을 생성하지 않는다.
 
@@ -95,30 +128,15 @@ Herdr Pane
 
 두 View 모두 같은 process와 같은 native agent session을 바라본다.
 
----
-
-## 3.3 Projection, not duplication
+### 3.3 Projection, not duplication
 
 Chat UI를 위해 별도의 conversation database를 source of truth로 만들지 않는다.
 
-대신 기존 데이터를 목적에 따라 사용한다.
-
-| Data                               | Source of truth         |
-| ---------------------------------- | ----------------------- |
-| workspace / pane lifecycle         | Herdr                   |
-| agent state                        | Herdr                   |
-| agent process                      | Herdr / PTY             |
-| conversation history               | Native agent transcript |
-| current interactive terminal state | PTY                     |
-| durable command receipt            | Herdr Mobile Chat Bridge (`-receipts-dir`) |
-| mobile presentation state          | Herdr Mobile Chat       |
-| unread / UI preferences            | Herdr Mobile Chat (후속 후보) |
+대신 기존 데이터를 목적에 따라 사용한다. 데이터별 source of truth는 [§9 Data Ownership](#9-data-ownership) 표가 기준이다.
 
 Chat은 원본 session의 **projection/read model**이다.
 
----
-
-## 3.4 PTY remains the interactive truth
+### 3.4 PTY remains the interactive truth
 
 Transcript가 agent의 모든 interactive state를 표현한다고 가정하지 않는다.
 
@@ -136,9 +154,7 @@ Select an option:
 
 그 경우 사용자에게 Terminal View를 제공한다.
 
----
-
-## 3.5 Mobile lifecycle is normal behavior
+### 3.5 Mobile lifecycle is normal behavior
 
 다음 상황은 오류가 아니라 정상적인 사용 흐름으로 간주한다.
 
@@ -160,9 +176,7 @@ WebSocket lifetime != Agent session lifetime
 
 이어야 한다.
 
----
-
-# 4. Goals
+## 4. Goals
 
 MVP의 목표는 다음 사용자 흐름을 안정적으로 지원하는 것이다.
 
@@ -178,8 +192,6 @@ MVP의 목표는 다음 사용자 흐름을 안정적으로 지원하는 것이�
 * 마지막 activity
 * attention 필요 여부
 
----
-
 ### G2. 기존 agent conversation 확인
 
 사용자는 실행 중인 Claude Code 또는 Codex 세션의 기존 대화를 모바일에 적합한 형태로 읽을 수 있다.
@@ -193,8 +205,6 @@ MVP의 목표는 다음 사용자 흐름을 안정적으로 지원하는 것이�
 * tool activity
 * errors
 * system/status events
-
----
 
 ### G3. 기존 agent와 계속 대화
 
@@ -214,29 +224,21 @@ Existing Claude / Codex Process
 
 PC terminal에서 직접 입력하는 것과 동일한 session context를 유지해야 한다.
 
----
-
 ### G4. 연결이 끊겨도 agent 작업 유지
 
 브라우저가 background 상태가 되거나 WebSocket 연결이 끊겨도 agent process는 영향을 받지 않는다.
 
 재접속 시 현재 session과 conversation 상태를 복원한다.
 
----
-
 ### G5. Attention 중심 UX
 
 사용자는 여러 세션을 일일이 열어보지 않고도 어느 agent가 자신의 입력을 기다리고 있는지 파악할 수 있다.
-
----
 
 ### G6. Terminal fallback
 
 Chat UI에서 처리할 수 없는 interaction이 존재할 경우 같은 pane의 Terminal View로 즉시 전환할 수 있다.
 
----
-
-# 5. Non-Goals
+## 5. Non-Goals
 
 MVP에서는 다음 기능을 구현하지 않는다.
 
@@ -254,8 +256,6 @@ MVP에서는 다음 기능을 구현하지 않는다.
 * merge UI
 * full repository management
 
----
-
 ### Agent runtime replacement
 
 Claude Code, Codex 또는 Herdr를 자체 runtime으로 대체하지 않는다.
@@ -272,8 +272,6 @@ Claude / Codex
 
 Herdr가 runtime owner다.
 
----
-
 ### Universal agent support
 
 초기부터 모든 CLI agent를 지원하지 않는다.
@@ -286,15 +284,11 @@ Claude Code
 
 Codex는 다음 adapter다([P1-01/P1-02](backlog.md#p1--핵심-ux와-다음-agent)). 다른 agent는 adapter 확장으로 추후 지원한다.
 
----
-
 ### Public Internet access
 
 공개 SaaS 형태의 인증/계정 시스템을 만들지 않는다.
 
 서비스는 Tailnet 내부에서 사용하는 것을 기본 전제로 한다.
-
----
 
 ### Multi-user collaboration
 
@@ -302,17 +296,13 @@ MVP는 single-user product다.
 
 사용자 초대, role, organization, shared workspace 등의 개념을 도입하지 않는다.
 
----
-
 ### Multi-host
 
 MVP는 하나의 Herdr host를 대상으로 한다.
 
 다중 Herdr 서버 관리 기능은 추후 검토한다.
 
----
-
-# 6. Primary User Journey
+## 6. Primary User Journey
 
 대표적인 사용자 흐름은 다음과 같다.
 
@@ -366,9 +356,7 @@ notification (후속 optional)
 완료된 응답 / 변경사항 확인
 ```
 
----
-
-# 7. Information Architecture
+## 7. Information Architecture
 
 전체 화면 구조는 다음과 같다. 첫 slice는 Sessions, Chat, Terminal에 한정하고
 Changes와 Settings는 후속 단계다. 현재 route는 `web/src/route.ts`의 Chat과 Terminal뿐이다.
@@ -385,7 +373,7 @@ Changes와 Settings는 후속 단계다. 현재 route는 `web/src/route.ts`의 C
 └── Settings (후속)
 ```
 
-## 7.1 Sessions
+### 7.1 Sessions
 
 앱 진입 시 기본 화면이다.
 
@@ -424,9 +412,7 @@ latest activity와 last message는 Bridge가 native transcript에서 가장 최�
 목록 응답의 additive field `last_activity`, `last_message`로 전달하고 terminal text로 추측하지 않는다.
 Chat history가 없거나 transcript가 invalid이면 두 field를 모두 생략한다.
 
----
-
-# 8. Session Model
+## 8. Session Model
 
 사용자가 보는 하나의 채팅방은 **하나의 native agent session**에 대응한다.
 
@@ -491,70 +477,39 @@ Herdr patch 누락, 일시적 binding 오류 같은 binding·capability 손실�
 `completed`는 turn 완료 상태이며 살아 있는 process에서 후속 prompt가 가능하다.
 historical transcript만 남은 session을 탐색하는 기능은 첫 slice에서 제외한다.
 
----
+## 9. Data Ownership
 
-# 9. Data Ownership
+데이터별 owner와 source of truth는 다음 표가 기준이다. Herdr Mobile Chat은 owner가 Herdr Mobile Chat인 행의 정보만 자체 관리한다.
 
-## Herdr
-
-다음을 소유한다.
-
-```text
-workspace
-tab
-pane
-PTY
-agent process
-agent lifecycle
-agent status
-native agent session association
-```
-
----
-
-## Claude / Codex
-
-다음을 소유한다.
-
-```text
-conversation history
-assistant messages
-tool execution records
-native session metadata
-```
+| Data | Owner / source of truth | 비고 |
+| --- | --- | --- |
+| workspace / tab / pane lifecycle | Herdr | |
+| PTY | Herdr | |
+| current interactive terminal state | PTY | [§3.4](#34-pty-remains-the-interactive-truth) |
+| agent process | Herdr / PTY | |
+| agent lifecycle | Herdr | |
+| agent status (agent state) | Herdr | |
+| native agent session association | Herdr | |
+| conversation history | Claude / Codex (native agent transcript) | |
+| assistant messages | Claude / Codex (native agent transcript) | |
+| tool execution records | Claude / Codex (native agent transcript) | |
+| native session metadata | Claude / Codex | |
+| durable command receipt | Herdr Mobile Chat Bridge | 구현. Bridge disk (`-receipts-dir`). 유일한 disk persistence |
+| event cursor | Herdr Mobile Chat Bridge | 구현. connection 단위 runtime state. 저장하지 않는다 |
+| draft / pending command | Herdr Mobile Chat client | 구현. browser `sessionStorage` |
+| mobile presentation state | Herdr Mobile Chat | |
+| unread / last read position | Herdr Mobile Chat | 후속 후보 |
+| notification state | Herdr Mobile Chat | 후속 후보 |
+| favorites | Herdr Mobile Chat | 후속 후보 |
+| UI / local preferences | Herdr Mobile Chat | 후속 후보 |
 
 가능한 경우 agent가 생성하는 native transcript를 그대로 이용한다.
-
----
-
-## Herdr Mobile Chat
-
-다음 정보만 자체 관리한다.
-
-현재 구현:
-
-```text
-durable command receipt   Bridge disk (-receipts-dir). 유일한 disk persistence
-event cursor              connection 단위 runtime state. 저장하지 않는다
-draft / pending command   browser sessionStorage
-```
-
-후속 후보:
-
-```text
-last read position
-notification state
-favorites
-local preferences
-```
 
 conversation 전체를 별도 DB에 복제하는 것은 기본 설계가 아니다.
 
 필요하다면 성능 최적화를 위한 cache/index는 허용하지만 source of truth가 되지는 않는다.
 
----
-
-# 10. Agent Adapter
+## 10. Agent Adapter
 
 Agent마다 transcript 형식과 interaction 방식이 다르기 때문에 adapter 계층을 둔다.
 
@@ -584,9 +539,7 @@ Codex         후속 (P1-01/P1-02)
 
 Adapter는 agent native event를 공통 domain event로 변환한다.
 
----
-
-# 11. Unified Conversation Model
+## 11. Unified Conversation Model
 
 클라이언트가 Claude/Codex 개별 transcript format을 알아서는 안 된다.
 
@@ -611,9 +564,7 @@ Bridge에서 다음과 같은 semantic event로 normalize한다.
 
 불확실한 terminal interaction을 추측하여 structured event로 변환하지 않는다.
 
----
-
-# 12. Read Path
+## 12. Read Path
 
 Chat history는 다음 경로로 생성된다.
 
@@ -649,9 +600,7 @@ Chat View
   안내, slash command·bash mode의 호출과 출력, background 작업 알림이 여기에 해당한다. 판정은 Agent
   Adapter가 확인된 형식에만 적용하고, 식별하지 못한 형식은 표시한다.
 
----
-
-# 13. Write Path
+## 13. Write Path
 
 사용자 메시지는 transcript에 직접 쓰지 않는다.
 
@@ -684,9 +633,7 @@ Client는 응답을 받기 전 브라우저가 reload되더라도 같은 초안�
 Chat의 user message는 native transcript에서 관찰한 뒤 확정한다. 전송 중 표시는 별도의 pending UI다.
 Herdr 조건부 write가 없으면 조회 후 입력하는 workaround로 이 보장을 대체하지 않는다.
 
----
-
-# 14. Chat UI
+## 14. Chat UI
 
 Session 기본 화면이다.
 
@@ -717,11 +664,9 @@ Composer
 └ Send
 ```
 
----
+## 15. Message Rendering
 
-# 15. Message Rendering
-
-## Assistant Message
+### Assistant Message
 
 지원:
 
@@ -737,9 +682,7 @@ Composer
 
 Code block에는 모바일에서 쉽게 사용할 수 있는 copy action을 제공한다.
 
----
-
-## Tool Card
+### Tool Card
 
 후속 optional 기능이다. 현재 Chat은 tool 기록을 표시하지 않는다.
 
@@ -763,9 +706,7 @@ tool call은 기본적으로 compact하게 표시한다.
 
 사용자가 필요할 때 상세 내용을 펼칠 수 있다.
 
----
-
-## Status Event
+### Status Event
 
 상태 변화는 conversation을 방해하지 않도록 작게 표현한다.
 
@@ -779,9 +720,7 @@ Compacting context...
 Waiting for input
 ```
 
----
-
-# 16. Composer
+## 16. Composer
 
 모바일에서 가장 많이 사용하는 control이다.
 
@@ -802,9 +741,7 @@ Waiting for input
 
 첨부가 agent CLI에서 직접 지원되지 않는 경우 Bridge가 host filesystem에 저장하고 접근 가능한 path를 prompt에 전달하는 방식 등을 adapter가 결정한다.
 
----
-
-# 17. Attention Model
+## 17. Attention Model
 
 Session에는 presentation용 status를 계산한다.
 
@@ -832,9 +769,7 @@ agent explicitly waiting for user
 
 터미널 문자열을 임의 정규식으로 분석해 상태를 추측하는 것은 최소화한다.
 
----
-
-# 18. Permission / Question Handling
+## 18. Permission / Question Handling
 
 Agent Adapter가 충분히 구조화된 정보를 제공할 수 있을 경우 Chat에서 native card로 표현한다.
 
@@ -872,9 +807,7 @@ Agent requires terminal interaction
 
 정확하지 않은 자동화를 제공하는 것보다 terminal fallback을 우선한다.
 
----
-
-# 19. Terminal View
+## 19. Terminal View
 
 Terminal은 동일 Herdr pane의 실제 PTY를 보여준다.
 
@@ -904,9 +837,7 @@ Terminal observer는 기존 session만 관찰하며 resume/start/resize/takeover
 raw input에도 동일한 runtime binding 보호를 적용한다. observer disconnect는 agent lifecycle을 바꾸지 않는다.
 현재 Herdr direct attach는 이 조건을 충족하지 않으므로 그대로 proxy하지 않는다.
 
----
-
-# 20. Changes View
+## 20. Changes View
 
 Git working tree의 변경 파일을 모바일에서 읽는 후속 optional 기능이다.
 사용자 변경이 섞일 수 있으므로 특정 agent의 변경이라고 단정하지 않는다.
@@ -930,9 +861,7 @@ added / deleted line count
 
 Git workflow를 모바일에서 완성하는 것이 목적이 아니다.
 
----
-
-# 21. Connectivity
+## 21. Connectivity
 
 기본 배포 모델:
 
@@ -953,9 +882,7 @@ Bridge를 public interface에 직접 bind하지 않는 구성을 기본으로 �
 
 외부 인터넷 공개는 지원 대상이 아니다.
 
----
-
-# 22. Authentication
+## 22. Authentication
 
 MVP에는 별도의 회원가입 / login system을 도입하지 않는다.
 
@@ -983,9 +910,7 @@ role
 
 등의 인증 시스템은 구축하지 않는다.
 
----
-
-# 23. Reconnection Model
+## 23. Reconnection Model
 
 Client connection은 disposable하다.
 
@@ -1024,9 +949,7 @@ Bridge restart, transcript 교체, 복구 불가능한 resync는 epoch를 바꾼
 
 이다.
 
----
-
-# 24. Background Behavior
+## 24. Background Behavior
 
 PWA가 background로 이동했을 때 client connection이 유지된다고 가정하지 않는다.
 
@@ -1042,9 +965,7 @@ restore missing messages
 update attention state
 ```
 
----
-
-# 25. Notifications
+## 25. Notifications
 
 Notification은 후속 optional 기능이며 첫 slice 및 핵심 MVP 필수 조건에서 제외한다.
 구현 시 대상은 두 종류로 제한한다.
@@ -1067,9 +988,7 @@ notification을 누르면 해당 session으로 이동한다.
 
 Web Push가 플랫폼 제약으로 충분하지 않은 경우 네이티브 클라이언트 전환 판단의 주요 근거로 사용한다.
 
----
-
-# 26. PWA Requirements
+## 26. PWA Requirements
 
 초기 client는 mobile-first Web/PWA다.
 
@@ -1085,9 +1004,7 @@ Web Push가 플랫폼 제약으로 충분하지 않은 경우 네이티브 클�
 
 Desktop 지원은 가능하지만 desktop-first layout은 별도로 최적화하지 않는다.
 
----
-
-# 27. Bridge Responsibilities
+## 27. Bridge Responsibilities
 
 Bridge는 프로젝트의 핵심 backend component다.
 
@@ -1117,9 +1034,7 @@ replace Herdr lifecycle
 become an IDE backend
 ```
 
----
-
-# 28. Client Responsibilities
+## 28. Client Responsibilities
 
 Client는 thin presentation layer를 지향한다.
 
@@ -1139,9 +1054,7 @@ local presentation preferences
 
 Agent별 transcript logic을 client에 넣지 않는다.
 
----
-
-# 29. Error Handling
+## 29. Error Handling
 
 사용자에게 internal adapter 오류를 그대로 노출하지 않는다.
 
@@ -1192,9 +1105,7 @@ Agent continues running.
 
 Client connection loss가 agent process loss처럼 보이면 안 된다.
 
----
-
-# 30. MVP Scope
+## 30. MVP Scope
 
 아래 표는 핵심 MVP와 후속 optional capability를 구분한다.
 첫 구현은 Claude 하나의 discovery → transcript Chat → 동일 PTY prompt → transcript 응답이며,
@@ -1229,9 +1140,7 @@ write-enabled UI를 구현 완료로 간주하지 않는다. 세부 gate와 미�
 | Completion notification | 후속 optional |
 | Input-required notification | 후속 optional |
 
----
-
-# 31. Post-MVP Candidates
+## 31. Post-MVP Candidates
 
 다음은 MVP 완료 후 실제 사용 과정에서 필요성이 확인될 때만 추가한다.
 
@@ -1263,9 +1172,7 @@ native push infrastructure
 session analytics
 ```
 
----
-
-# 32. Explicitly Deferred
+## 32. Explicitly Deferred
 
 다음 기능은 요구가 생기더라도 바로 추가하지 않는다.
 
@@ -1284,61 +1191,43 @@ agent-to-agent workflow
 
 제품이 다시 generic AI IDE로 확장되는 것을 방지하기 위한 경계다.
 
----
-
-# 33. Success Criteria
+## 33. Success Criteria
 
 MVP는 다음 조건을 만족하면 성공으로 판단한다.
 
-## Session continuity
+### Session continuity
 
 PC에서 실행한 Claude/Codex 세션을 모바일에서 별도 설정 없이 찾아볼 수 있다.
 
----
-
-## Conversation continuity
+### Conversation continuity
 
 PC terminal에서 입력한 대화와 모바일에서 입력한 대화가 동일 conversation에 나타난다.
 
----
-
-## No duplicate agent
+### No duplicate agent
 
 모바일에서 prompt를 보내더라도 새로운 Claude/Codex process 또는 session이 생성되지 않는다.
 
----
-
-## Mobile usability
+### Mobile usability
 
 대부분의 일반적인 follow-up interaction은 Terminal View를 열지 않고 Chat View에서 완료할 수 있다.
 
----
-
-## Recovery
+### Recovery
 
 모바일 화면을 잠갔다가 다시 열었을 때 agent 작업과 conversation이 정상 복구된다.
 
----
-
-## Attention
+### Attention
 
 agent가 사용자 입력을 필요로 할 경우 Session 목록에서 이를 쉽게 식별할 수 있다.
 
----
-
-## Terminal escape hatch
+### Terminal escape hatch
 
 Chat parser가 처리하지 못하는 CLI 상태에서도 사용자는 기존 pane을 직접 제어할 수 있다.
 
----
-
-## Private access
+### Private access
 
 Tailnet 밖에서는 기본적으로 서비스에 접근할 수 없다.
 
----
-
-# 34. Quality Criteria
+## 34. Quality Criteria
 
 ### Reliability
 
@@ -1356,35 +1245,27 @@ agent CLI version 변경으로 structured parsing 일부가 실패하더라도 T
 
 새로운 persistence나 abstraction은 명확한 필요가 있을 때만 추가한다.
 
----
+## 35. Major Risks
 
-# 35. Major Risks
-
-## Transcript format changes
+### Transcript format changes
 
 Claude Code 또는 Codex transcript는 외부 consumer를 위한 stable API가 아닐 수 있다.
 
 따라서 adapter 경계를 명확히 하고 parser failure가 전체 시스템 failure로 이어지지 않도록 한다.
 
----
-
-## Interactive terminal state
+### Interactive terminal state
 
 모든 CLI interaction을 transcript에서 재구성할 수 없다.
 
 Terminal fallback을 first-class capability로 유지한다.
 
----
-
-## PWA background limitations
+### PWA background limitations
 
 모바일 OS가 background connection이나 notification을 제한할 수 있다.
 
 실제 사용 결과 이것이 핵심 UX를 심각하게 제한한다면 Web UI를 유지하면서 별도 native client를 검토한다.
 
----
-
-## Scope expansion
+### Scope expansion
 
 파일 편집, Git, preview, browser 등의 기능을 추가하기 시작하면 모바일 IDE가 될 가능성이 높다.
 
@@ -1394,32 +1275,28 @@ MVP의 핵심 질문은 항상 다음이어야 한다.
 
 아니라면 기본적으로 범위 밖이다.
 
----
-
-# 36. Architecture Decision Summary
+## 36. Architecture Decision Summary
 
 현재까지 확정된 주요 결정은 다음과 같다.
 
-| Decision                    | Choice                           |
-| --------------------------- | -------------------------------- |
-| Runtime owner               | Herdr                            |
-| Agent owner                 | Claude Code / Codex              |
-| Conversation source         | Native transcript                |
-| Interactive source of truth | PTY                              |
-| Chat model                  | Projection over existing session |
-| User input path             | Existing Herdr pane              |
-| First client                | Web / PWA                        |
-| Network                     | localhost 또는 Tailscale Serve     |
-| User model                  | Single user                      |
-| Host model                  | Single host                      |
-| Primary UX                  | Chat-first                       |
-| Terminal                    | Fallback                         |
-| Conversation DB             | No independent source of truth   |
-| Initial agents              | Claude Code, 이후 Codex           |
+| Decision | Choice | 근거 |
+| --- | --- | --- |
+| Runtime owner | Herdr | [ADR-001](adr.md#adr-001--herdr를-runtime-owner로-유지한다) |
+| Agent owner | Claude Code / Codex | [ADR-002](adr.md#adr-002--chat은-새로운-conversation이-아니라-projection이다) |
+| Conversation source | Native transcript | [ADR-002](adr.md#adr-002--chat은-새로운-conversation이-아니라-projection이다), [ADR-003](adr.md#adr-003--native-agent-session-id를-conversation-identity로-사용한다) |
+| Interactive source of truth | PTY | [ADR-005](adr.md#adr-005--pty를-interactive-truth로-유지한다) |
+| Chat model | Projection over existing session | [ADR-002](adr.md#adr-002--chat은-새로운-conversation이-아니라-projection이다) |
+| User input path | Existing Herdr pane | [ADR-004](adr.md#adr-004--read-path와-write-path를-분리한다), [ADR-034](adr.md#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다) |
+| First client | Web / PWA | [ADR-012](adr.md#adr-012--webpwa를-첫-client로-사용한다) |
+| Network | localhost 또는 Tailscale Serve | [ADR-024](adr.md#adr-024--tailnet을-primary-security-boundary로-사용한다) |
+| User model | Single user | [§5 Multi-user collaboration](#multi-user-collaboration) |
+| Host model | Single host | [ADR-025](adr.md#adr-025--host는-mvp에서-하나만-지원한다) |
+| Primary UX | Chat-first | [§3.1](#31-chat-first), [ADR-013](adr.md#adr-013--terminal은-chat과-동일-session의-secondary-view다) |
+| Terminal | Fallback | [ADR-013](adr.md#adr-013--terminal은-chat과-동일-session의-secondary-view다), [ADR-035](adr.md#adr-035--mobile-terminal은-기존-pty의-passive-mirror다) |
+| Conversation DB | No independent source of truth | [ADR-002](adr.md#adr-002--chat은-새로운-conversation이-아니라-projection이다) |
+| Initial agents | Claude Code, 이후 Codex | [§5 Universal agent support](#universal-agent-support) |
 
----
-
-# 37. Core Product Definition
+## 37. Core Product Definition
 
 한 문장으로 정의하면:
 
@@ -1429,9 +1306,7 @@ MVP의 핵심 질문은 항상 다음이어야 한다.
 
 > **A mobile-first projection layer over existing Herdr-managed agent sessions, combining Herdr lifecycle state, native agent transcripts, and PTY control into a unified chat experience.**
 
----
-
-# 38. MVP Product Boundary
+## 38. MVP Product Boundary
 
 최종적으로 MVP는 다음 영역까지만 책임진다.
 
