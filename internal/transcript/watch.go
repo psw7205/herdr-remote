@@ -9,6 +9,7 @@ import (
 
 // Watch establishes directory observation before the initial read. Polling
 // reconciles missed notifications by reading only after the saved offset.
+// Cancelling ctx stops reading between batches and closes the fsnotify watcher.
 func Watch(ctx context.Context, path string, apply func(Batch) error, failed func(error)) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -20,7 +21,7 @@ func Watch(ctx context.Context, path string, apply func(Batch) error, failed fun
 	}
 	tail := NewTailer(path)
 	drain := func() {
-		for {
+		for ctx.Err() == nil {
 			batch, e := tail.Read()
 			if e != nil {
 				failed(e)

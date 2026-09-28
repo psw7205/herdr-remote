@@ -966,3 +966,155 @@ func TestPreviewTextCollapsesWhitespaceAndCutsRunes(t *testing.T) {
 		}
 	}
 }
+
+// watcherOf returns the item's watcher done channel, nil when none runs.
+func watcherOf(r *Registry, id string) chan struct{} {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.items[id].done
+}
+
+func appendUserLine(t *testing.T, root, uuid, parent string) {
+	t.Helper()
+	f, err := os.OpenFile(filepath.Join(root, "projects", "repo", nativeA+".jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	line := `{"type":"user","uuid":"` + uuid + `","parentUuid":"` + parent + `","sessionId":"` + nativeA + `","message":{"role":"user","content":"sample"}}` + "\n"
+	if _, err := f.WriteString(line); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func waitHistory(t *testing.T, r *Registry, id, uuid string) stream.Snapshot {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		snap, _, err := r.Get(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(snap.Data), `"`+uuid+`"`) {
+			return snap
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("%s not loaded: %s", uuid, snap.Data)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func waitClosed(t *testing.T, done chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("transcript watcher still running")
+	}
+}
+
+// The watcher, and with it the fsnotify watcher on the transcript directory,
+// lives only while the item is active. Unverified keeps it; ended releases it;
+// a revive re-reads the transcript under a new epoch without duplicates.
+func TestTranscriptWatcherFollowsItemLifecycle(t *testing.T) {
+	r, f, root := boundRegistry(t)
+	id := "claude:" + nativeA
+	first := watcherOf(r, id)
+	if first == nil {
+		t.Fatal("active item has no watcher")
+	}
+	a := f.agents[0]
+	a.TerminalID = "term_b"
+
+	// Unverified: the agent still writes, so Chat keeps updating on the same watcher.
+	f.agents = []herdr.Agent{a}
+	f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, meta, _ := r.Get(id); meta.Lifecycle != LifecycleUnverified || watcherOf(r, id) != first {
+		t.Fatalf("unverified item lost its watcher: %+v", meta)
+	}
+	appendUserLine(t, root, "u2", "u-"+nativeA)
+	epoch := waitHistory(t, r, id, "u2").Cursor.Epoch
+
+	// Ended: the watcher exits and later appends are not read.
+	f.agents = nil
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if watcherOf(r, id) != nil {
+		t.Fatal("ended item kept its watcher")
+	}
+	waitClosed(t, first)
+	before, _, _ := r.Get(id)
+	appendUserLine(t, root, "u3", "u2")
+	if after, _, _ := r.Get(id); after.Cursor != before.Cursor || string(after.Data) != string(before.Data) {
+		t.Fatalf("ended item changed: %+v -> %+v", before.Cursor, after.Cursor)
+	}
+
+	// Unbound pane: item, then revive: a new watcher resyncs under a new epoch
+	// and the pane: item is superseded without ever owning a watcher.
+	f.agents = []herdr.Agent{a}
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if watcherOf(r, "pane:w1:p2") != nil {
+		t.Fatal("pane: item without Chat has a watcher")
+	}
+	f.bindingErr = nil
+	f.bindings[a.PaneID] = herdr.Binding{Token: "C", TerminalID: "term_b", NativeSessionID: nativeA, ProcessID: 14, Agent: "claude", CWD: "repo"}
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, meta, _ := r.Get("pane:w1:p2"); meta.Lifecycle != LifecycleSuperseded || watcherOf(r, "pane:w1:p2") != nil {
+		t.Fatalf("superseded pane item %+v", meta)
+	}
+	second := watcherOf(r, id)
+	if second == nil || second == first {
+		t.Fatal("revived item has no new watcher")
+	}
+	snap := waitHistory(t, r, id, "u3")
+	if snap.Cursor.Epoch == epoch {
+		t.Fatal("revive resync kept the old epoch")
+	}
+	var messages []Message
+	if err := json.Unmarshal(snap.Data, &messages); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, m := range messages {
+		ids = append(ids, m.ID)
+	}
+	if !slices.Equal(ids, []string{"u-" + nativeA, "u2", "u3"}) {
+		t.Fatalf("revived history %v", ids)
+	}
+
+	// Ending again releases the restarted watcher too.
+	f.agents = nil
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitClosed(t, second)
+}
+
+// A cancelled watcher that is still finishing a read must not publish into the
+// item, which may already belong to its successor.
+func TestCancelledWatcherPublishesNothing(t *testing.T) {
+	root := t.TempDir()
+	writeTranscript(t, root, "repo", nativeA)
+	path, err := claude.Resolve(root, nativeA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := &Item{nativeID: nativeA, path: path, meta: Meta{ID: "claude:" + nativeA, Chat: true, Active: true}, projection: claude.NewProjection(), stream: stream.New("claude:" + nativeA)}
+	before := item.stream.Snapshot()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	item.watch(ctx)
+	if after := item.stream.Snapshot(); after.Cursor != before.Cursor || string(after.Data) != string(before.Data) || item.invalid || item.last != nil {
+		t.Fatalf("cancelled watcher published: %+v %s", after.Cursor, after.Data)
+	}
+}

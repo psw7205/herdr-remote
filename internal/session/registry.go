@@ -76,6 +76,10 @@ type Item struct {
 	lastError  string
 	loading    bool
 	invalid    bool
+	// cancel stops the transcript watcher and done closes when it has
+	// returned; both are nil while no watcher runs. Guarded by Registry.mu.
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 type Registry struct {
 	mu         sync.RWMutex
@@ -298,6 +302,7 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		item.meta.Active = false
 		item.meta.Binding = ""
 		item.meta.Terminal = false
+		item.stopWatch()
 		if next := successors[item.meta.PaneID]; next != "" && id == "pane:"+item.meta.PaneID {
 			item.meta.SuccessorID = next
 			item.meta.Status = found[next].Status
@@ -313,6 +318,11 @@ func (r *Registry) Refresh(ctx context.Context) error {
 				item.stream.Append("agent.status", map[string]any{"status": meta.Status, "lifecycle": lifecycle(meta)})
 			}
 			item.meta = meta
+			// A revived item re-reads its transcript from the start, so the
+			// first batch resets the projection and replaces the stream epoch.
+			if meta.Chat && item.cancel == nil {
+				item.startWatch(r.ctx)
+			}
 			continue
 		}
 		item := &Item{meta: meta, path: paths[id], stream: stream.New(id), projection: claude.NewProjection()}
@@ -321,15 +331,48 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		}
 		r.items[id] = item
 		if meta.Chat {
-			go item.watch(r.ctx)
+			item.startWatch(r.ctx)
 		}
 	}
 	return nil
 }
+
+// startWatch and stopWatch run under Registry.mu. The watcher lives only while
+// the item is active (including unverified, whose agent still writes the
+// transcript); ended and superseded items keep their last stream state.
+func (item *Item) startWatch(parent context.Context) {
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	item.cancel, item.done = cancel, done
+	go func() {
+		defer close(done)
+		item.watch(ctx)
+	}()
+}
+func (item *Item) stopWatch() {
+	if item.cancel != nil {
+		item.cancel()
+		item.cancel, item.done = nil, nil
+	}
+}
 func (item *Item) watch(ctx context.Context) {
-	err := transcript.Watch(ctx, item.path, item.apply, func(err error) {
+	// A cancelled watcher may still be finishing a read while its successor
+	// starts. Checking ctx under item.mu keeps its late results out of the
+	// successor's projection: cancel happens before the successor starts.
+	apply := func(batch transcript.Batch) error {
 		item.mu.Lock()
 		defer item.mu.Unlock()
+		if ctx.Err() != nil {
+			return nil
+		}
+		return item.applyLocked(batch)
+	}
+	err := transcript.Watch(ctx, item.path, apply, func(err error) {
+		item.mu.Lock()
+		defer item.mu.Unlock()
+		if ctx.Err() != nil {
+			return
+		}
 		if item.lastError != err.Error() {
 			item.invalid = true
 			item.lastError = err.Error()
@@ -337,7 +380,7 @@ func (item *Item) watch(ctx context.Context) {
 			slog.Warn("transcript watcher", "error", err)
 		}
 	})
-	if err != nil {
+	if err != nil && ctx.Err() == nil {
 		slog.Error("transcript watcher stopped", "error", err)
 		item.stream.Append("session.error", map[string]string{"message": "Transcript watcher unavailable. Open Terminal."})
 	}
@@ -345,6 +388,9 @@ func (item *Item) watch(ctx context.Context) {
 func (item *Item) apply(batch transcript.Batch) error {
 	item.mu.Lock()
 	defer item.mu.Unlock()
+	return item.applyLocked(batch)
+}
+func (item *Item) applyLocked(batch transcript.Batch) error {
 	if batch.Reset {
 		item.projection = claude.NewProjection()
 		item.last = nil
