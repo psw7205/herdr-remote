@@ -70,16 +70,34 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		remoteOrigin := s.tailnetHost != "" && r.Header.Get("Origin") == "https://"+s.tailnetHost
-		forwardedHost := r.Header.Get("X-Forwarded-Host")
-		remoteProxy := s.tailnetHost != "" && (forwardedHost == s.tailnetHost || r.Header.Get("X-Forwarded-Proto") == "https")
-		if remoteHost || remoteOrigin || remoteProxy {
-			if s.tailnetLogin == "" || !strings.EqualFold(r.Header.Get("Tailscale-User-Login"), s.tailnetLogin) {
+		// Serve forwards the client's Host header unchanged, so a peer can forge a
+		// loopback Host. The headers Serve adds mark a proxied request regardless
+		// of Host and of whether a tailnet host was resolved at startup.
+		if remoteHost || remoteOrigin || proxied(r) {
+			if s.tailnetHost == "" || s.tailnetLogin == "" || !strings.EqualFold(r.Header.Get("Tailscale-User-Login"), s.tailnetLogin) {
 				problem(w, 403, "TAILNET_IDENTITY_REJECTED")
+				return
+			}
+			if !remoteHost {
+				problem(w, 403, "HOST_REJECTED")
 				return
 			}
 		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+// proxyHeaders are added by Tailscale Serve. A direct local browser request,
+// including the Vite dev proxy (no xfwd), carries none of them.
+var proxyHeaders = []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Tailscale-User-Login", "Tailscale-User-Name"}
+
+func proxied(r *http.Request) bool {
+	for _, name := range proxyHeaders {
+		if len(r.Header.Values(name)) > 0 {
+			return true
+		}
+	}
+	return false
 }
 func jsonResponse(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

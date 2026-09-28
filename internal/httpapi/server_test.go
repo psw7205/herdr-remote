@@ -233,3 +233,86 @@ func TestRemoteOriginRequiresIdentityEvenWithLoopbackProxyHost(t *testing.T) {
 		t.Fatalf("missing Serve identity was accepted: %d", out.Code)
 	}
 }
+
+func gateServer(t *testing.T, host, login, static string) http.Handler {
+	t.Helper()
+	store, e := command.Open(t.TempDir())
+	if e != nil {
+		t.Fatal(e)
+	}
+	server := New(&fakeSessions{hub: stream.New("session")}, store, []string{"http://127.0.0.1:8787"}, static)
+	server.SetTailnetIdentity(host, login)
+	return server.Handler()
+}
+func serveGate(h http.Handler, method, host string, header map[string]string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, "http://"+host+"/api/sessions", nil)
+	for name, value := range header {
+		req.Header.Set(name, value)
+	}
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, req)
+	return out
+}
+func problemCode(t *testing.T, out *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body map[string]string
+	if e := json.Unmarshal(out.Body.Bytes(), &body); e != nil {
+		t.Fatalf("status %d body %q: %v", out.Code, out.Body.String(), e)
+	}
+	return body["error"]
+}
+
+// Serve forwards the client's Host unchanged, so a tailnet peer can send a
+// loopback Host. The headers Serve adds must still mark the request as remote.
+func TestForgedLoopbackHostWithServeHeadersIsRejected(t *testing.T) {
+	forged := map[string]string{
+		"X-Forwarded-For":      "100.64.0.2",
+		"X-Forwarded-Host":     "127.0.0.1:8787",
+		"X-Forwarded-Proto":    "https",
+		"Tailscale-User-Login": "peer@example.com",
+		"Tailscale-User-Name":  "Peer",
+	}
+	for _, host := range []string{"", "node.tailnet.ts.net"} {
+		h := gateServer(t, host, "owner@example.com", "")
+		for name, value := range forged {
+			for _, method := range []string{http.MethodGet, http.MethodPost} {
+				out := serveGate(h, method, "127.0.0.1:8787", map[string]string{name: value, "Origin": "http://127.0.0.1:8787"})
+				if out.Code != 403 || problemCode(t, out) != "TAILNET_IDENTITY_REJECTED" {
+					t.Fatalf("tailnet host %q: %s with %s accepted: %d %s", host, method, name, out.Code, out.Body.String())
+				}
+			}
+		}
+	}
+}
+func TestServeRequestRequiresTailnetHostAndOwner(t *testing.T) {
+	h := gateServer(t, "node.tailnet.ts.net", "owner@example.com", "")
+	serve := func(login string) map[string]string {
+		header := map[string]string{
+			"X-Forwarded-For":   "100.64.0.2",
+			"X-Forwarded-Host":  "node.tailnet.ts.net",
+			"X-Forwarded-Proto": "https",
+		}
+		if login != "" {
+			header["Tailscale-User-Login"] = login
+		}
+		return header
+	}
+	if out := serveGate(h, http.MethodGet, "node.tailnet.ts.net", serve("Owner@Example.com")); out.Code != 200 {
+		t.Fatalf("genuine Serve request rejected: %d %s", out.Code, out.Body.String())
+	}
+	// Serve adds no identity headers for tagged source nodes.
+	if out := serveGate(h, http.MethodGet, "node.tailnet.ts.net", serve("")); out.Code != 403 || problemCode(t, out) != "TAILNET_IDENTITY_REJECTED" {
+		t.Fatalf("tagged node accepted: %d %s", out.Code, out.Body.String())
+	}
+	// A genuine Serve request carries the tailnet Host, never a loopback one.
+	if out := serveGate(h, http.MethodGet, "127.0.0.1:8787", serve("owner@example.com")); out.Code != 403 || problemCode(t, out) != "HOST_REJECTED" {
+		t.Fatalf("loopback Host with owner login accepted: %d %s", out.Code, out.Body.String())
+	}
+	// Local browser and Vite dev proxy requests carry no Serve headers.
+	for _, host := range []string{"", "node.tailnet.ts.net"} {
+		local := gateServer(t, host, "owner@example.com", "")
+		if out := serveGate(local, http.MethodGet, "127.0.0.1:8787", map[string]string{"Origin": "http://127.0.0.1:5173"}); out.Code != 200 {
+			t.Fatalf("tailnet host %q: local request rejected: %d %s", host, out.Code, out.Body.String())
+		}
+	}
+}
