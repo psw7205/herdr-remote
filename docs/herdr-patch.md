@@ -1,6 +1,6 @@
 # Herdr patch 유지 runbook
 
-2026-09-24 기준. Backlog [P0-04](backlog.md#p0--배포와-핵심-안정성)의 운영 절차다.
+2026-09-28 기준. Backlog [P0-04](backlog.md#p0--배포와-핵심-안정성)의 운영 절차다.
 Herdr 연동 근거는 [Integration 조사](records/integration-findings.md), 실제 검증 기록은
 [검증 기록](records/verification.md)을 따른다.
 
@@ -8,7 +8,7 @@ Herdr 연동 근거는 [Integration 조사](records/integration-findings.md), �
 
 | 표기 | 의미 |
 | --- | --- |
-| **실측** | 이 host에서 실제로 실행해 결과를 확인했다 |
+| **실측** | 작성자의 macOS host에서 실제로 실행해 결과를 확인했다 |
 | **code 확인** | `herdr` repo source와 설정을 읽어 확인했으나 이 절차로 실행하지 않았다 |
 | **미검증** | 실행하지 않았다. 격리 환경에서 검증하기 전에는 기대 동작일 뿐이다 |
 
@@ -78,11 +78,9 @@ write 전에 거부하므로 Bridge는 `delivery_unknown`이 아니라 `rejected
 receipt에 기록하고, 같은 `command_id` 재시도에는 재전송 없이 이 결과를 돌려준다. Chat UI는
 conditional input API가 없어 입력을 전달하지 않았다는 안내를 표시한다.
 
-상태: `conditional_input` 감지·UI 안내는 이 문서와 같은 P0-04 작업에서 추가됐다.
-stock server를 상대로 `unsupported`가 표시되는지는 **미검증**이다. 기존 `doctor`의
-"No verified native runtime binding" blocker는 synthetic fixture test로 확인했다.
-`conditional_input` blocker의 검증 범위는 해당 Go 변경의 기록을 따른다. `doctor` 성공은 capability 관찰이며
-PTY handoff나 race 통과를 뜻하지 않는다.
+상태: stock server를 상대로 `unsupported`가 표시되는지는 **미검증**이다. `doctor`의
+"No verified native runtime binding" blocker와 `conditional_input` blocker는 synthetic fixture
+test로 확인했다. `doctor` 성공은 capability 관찰이며 PTY handoff나 race 통과를 뜻하지 않는다.
 
 ## 3. patch build
 
@@ -184,7 +182,8 @@ mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
 
 - agent process는 유지되고 `conditional_input`은 `unsupported`가 된다.
 - Bridge는 Chat 입력과 Terminal을 fail closed하고 UI에 안내를 표시한다.
-- 열린 Chat은 P0-07 때문에 `ended`로 보일 수 있다. agent 종료로 해석하지 않는다.
+- 열린 `claude:` session은 `ended`가 아닌 `unverified`로 남고 입력과 Terminal이 fail closed한다
+  (P0-07). agent 종료로 해석하지 않는다.
 
 상태: **미검증**. patch server → stock import의 handoff 호환성, `unsupported` 판정,
 UI 안내는 실행해 보지 않았다. 사용자 agent가 있는 server에서 처음 시도하지 않는다.
@@ -202,9 +201,9 @@ UI 안내는 실행해 보지 않았다. 사용자 agent가 있는 server에서 
   `herdr update`(또는 `--handoff`)를 실행하면 patch가 stock으로 교체된다. 자동 설치는 없다.
 - `herdr update --handoff`는 교체 후 live handoff까지 수행한다. agent는 살아 있지만 조건부
   입력만 조용히 사라진다. `conditional_input` 감지가 이 경우를 드러내는 신호다.
-- 현재 Herdr 설정은 `[update] channel = "stable"`이다. `[update]`에는 `version_check`,
-  `manifest_check` key가 있으나 background 확인을 끄는 설정이다. 수동 `herdr update`를
-  막는 설정은 확인되지 않았다(**code 확인**, 설정 변경은 하지 않음).
+- Herdr 설정의 `[update]`에는 `channel` 외에 `version_check`, `manifest_check` key가 있으나
+  background 확인을 끄는 설정이다. 수동 `herdr update`를 막는 설정은 확인되지 않았다
+  (**code 확인**).
 
 새 Herdr release를 반영하는 절차:
 
