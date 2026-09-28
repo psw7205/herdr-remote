@@ -996,7 +996,7 @@ Client connection은 disposable하다.
 ```text
 Client
    │
-   ├ lastEventId = 152
+   ├ cursor = {epoch E, sequence 152}
    │
    X disconnected
    │
@@ -1005,7 +1005,7 @@ Client
    ▼
 Reconnect
    │
-   └ lastEventId = 152
+   └ cursor = {epoch E, sequence 152}
          ↓
 Bridge
          ↓
