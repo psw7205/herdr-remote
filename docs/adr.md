@@ -1429,7 +1429,11 @@ app-level 인증을 추가하지 않는다. tagged node나 login이 없는 node�
 host만 유지하고 모든 tailnet 요청을 거부한다. CLI가 없거나 실패하면 `auto` host는 확정되지
 않아 localhost 전용으로 동작한다. host를 명시했는데 `auto` login만 실패한 경우에는 host를
 유지하고 모든 tailnet 요청을 거부하며, localhost 전용으로 바뀌지 않는다. 어느 쪽이든 Bridge는
-종료하지 않는다. `https://<host>`는 host와 owner login이 모두 확정된 경우에만 Origin
+종료하지 않는다. Serve는 client의 `Host`를 그대로 전달하므로 localhost 판정은 `Host`만 보지
+않는다. Tailnet host·Origin과 일치하거나 Serve가 추가하는 `X-Forwarded-For`·`X-Forwarded-Host`·
+`X-Forwarded-Proto`·`Tailscale-User-Login`·`Tailscale-User-Name` 중 하나라도 있는 요청은 host 확정
+여부와 무관하게 tailnet 요청이며, host와 owner login이 확정되고 `Tailscale-User-Login`이 owner와
+일치하며 `Host`가 tailnet host일 때만 허용한다. `https://<host>`는 host와 owner login이 모두 확정된 경우에만 Origin
 allowlist에 추가되며, login이 없는 동안 `-origins`로 넣은 tailnet HTTPS Origin은 경고와 함께
 제외된다. `doctor`의 Funnel 감지는 host의 모든 port와 `--bg` 없이 실행한 foreground Serve
 설정까지 포함한다. 어느 경우에도 Serve 사용에는 tailnet 관리 화면에서 HTTPS Certificates를 한 번
