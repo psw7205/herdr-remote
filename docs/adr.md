@@ -1957,3 +1957,35 @@ pane `rect`(zoomed tab의 focused pane이면 tab `area`)에서 채우며, 읽지
 `rect`는 border·scrollbar를 포함한 상한이고 direct attach resize lock이 있으면 PTY와 다를 수
 있으므로 client는 이 값과 frame의 줄 수·가장 긴 줄 폭 중 큰 값을 grid로 쓴다. mobile viewport는
 font size와 horizontal scroll로만 맞추며 PTY 크기를 바꾸지 않는다.
+
+---
+
+# ADR-036 — Herdr patch는 소유 fork에서 유지한다
+
+## Status
+
+Accepted (2026-09-28)
+
+## Context
+
+ADR-034의 조건부 입력에는 stock Herdr에 없는 `agent.binding`·`agent.bound_input`이 필요하다.
+Herdr 원본(`herdrdev/herdr`)은 승인되지 않은 외부 contributor의 feature PR을 자동으로 닫고,
+기능 제안은 maintainer 승인을 거쳐야 한다. upstream 반영을 전제로 할 수 없다.
+
+## Decision
+
+patch는 소유 fork `psw7205/herdr`에서 유지한다. fork `master`는 `upstream/master`의
+fast-forward mirror이고, patch는 최신 stable tag 위의 `mobile-binding` branch에 둔다.
+stable release마다 rebase와 `just ci`·설치 검증을 거쳐 갱신한다. 절차는
+[Herdr patch runbook §8](herdr-patch.md#8-fork-관리)을 따른다.
+
+기각한 대안:
+
+- upstream PR: contribution 정책상 받아들여질 경로가 없다.
+- stock `agent.prompt`·raw pane input 사용: stale binding 보호가 없어 ADR-034를 위반한다.
+
+## Consequences
+
+사용자는 fork의 patched Herdr를 직접 build·설치해야 한다. Herdr release를 따라가는 rebase
+비용은 이 project가 진다. Bridge는 patch 유무를 version이 아니라 `doctor`의
+`conditional_input`으로 판별하므로(P0-04) stock으로 바뀌어도 fail closed한다.
