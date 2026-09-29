@@ -1113,8 +1113,141 @@ func TestCancelledWatcherPublishesNothing(t *testing.T) {
 	before := item.stream.Snapshot()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	item.watch(ctx)
+	item.watch(ctx, path)
 	if after := item.stream.Snapshot(); after.Cursor != before.Cursor || string(after.Data) != string(before.Data) || item.invalid || item.last != nil {
 		t.Fatalf("cancelled watcher published: %+v %s", after.Cursor, after.Data)
+	}
+}
+
+func moveTranscript(t *testing.T, root, from, to string) string {
+	t.Helper()
+	dir := filepath.Join(root, "projects", to)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	next := filepath.Join(dir, nativeA+".jsonl")
+	if err := os.Rename(filepath.Join(root, "projects", from, nativeA+".jsonl"), next); err != nil {
+		t.Fatal(err)
+	}
+	return next
+}
+
+func appendLine(t *testing.T, path, uuid, parent string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	line := `{"type":"user","uuid":"` + uuid + `","parentUuid":"` + parent + `","sessionId":"` + nativeA + `","message":{"role":"user","content":"sample"}}` + "\n"
+	if _, err := f.WriteString(line); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Claude Code moves the transcript to another project directory when the
+// session changes its working directory. The next Refresh follows the file by
+// native ID, verified or not, and resyncs under a new epoch without duplicates.
+func TestMovedTranscriptIsResolvedAgain(t *testing.T) {
+	r, f, root := boundRegistry(t)
+	id := "claude:" + nativeA
+	snap, _, _ := r.Get(id)
+	first, epoch := watcherOf(r, id), snap.Cursor.Epoch
+
+	next := moveTranscript(t, root, "repo", "repo-worktree")
+	appendLine(t, next, "u2", "u-"+nativeA)
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitClosed(t, first)
+	snap = waitHistory(t, r, id, "u2")
+	if snap.Cursor.Epoch == epoch {
+		t.Fatal("moved transcript kept the old epoch")
+	}
+	var messages []Message
+	if err := json.Unmarshal(snap.Data, &messages); err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].ID != "u-"+nativeA || messages[1].ID != "u2" {
+		t.Fatalf("moved history %+v", messages)
+	}
+
+	// Unverified continuity has no binding to resolve from; its native ID still is.
+	a := f.agents[0]
+	a.TerminalID = "term_b"
+	f.agents = []herdr.Agent{a}
+	f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	second := watcherOf(r, id)
+	next = moveTranscript(t, root, "repo-worktree", "repo")
+	appendLine(t, next, "u3", "u2")
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitClosed(t, second)
+	waitHistory(t, r, id, "u3")
+	if _, meta, _ := r.Get(id); meta.Lifecycle != LifecycleUnverified || !meta.Chat {
+		t.Fatalf("unverified item after move %+v", meta)
+	}
+
+	// An unresolvable ID (deleted, or found twice mid-copy) keeps the watcher.
+	third := watcherOf(r, id)
+	writeTranscript(t, root, "copy", nativeA)
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if watcherOf(r, id) != third {
+		t.Fatal("ambiguous resolution replaced the watcher")
+	}
+}
+
+// Ended items keep their stream snapshot for viewers but drop parsed history,
+// and only the maxInactive most recently ended items are kept at all.
+func TestEndedItemsReleaseHistoryAndAreBounded(t *testing.T) {
+	r, f, _ := boundRegistry(t)
+	id := "claude:" + nativeA
+	before, _, _ := r.Get(id)
+	f.agents = nil
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	after, _, err := r.Get(id)
+	if err != nil || string(after.Data) != string(before.Data) {
+		t.Fatalf("ended snapshot changed: %v %s", err, after.Data)
+	}
+	r.mu.RLock()
+	item := r.items[id]
+	r.mu.RUnlock()
+	item.mu.Lock()
+	released := item.last == nil && len(item.projection.Messages()) == 0
+	item.mu.Unlock()
+	if !released {
+		t.Fatal("ended item kept its parsed history")
+	}
+
+	for i := range maxInactive + 5 {
+		f.agents = []herdr.Agent{{PaneID: fmt.Sprintf("w2:p%d", i), TerminalID: "t", Agent: "claude", Status: "idle"}}
+		if err := r.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.mu.RLock()
+	count := len(r.items)
+	r.mu.RUnlock()
+	// maxInactive ended items plus the one still active.
+	if count != maxInactive+1 {
+		t.Fatalf("kept %d items", count)
+	}
+	for _, gone := range []string{id, "pane:w2:p0", "pane:w2:p3"} {
+		if _, _, err := r.Get(gone); err == nil {
+			t.Fatalf("%s not evicted", gone)
+		}
+	}
+	for _, kept := range []string{"pane:w2:p4", fmt.Sprintf("pane:w2:p%d", maxInactive+3), fmt.Sprintf("pane:w2:p%d", maxInactive+4)} {
+		if _, _, err := r.Get(kept); err != nil {
+			t.Fatalf("%s evicted: %v", kept, err)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -80,6 +81,8 @@ type Item struct {
 	// returned; both are nil while no watcher runs. Guarded by Registry.mu.
 	cancel context.CancelFunc
 	done   chan struct{}
+	// ended orders inactive items for eviction; guarded by Registry.mu.
+	ended uint64
 }
 type Registry struct {
 	mu         sync.RWMutex
@@ -89,7 +92,13 @@ type Registry struct {
 	items      map[string]*Item
 	// conditional is the agent.binding capability seen by the last successful Refresh.
 	conditional string
+	ends        uint64
 }
+
+// maxInactive bounds the ended and superseded items kept for clients still
+// viewing them. Older ones are evicted; a native session seen again gets a new
+// item whose fresh epoch makes clients resync from the snapshot.
+const maxInactive = 32
 
 func NewRegistry(ctx context.Context, gateway Gateway, claudeRoot string) *Registry {
 	return &Registry{ctx: ctx, gateway: gateway, claudeRoot: claudeRoot, items: make(map[string]*Item), conditional: herdr.ConditionalInputUnknown}
@@ -213,6 +222,29 @@ func (r *Registry) Refresh(ctx context.Context) error {
 			o.binding, o.verified, o.path, o.resolved = herdr.Binding{}, false, "", false
 		}
 	}
+	// Claude Code moves a session's transcript to another project directory
+	// when the session changes its working directory (e.g. into a worktree).
+	// Every active native item is resolved again by its native ID so that a
+	// moved transcript is followed; an unresolvable ID keeps the old path.
+	resolved := make(map[string]string)
+	for _, o := range observed {
+		if o.resolved {
+			resolved[o.binding.NativeSessionID] = o.path
+		}
+	}
+	r.mu.RLock()
+	var pending []string
+	for _, item := range r.items {
+		if _, ok := resolved[item.nativeID]; item.meta.Active && item.path != "" && !ok {
+			pending = append(pending, item.nativeID)
+		}
+	}
+	r.mu.RUnlock()
+	for _, native := range pending {
+		if path, e := claude.Resolve(r.claudeRoot, native); e == nil {
+			resolved[native] = path
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.conditional = conditional
@@ -303,6 +335,9 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		item.meta.Binding = ""
 		item.meta.Terminal = false
 		item.stopWatch()
+		item.release()
+		r.ends++
+		item.ended = r.ends
 		if next := successors[item.meta.PaneID]; next != "" && id == "pane:"+item.meta.PaneID {
 			item.meta.SuccessorID = next
 			item.meta.Status = found[next].Status
@@ -318,8 +353,13 @@ func (r *Registry) Refresh(ctx context.Context) error {
 				item.stream.Append("agent.status", map[string]any{"status": meta.Status, "lifecycle": lifecycle(meta)})
 			}
 			item.meta = meta
-			// A revived item re-reads its transcript from the start, so the
-			// first batch resets the projection and replaces the stream epoch.
+			if path, ok := resolved[item.nativeID]; ok && item.path != "" && path != item.path {
+				slog.Info("transcript moved", "session", id)
+				item.stopWatch()
+				item.path = path
+			}
+			// A revived or moved item re-reads its transcript from the start, so
+			// the first batch resets the projection and replaces the stream epoch.
 			if meta.Chat && item.cancel == nil {
 				item.startWatch(r.ctx)
 			}
@@ -334,7 +374,25 @@ func (r *Registry) Refresh(ctx context.Context) error {
 			item.startWatch(r.ctx)
 		}
 	}
+	r.evictInactive()
 	return nil
+}
+
+// evictInactive runs under Registry.mu.
+func (r *Registry) evictInactive() {
+	var inactive []*Item
+	for _, item := range r.items {
+		if !item.meta.Active {
+			inactive = append(inactive, item)
+		}
+	}
+	if len(inactive) <= maxInactive {
+		return
+	}
+	slices.SortFunc(inactive, func(a, b *Item) int { return cmp.Compare(a.ended, b.ended) })
+	for _, item := range inactive[:len(inactive)-maxInactive] {
+		delete(r.items, item.meta.ID)
+	}
 }
 
 // startWatch and stopWatch run under Registry.mu. The watcher lives only while
@@ -344,9 +402,10 @@ func (item *Item) startWatch(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
 	item.cancel, item.done = cancel, done
+	path := item.path
 	go func() {
 		defer close(done)
-		item.watch(ctx)
+		item.watch(ctx, path)
 	}()
 }
 func (item *Item) stopWatch() {
@@ -355,7 +414,16 @@ func (item *Item) stopWatch() {
 		item.cancel, item.done = nil, nil
 	}
 }
-func (item *Item) watch(ctx context.Context) {
+
+// release drops the parsed history of an item that stopped watching. The
+// stream keeps its last snapshot for clients; a revive re-reads from the start.
+func (item *Item) release() {
+	item.mu.Lock()
+	defer item.mu.Unlock()
+	item.projection = claude.NewProjection()
+	item.last = nil
+}
+func (item *Item) watch(ctx context.Context, path string) {
 	// A cancelled watcher may still be finishing a read while its successor
 	// starts. Checking ctx under item.mu keeps its late results out of the
 	// successor's projection: cancel happens before the successor starts.
@@ -367,7 +435,7 @@ func (item *Item) watch(ctx context.Context) {
 		}
 		return item.applyLocked(batch)
 	}
-	err := transcript.Watch(ctx, item.path, apply, func(err error) {
+	transcript.Watch(ctx, path, apply, func(err error) {
 		item.mu.Lock()
 		defer item.mu.Unlock()
 		if ctx.Err() != nil {
@@ -380,10 +448,6 @@ func (item *Item) watch(ctx context.Context) {
 			slog.Warn("transcript watcher", "error", err)
 		}
 	})
-	if err != nil && ctx.Err() == nil {
-		slog.Error("transcript watcher stopped", "error", err)
-		item.stream.Append("session.error", map[string]string{"message": "Transcript watcher unavailable. Open Terminal."})
-	}
 }
 func (item *Item) apply(batch transcript.Batch) error {
 	item.mu.Lock()

@@ -655,8 +655,8 @@ Cursor는 `{epoch, sequence}`이며 snapshot과 cursor를 같은 session lock에
 `subscribe(after=C)`는 같은 lock에서 replay C+1…current를 확보하고 live 등록을 완료한다.
 network 전송은 lock 밖에서 한다. queue overflow를 조용히 drop하지 않는다.
 
-Bridge restart, transcript identity replacement, 복구 불가능한 resync, `ended` session의 revive(watcher를
-다시 열고 transcript를 처음부터 읽는다) 시 epoch를 교체한다.
+Bridge restart, transcript identity replacement, transcript 경로 이동, 복구 불가능한 resync, `ended`
+session의 revive(watcher를 다시 열고 transcript를 처음부터 읽는다) 시 epoch를 교체한다.
 다른 epoch, 미래 sequence, buffer miss는 fresh snapshot으로 복구한다.
 이 결정은 Accepted ADR-019의 bounded buffer를 사용한다.
 
@@ -1312,6 +1312,14 @@ Watcher는:
 agent가 transcript rotate/rewrite를 할 가능성을 고려한다.
 
 file identity가 바뀌면 adapter가 재동기화한다.
+
+Claude Code는 session이 working directory를 옮기면(예: worktree 진입) transcript를 다른 project
+directory로 옮긴다. Bridge는 주기적 discovery마다 native session ID로 경로를 다시 찾고, 바뀌면 새
+경로를 처음부터 읽어 epoch를 교체한다. 같은 ID가 두 곳에서 보이면 기존 경로를 유지한다.
+
+Watcher는 transcript 파일만 감시하고 directory를 감시하지 않는다. macOS kqueue는 감시한 directory의
+파일마다 descriptor를 연다. 파일 감시는 삭제·이동·교체 뒤 다시 등록하며, 알림을 놓치거나 쓸 수 없을
+때는 polling이 offset 이후를 읽는다.
 
 ---
 

@@ -216,6 +216,32 @@ binding header가 빠져 근거로 쓰지 않는다), handoff 전후 pane geomet
 실행 후 격리 server·Bridge·test transcript는 삭제했다. Claude Code의 폴더 신뢰 기록은 사용자
 설정이라 지우지 않았다.
 
+## Transcript 이동·resource 상한 검증 (2026-09-29)
+
+범위는 backlog P1-12·P1-13이다. 격리 환경은 [CONTRIBUTING.md](../../CONTRIBUTING.md#격리-herdr-환경)
+절차(patched Herdr `0.9.1`, Claude Code `2.1.284`, Haiku 4.5)를 따랐고, 실행 전후 default server의
+pane 7개와 기존 Claude PID가 같았다.
+
+| 항목 | 방법 | 결과 |
+| --- | --- | --- |
+| worktree 이동 (P1-12) | 격리 Claude에 `EnterWorktree` tool 사용을 요청 | Claude Code가 transcript를 `<project>--claude-worktrees-<name>` project directory로 옮기고 원래 파일을 지웠다. Bridge는 다음 `Refresh`에서 `transcript moved`를 남기고 새 epoch snapshot으로 바꿨다. 이동 전 2개와 이동 응답까지 message 4개가 중복 없이 보였다 |
+| 이동 뒤 전달 | 새 경로에서 Bridge `prompt` | `accepted`, 같은 epoch에 user/assistant가 live로 추가됐다 |
+| transcript fd (P1-13) | default server에 개발용 Bridge를 read-only로 붙여 `lsof`. 입력은 보내지 않았다 | Chat session 2개일 때 변경 전 build(`de0f987`)는 fd 82개, 그중 project directory의 transcript 42개를 열었다. 변경 후 build는 fd 19개, transcript 2개다 |
+
+Unit test 근거:
+
+| 동작 | test |
+| --- | --- |
+| verified·unverified item이 이동한 transcript를 native ID로 다시 찾아 새 epoch로 복구하고, 두 곳에서 보이면 기존 watcher를 유지 | `internal/session` `TestMovedTranscriptIsResolvedAgain` |
+| transcript 파일만 감시해 같은 directory의 다른 파일을 열지 않음 | `internal/transcript` `TestWatchDoesNotOpenSiblingTranscripts`(변경 전 구현에서 fd 69개로 실패) |
+| 삭제 후 재생성, rename 교체 뒤에도 처음부터 다시 읽고 이후 append를 받음 | `TestWatchFollowsRecreatedAndReplacedFile` |
+| 종료된 item은 stream snapshot을 유지하되 parsed history를 해제하고, 최근 종료된 32개만 남김 | `internal/session` `TestEndedItemsReleaseHistoryAndAreBounded` |
+| MagicDNS host가 없어도 Funnel과 Tailscale Service의 raw TCP forward를 blocker로 보고 | `cmd/doctor` `TestDoctorBlocksExposureWithoutMagicDNS`, `internal/tailnet` `TestServeConfigTCPForward` |
+
+확인하지 않은 것: `fsnotify.NewWatcher` 생성 실패 시 polling으로 대체하고 재시도하는 경로는
+test로 재현하지 않았다. 수 주 단위 장기 실행의 fd·memory 추이도 측정하지 않았다. 실행 후 격리
+server, Bridge, test transcript directory 2개를 삭제했다.
+
 ## 남은 범위
 
 첫 vertical slice 이후의 Codex adapter는 Herdr 안에서 실행 중인 Codex의 실제 CLI transcript와
