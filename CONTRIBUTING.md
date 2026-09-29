@@ -38,9 +38,9 @@ Herdr server나 사용자 agent를 종료해서 port 문제를 해결하지 않�
 
 Herdr와 Bridge 없이 UI 상태를 확인할 때는 Vite만 띄우고 `http://127.0.0.1:5173/fixture.html`에
 접속한다. `?scenario=`로 `long`, `live`, `disconnected`, `delivery-unknown`, `rejected`, `empty`,
-`herdr-down`, `unsupported`, `slow`, `superseded`를 고를 수 있다. `/`로 시작하는 입력은 transcript에서
-숨는 slash command처럼 echo 없이 수락된다. 이 page는 fetch와 WebSocket만 가짜 Bridge로 바꾸고
-실제 client code를 그대로 실행한다. 데이터는 `web/src/fixtures/`의 익명 sample뿐이며 production
+`herdr-down`, `unsupported`, `slow`, `superseded`, `start-trust`, `start-unknown`, `no-root`를 고를 수
+있다. `/`로 시작하는 입력은 transcript에서 숨는 slash command처럼 echo 없이 수락된다. 이 page는
+fetch와 WebSocket만 가짜 Bridge로 바꾸고 실제 client code를 그대로 실행한다. 데이터는 `web/src/fixtures/`의 익명 sample뿐이며 production
 build에는 포함되지 않는다. 실제 session으로 화면을 확인할 때는 screenshot을 추적 파일에 남기지 않는다.
 dev server의 CSS는 build처럼 낮춰지지 않는다(`light-dark()` 등). 색이나 theme을 바꾸면 build한
 화면에서도 확인한다.
@@ -98,6 +98,7 @@ herdr session list                      # e2e의 socket 경로 확인
 # Bridge는 별도 port·receipt와 tailnet off로 띄운다.
 mise exec -- go run ./cmd/bridge -herdr-socket <e2e socket> -receipts-dir "$E2E/receipts" \
   -listen 127.0.0.1:8797 -origins http://127.0.0.1:8797 -tailnet-host off
+# 새 session 시작을 볼 때는 임시 root를 함께 넘긴다: -project-root "$E2E"
 ```
 
 - 모든 Herdr 명령은 `"$E2E/h"`로 실행한다. `--session` 없는 `herdr`나 상속된 `HERDR_SOCKET_PATH`는
@@ -108,6 +109,8 @@ mise exec -- go run ./cmd/bridge -herdr-socket <e2e socket> -receipts-dir "$E2E/
 - `agent start`는 사용자 shell에서 실행되므로 alias가 붙인 옵션이 적용된다. permission 대기를
   재현하려면 pane에 `command claude ...`를 직접 입력한다.
 - native session은 첫 prompt 뒤 생긴다. Bridge `prompt`는 `claude:<native-id>` item에만 전달된다.
+- Bridge로 시작한 session은 agent 인자가 없어 사용자 기본 model로 뜬다. 그 안에서 `/model`을 쓰면
+  사용자 설정의 기본 model이 바뀌므로, 바꿨다면 정리할 때 원래 값으로 되돌린다.
 - stock 전환은 설치 binary를 바꾸지 않고 `"$E2E/h" server live-handoff --import-exe <binary>`로 한다.
 - 정리 순서: Bridge 종료 → `"$E2E/h" server stop` → `herdr session delete e2e` →
   Claude transcript root(Bridge `-claude-dir` 기본값) 아래 임시 directory 이름의 test transcript 삭제 →

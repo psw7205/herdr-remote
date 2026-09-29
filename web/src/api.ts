@@ -28,7 +28,16 @@ export type Snapshot = { cursor: Cursor; data: Message[] }
 export type Event = { type: string; cursor: Cursor; payload: unknown; event_id: string }
 export type Delivery = { status: 'accepted' | 'rejected' | 'delivery_unknown'; code?: string }
 export type ConditionalInput = 'supported' | 'unsupported' | 'unknown'
-export type SessionList = { sessions: Session[]; conditionalInput: ConditionalInput }
+// Which agent kinds the Bridge may ask Herdr to start, and whether a new
+// workspace is possible (only with a -project-root). ADR-037.
+export type StartCapability = { kinds: string[]; new_workspace: boolean }
+export const noStart: StartCapability = { kinds: [], new_workspace: false }
+export type SessionList = { sessions: Session[]; conditionalInput: ConditionalInput; start: StartCapability }
+export type Placement = 'new_workspace' | 'new_tab'
+// A folder a new session may start in. The Bridge resolves the opaque id to
+// a path; the client never sends one.
+export type StartCandidate = { id: string; name: string; root?: string; open: boolean; workspace?: string; placement: Placement }
+export type StartDelivery = Delivery & { created?: { workspace_id: string; tab_id: string; pane_id: string; agent: string } }
 
 async function readJSON<T>(response: Response): Promise<T> {
   const body = await response.json()
@@ -36,8 +45,24 @@ async function readJSON<T>(response: Response): Promise<T> {
   return body as T
 }
 export async function listSessions(): Promise<SessionList> {
-  const body = await readJSON<{ sessions: Session[]; herdr?: { conditional_input?: ConditionalInput } }>(await fetch('/api/sessions', { cache: 'no-store' }))
-  return { sessions: body.sessions, conditionalInput: body.herdr?.conditional_input ?? 'unknown' }
+  const body = await readJSON<{ sessions: Session[]; herdr?: { conditional_input?: ConditionalInput }; start?: StartCapability }>(await fetch('/api/sessions', { cache: 'no-store' }))
+  return { sessions: body.sessions, conditionalInput: body.herdr?.conditional_input ?? 'unknown', start: body.start ?? noStart }
+}
+export async function listStartCandidates(): Promise<{ candidates: StartCandidate[]; start: StartCapability }> {
+  return readJSON(await fetch('/api/start-candidates', { cache: 'no-store' }))
+}
+// A start is answered after Herdr's agent readiness wait (up to 30s), so the
+// caller's timeout must be longer. The body is a receipt result either way.
+export async function startSession(candidate: string, kind: string, placement: Placement, commandID: string, signal?: AbortSignal): Promise<StartDelivery> {
+  const response = await fetch('/api/sessions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
+    body: JSON.stringify({ command_id: commandID, command_type: 'session_start', payload: { candidate_id: candidate, kind, placement } }),
+  })
+  const body = await response.json()
+  if (typeof body?.status === 'string') return body as StartDelivery
+  // A validation or Origin error is answered before any receipt: nothing ran.
+  if (typeof body?.error === 'string') return { status: 'rejected', code: body.error }
+  throw new Error(`HTTP ${response.status}`)
 }
 export function sessionLifecycle(session: Pick<Session, 'active' | 'lifecycle'>): Lifecycle {
   return session.lifecycle ?? (session.active ? 'active' : 'ended')

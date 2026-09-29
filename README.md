@@ -35,7 +35,7 @@ repo와 Go module 이름은 `herdr-remote`다.
 | 모바일 UI | 상태별 session 목록, Chat, light/dark theme, code 복사, 특수 키가 있는 Terminal, PWA. 실기기 keyboard와 설치형 PWA는 미검증 |
 | Tailnet | Serve 경유 소유자 phone에서 Chat·prompt·Terminal 확인. 화면 잠금·네트워크 전환 뒤 reconnect와 다른 사용자 거부의 실측은 미검증 |
 | Codex | 미지원. native transcript 구조만 조사했다 |
-| 새 session 생성 | 미구현. 설정한 폴더에서 Herdr로 시작하는 방식으로 결정했다(ADR-037) |
+| 새 session 생성 | `-project-root` 아래 Git repo의 새 workspace나 열린 workspace의 새 tab에서 Herdr로 Claude를 시작(ADR-037). 격리 Herdr에서 실측, 실기기는 사용 중 확인 |
 | Tool card·Changed Files·attachment·notification | 미구현 |
 
 Claude의 localhost handoff와 Bridge 재시작 복구는 실제 process에서 검증했다.
@@ -153,6 +153,7 @@ network 경계도 좁히도록 tailnet ACL/grant로 Bridge host의 HTTPS 접근�
 | `-tailnet-host` | `auto`: `Self.DNSName`에서 끝의 점을 제거한 값. `off`: Tailnet 요청을 받지 않는 localhost 전용. 그 밖의 값은 Serve DNS host로 사용 |
 | `-tailnet-login` | `auto`: 이 Tailscale node를 소유한 사용자 login. 명시 값은 Serve로 접근할 수 있는 단일 사용자 login |
 | `-tailscale-bin` | Tailscale CLI 경로. 비우면 PATH, 이어서 알려진 설치 경로에서 찾는다 |
+| `-project-root` | 없음. 반복 가능한 절대 경로. root가 Git repo면 root 하나, 아니면 바로 아래 한 단계의 Git repo가 새 session 후보다. hidden directory와 실제 경로가 root 밖인 symlink는 제외한다. 없으면 새 workspace는 만들 수 없고 열린 workspace에 새 tab만 연다 |
 
 전체 flag는 `mise exec -- go run ./cmd/bridge -h`로 확인한다.
 `-herdr-socket`은 CLI flag이며, 위 예시의 `HERDR_SOCKET_PATH`는 shell이 전달하는 값이다.
@@ -172,6 +173,9 @@ Chat command → durable receipt → Herdr binding 검증 → 기존 PTY
 - native session을 식별하지 못한 `pane:` item은 binding이 없으면 `unbound`다. 같은 pane에서 `claude:` session이 새로 검증되면 `pane:` item은 `superseded`와 `successor_id`를 보고하고, Web UI는 successor의 binding으로 Chat·Terminal을 이어 간다.
 - WS 종료나 Bridge 종료는 Herdr process를 중단하지 않는다. Bridge restart는 새 epoch로 native history를 복구한다.
 - receipts를 임의로 지우면 오래된 command ID의 재수락을 막는 근거가 사라진다.
+- 새 session은 Herdr `workspace.create`·`tab.create`·`agent.start`로만 요청한다. client는 경로 대신 opaque 후보 ID를 보내고 Bridge가 dispatch 직전에 경로를 다시 검증한다. `session_start` receipt가 생성된 workspace·tab·pane ID를 남겨 같은 ID의 retry는 같은 결과를 받는다.
+- agent 인자는 전달하지 않는다. Herdr가 pane의 사용자 shell에서 agent를 실행하므로 permission mode 등은 shell alias·설정을 따르며 Bridge가 보장하지 않는다. 처음 여는 폴더의 신뢰 확인 화면은 PC의 Herdr에서 수락한다.
+- 새 session도 기존 discovery를 거친다. `pane:<pane-id>`로 먼저 보이고 native session이 검증돼 `claude:<native-id>`가 된 뒤에 Chat 입력이 열린다.
 
 ## 운영과 알려진 제한
 

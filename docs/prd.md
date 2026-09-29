@@ -242,7 +242,7 @@ Chat UI에서 처리할 수 없는 interaction이 존재할 경우 같은 pane�
 
 ### G7. Herdr에서 새 session 시작
 
-후속 기능이다([P1-14](backlog.md#p1--핵심-ux와-다음-agent)). 사용자는 설정한 project root 아래의 폴더나
+2026-09-29에 `claude`로 구현했다([P1-14](backlog.md#p1--핵심-ux와-다음-agent)). 사용자는 설정한 project root 아래의 폴더나
 이미 열린 Herdr workspace를 골라 새 agent session을 시작할 수 있다. 생성과 process는 Herdr가
 소유하고, 새 session은 기존 session과 같은 discovery·binding 규칙을 따른다.
 기존 session의 resume과 agent 인자 전달은 제공하지 않는다. 범위는 [ADR-037](adr.md#adr-037--새-session-생성은-herdr에-요청한다)을 따른다.

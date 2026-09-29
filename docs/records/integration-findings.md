@@ -250,3 +250,17 @@ patched Herdr `0.9.1`의 이름 있는 격리 server와 Claude Code `2.1.283`으
   환경만 넘기면 정상 저장됐다.
 - `herdr server live-handoff --import-exe <path>`는 `--session`으로 지정한 server에만 적용됐다.
   default server의 PID는 바뀌지 않았다.
+
+## 2026-09-29 — 새 session 생성 API 구현 중 확인
+
+patched Herdr `0.9.1` 격리 server에서 P1-14를 구현하며 확인했다. 결과 전체는
+[verification.md](verification.md#격리-herdr-새-session-시작-검증-2026-09-29)에 있다.
+
+- raw socket `agent.start`는 launch 입력을 보낸 직후 `launch_pending: true`로 반환한다. 2026-09-28
+  조사의 "입력 준비가 된 뒤 성공, 시작 중 `blocked`면 `agent_not_ready`, 기본 30s"는 Herdr CLI의
+  동작이다. CLI는 `agent.get`을 polling해 이를 만들고, 새 pane의 shell이 초기화 중일 때만
+  `agent_pane_busy`를 짧게 재시도한다. Bridge도 같은 규칙으로 기다린다.
+- `workspace.list`의 workspace에는 cwd가 없다. 열린 폴더는 `session.snapshot`의 pane `cwd`로 읽으며,
+  pane cwd는 symlink를 해석한 실제 경로로 보고된다.
+- `workspace.create`·`tab.create`에 `focus: false`를 주면 기존 focused workspace가 바뀌지 않았다.
+- agent 인자 없이 시작한 Claude 안에서 `/model`을 쓰면 사용자 설정의 기본 model이 바뀐다.

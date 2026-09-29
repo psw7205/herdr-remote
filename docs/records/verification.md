@@ -242,6 +242,50 @@ Unit test 근거:
 test로 재현하지 않았다. 수 주 단위 장기 실행의 fd·memory 추이도 측정하지 않았다. 실행 후 격리
 server, Bridge, test transcript directory 2개를 삭제했다.
 
+## 격리 Herdr 새 session 시작 검증 (2026-09-29)
+
+범위는 backlog P1-14(ADR-037)다. [격리 환경 절차](../../CONTRIBUTING.md#격리-herdr-환경)를
+session 이름 `e2e-p114`, Bridge port 8798, `-project-root <임시 root>`로 실행했다.
+
+환경: `env -i`로 띄운 headless patched Herdr `0.9.1`, Claude Code `2.1.284`, desktop client 없음.
+임시 root 아래에 Git repo 두 개, hidden Git repo, Git이 아닌 directory, root 밖 Git repo를 가리키는
+symlink를 두었다. default Herdr server에는 조회(`pane list`·`agent list`·`pane.process_info`)만
+보냈다. 실행 전 default의 pane 7개는 끝난 뒤에도 같은 `terminal_id`·agent였다. 실행 중 default에
+pane 하나가 늘고 다른 한 pane의 Claude가 같은 shell에서 새 process로 바뀌었다. 이 검증의 명령은
+default에 쓰지 않았으므로 원인은 확인하지 못했다. 검증을 실행한 coding agent의 process는 그대로였다.
+
+설치 version에서 확인한 API 사실:
+
+- raw socket `agent.start`는 입력을 보낸 직후 `launch_pending: true`로 반환한다. 30s 준비 대기와
+  `agent_not_ready`는 Herdr CLI가 `agent.get`을 polling해 만든다. Bridge도 같은 규칙(`blocked` →
+  미준비, `idle`/`done` + `interactive_ready` → 준비, 새 pane의 shell 초기화 중 `agent_pane_busy`만
+  2s 동안 재시도)으로 기다린다.
+- `workspace.list`의 workspace에는 cwd가 없다. workspace의 폴더는 `session.snapshot`의 첫 pane `cwd`로
+  읽는다. pane cwd는 symlink를 해석한 실제 경로로 보고되므로 후보 경로와 양쪽 모두 해석해 비교한다.
+- `workspace.create`·`tab.create`에 `focus: false`를 주면 기존 focused workspace가 바뀌지 않았다.
+
+| 시나리오 | 결과 |
+| --- | --- |
+| 후보 목록 | root의 Git repo 두 개만 나왔다. hidden repo, Git이 아닌 directory, root 밖 symlink는 빠졌다. 이미 열린 workspace의 폴더는 `open`·`new_tab`으로 표시됐다 |
+| (a) 새 workspace, 처음 여는 폴더 | 약 5.5초 뒤 202 `accepted`·`AGENT_NOT_READY`와 생성된 workspace·tab·pane ID. 신뢰 확인 화면 동안 목록 item은 `pane:<pane-id>`·`unbound`·`needs_attention`·`terminal: false`로 binding이 없어 모바일 Terminal은 열리지 않았다. `pane send-keys <pane> down enter`로 수락하자 `active`·`terminal: true`가 됐고, 첫 prompt 뒤 기존 discovery로 `claude:<native-id>`·`chat: true`가 됐다 |
+| (b) 열린 workspace의 새 tab | 신뢰한 폴더에서 약 6.6초 뒤 202 `accepted`(code 없음). 같은 workspace에 tab이 하나 늘고 workspace 수는 그대로였다 |
+| (c) 같은 `command_id` retry | (a)·(b) 모두 같은 status·code·생성 ID를 반환했고 workspace·tab 수가 늘지 않았다. Bridge를 재시작한 뒤에도 같은 결과였고 후보 ID도 재시작 전후 같았다 |
+| (d) 목록 뒤 폴더 변경 | 목록을 받은 뒤 한 repo directory를 지우고 다른 하나를 root 밖 repo로 가는 symlink로 바꿨다. 두 요청 모두 409 `CANDIDATE_CHANGED`, workspace가 생기지 않았다 |
+
+부수 관찰:
+
+- 시작된 Claude의 terminal title에 사용자 shell alias가 붙인 permission 관련 옵션이 보였다. 새 session의
+  permission mode는 사용자 shell 환경을 따르며 Bridge가 보장하지 않는다(UI에 표시).
+- Bridge로 시작한 session에서 `/model`을 쓰면 사용자 설정의 기본 model이 바뀐다. 이 검증 중 바뀐 값은
+  원래대로 되돌렸고 절차에 주의를 추가했다.
+- 정상 시작도 5~7초 걸렸다. Bridge는 start 한 건을 50s로, client는 60s로 제한한다.
+
+확인하지 않은 것: 실제 `delivery_unknown`과 `AGENT_START_FAILED` 발생(unit test로만 확인), Tailnet
+경유 실기기 화면, 신뢰 확인 화면의 수락을 모바일에서 하는 경로(binding이 없어 현재 불가), desktop
+client가 없을 때 만든 pane의 크기(P1-08). Web UI는 unit test와 build로 확인했고 browser 화면은
+사용하면서 확인한다. 정리: Bridge 종료 → 격리 server 종료 → session 삭제 → 임시 directory 이름의
+test transcript 삭제. Claude Code의 폴더 신뢰 기록은 사용자 설정이라 지우지 않았다.
+
 ## 남은 범위
 
 첫 vertical slice 이후의 Codex adapter는 Herdr 안에서 실행 중인 Codex의 실제 CLI transcript와

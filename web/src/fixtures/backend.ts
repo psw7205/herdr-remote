@@ -47,7 +47,13 @@ async function answer(scenario: Scenario, method: string, url: URL, body: string
   if (scenario.listFails) throw new TypeError('fixture: Bridge unreachable')
   if (method === 'GET' && url.pathname === '/api/sessions') {
     const sessions = [...rooms.values()].filter(room => room.session.active).map(preview)
-    return json({ sessions, herdr: { conditional_input: scenario.conditionalInput } })
+    return json({ sessions, herdr: { conditional_input: scenario.conditionalInput }, start: scenario.start.capability })
+  }
+  if (method === 'GET' && url.pathname === '/api/start-candidates') return json({ candidates: scenario.start.candidates, start: scenario.start.capability })
+  if (method === 'POST' && url.pathname === '/api/sessions') {
+    // The answer arrives after the agent readiness wait, like the Bridge's.
+    await wait(scenario.start.latency)
+    return json(scenario.start.result, scenario.start.result.status === 'rejected' ? 409 : 202)
   }
   const match = url.pathname.match(/^\/api\/sessions\/([^/]+)(\/terminal|\/commands)?$/)
   const room = match ? rooms.get(decodeURIComponent(match[1])) : undefined

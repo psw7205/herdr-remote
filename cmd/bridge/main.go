@@ -35,6 +35,11 @@ func main() {
 	tailnetHost := flag.String("tailnet-host", tailnet.Auto, "Tailscale Serve DNS host: auto (from tailscale status), off (localhost-only), or an explicit host")
 	tailnetLogin := flag.String("tailnet-login", tailnet.Auto, "only Tailscale user login allowed through Serve: auto (node owner) or an explicit login")
 	tailscaleBin := flag.String("tailscale-bin", "", "Tailscale CLI path (default: PATH, then well-known install locations)")
+	var projectRoots []string
+	flag.Func("project-root", "absolute folder whose Git repo (itself or one level below) may host a new session; repeatable. Without one, only open workspaces get new tabs", func(value string) error {
+		projectRoots = append(projectRoots, value)
+		return nil
+	})
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*listen)
 	if err != nil || host != "localhost" && host != "127.0.0.1" && host != "::1" {
@@ -52,7 +57,13 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	registry := session.NewRegistry(ctx, herdr.NewGateway(*socket), *claudeDir)
+	gateway := herdr.NewGateway(*socket)
+	starter, err := session.NewStarter(gateway, projectRoots)
+	if err != nil {
+		slog.Error("invalid -project-root", "error", err)
+		os.Exit(2)
+	}
+	registry := session.NewRegistry(ctx, gateway, *claudeDir)
 	if err = registry.Refresh(ctx); err != nil {
 		slog.Error("Herdr unavailable", "error", err)
 		os.Exit(1)
@@ -83,10 +94,13 @@ func main() {
 	}
 	api := httpapi.New(registry, receipts, allowed, *staticDir)
 	api.SetTailnetIdentity(identity.Host, identity.Login)
+	api.SetStarter(starter)
 	if err = api.ValidateOrigins(); err != nil {
 		slog.Error("invalid Origin config", "error", err)
 		os.Exit(2)
 	}
+	// No WriteTimeout: WebSocket streams are long-lived and a session start
+	// waits up to Herdr's 30s agent readiness; each handler bounds itself.
 	server := &http.Server{Addr: *listen, Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -100,7 +114,7 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(shutdownCtx)
 	}()
-	slog.Info("Bridge listening", "address", *listen, "origins", allowed)
+	slog.Info("Bridge listening", "address", *listen, "origins", allowed, "project_roots", len(projectRoots))
 	if err = server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("Bridge failed", "error", err)
 		os.Exit(1)

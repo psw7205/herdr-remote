@@ -2077,7 +2077,7 @@ stable release마다 rebase와 `just ci`·설치 검증을 거쳐 갱신한다. 
 
 ### Status
 
-Accepted (2026-09-28, 미구현. [Backlog P1-14](backlog.md#p1--핵심-ux와-다음-agent))
+Accepted (2026-09-28). 2026-09-29 구현, [Backlog P1-14](backlog.md#p1--핵심-ux와-다음-agent)
 
 ### Context
 
@@ -2108,8 +2108,9 @@ ADR-022 capability로 노출한다. `agent.start`의 `--` 뒤 인자는 받지 �
 
 **폴더 후보.** Bridge는 `-project-root` flag(반복 가능)로 root를 받는다. root가 Git repo면 root
 하나가 후보이고, 아니면 바로 아래 한 단계의 Git repo(`.git` directory 또는 file)만 후보다.
-hidden directory는 제외한다. symlink를 해석한 실제 경로가 root 밖이면 제외한다. 여기에 Herdr
-`workspace.list`의 열린 workspace cwd를 합치고 "열려 있음"으로 표시한다. 열린 workspace를 고르면
+hidden directory는 제외한다. symlink를 해석한 실제 경로가 root 밖이면 제외한다. 여기에 Herdr의
+열린 workspace를 합치고 "열려 있음"으로 표시한다. `workspace.list`에는 cwd가 없으므로 workspace의
+폴더는 `session.snapshot`에서 그 workspace 첫 pane의 cwd로 읽는다. 열린 workspace를 고르면
 기본 동작은 그 workspace에 새 tab을 여는 것이다. 같은 cwd의 workspace를 중복으로 만들지 않는다.
 root가 없으면 새 workspace 생성은 비활성이다.
 
@@ -2118,6 +2119,9 @@ root가 없으면 새 workspace 생성은 비활성이다.
 directory인지(열린 workspace라면 여전히 열려 있는지) 확인하고, 실패하면 reject한다.
 host filesystem 탐색, 임의 경로 입력, transcript에서 추출한 최근 project, Herdr 내부 state
 파일 읽기는 제공하지 않는다.
+
+**API.** 후보는 `GET /api/start-candidates`, 생성은 `POST /api/sessions`(`command_type: "session_start"`)다.
+허용 kind와 새 workspace 가능 여부는 `GET /api/sessions`의 `start`로 노출한다.
 
 **중복 방지.** 생성은 새 command type `session_start`이며 ADR-033 receipt를 따른다. digest는
 후보 ID, kind, 배치(new workspace 또는 기존 workspace의 new tab)로 만든다. `runtime_binding`은
@@ -2138,9 +2142,9 @@ native session이 검증되면 `claude:<native-id>`가 된다. Chat·prompt·Ter
   폴더라는 신뢰 경계이기도 하다. 폴더 안 설정(hooks, MCP 등)은 agent 실행 시 동작할 수 있다.
 * desktop client가 붙지 않은 상태에서 만든 pane은 Herdr fallback 크기를 쓸 수 있다(P1-08).
   모바일은 여전히 PTY를 resize하지 않는다.
-* 처음 여는 폴더에서 agent가 신뢰 확인 같은 시작 화면에 멈추면, native session이 아직 없어
-  binding이 발급되지 않을 수 있다. 이때 모바일 Terminal 입력은 fail closed하므로 PC에서 처리해야
-  한다. 실제 동작은 P1-14에서 검증한다.
+* 처음 여는 폴더에서 agent가 신뢰 확인 같은 시작 화면에 멈추면 native session이 아직 없어
+  binding이 발급되지 않는다(2026-09-29 격리 실측). 모바일 Terminal 입력은 fail closed하므로 확인은
+  PC의 Herdr에서 한다.
 * 실행 중 agent의 폴더 이동, 모바일에서 workspace·tab·pane 닫기는 제공하지 않는다.
 
 기각한 대안:

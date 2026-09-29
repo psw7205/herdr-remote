@@ -20,11 +20,11 @@ describe('session list', () => {
   const respond = (body: unknown) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
   it('reads the Herdr conditional input capability', async () => {
     respond({sessions:[session],herdr:{conditional_input:'unsupported'}})
-    expect(await listSessions()).toEqual({sessions:[session],conditionalInput:'unsupported'})
+    expect(await listSessions()).toEqual({sessions:[session],conditionalInput:'unsupported',start:{kinds:[],new_workspace:false}})
   })
   it('treats a missing capability from an older Bridge as unknown', async () => {
     respond({sessions:[session]})
-    expect(await listSessions()).toEqual({sessions:[session],conditionalInput:'unknown'})
+    expect(await listSessions()).toEqual({sessions:[session],conditionalInput:'unknown',start:{kinds:[],new_workspace:false}})
   })
   it('never describes an unverified session as connected or ended', () => {
     const unverified: Session = { ...session, runtime_binding: undefined, terminal: false, lifecycle: 'unverified' }

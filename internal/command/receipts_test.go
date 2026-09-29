@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -65,5 +66,34 @@ func TestCommandIDCannotEscapeDirectory(t *testing.T) {
 	got := s.Execute(context.Background(), r, func(context.Context, Request) Result { t.Fatal("invalid ID dispatched"); return Result{} })
 	if got.Status != "rejected" {
 		t.Fatal(got)
+	}
+}
+func TestPromptDigestInputUnchangedBySessionStartFields(t *testing.T) {
+	b, err := json.Marshal(request())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Receipts on disk were written with this exact encoding.
+	want := `{"command_id":"00000000-0000-4000-8000-000000000001","session_id":"s","runtime_binding":"b","command_type":"prompt","payload":{"text":"hello"}}`
+	if string(b) != want {
+		t.Fatalf("prompt encoding changed:\n%s", b)
+	}
+}
+func TestSessionStartRetryReturnsCreatedTopology(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	r := Request{CommandID: "00000000-0000-4000-8000-000000000002", Type: "session_start", Payload: Payload{CandidateID: "c1", Kind: "claude", Placement: "new_workspace"}}
+	created := &Created{WorkspaceID: "w2", TabID: "w2:t1", PaneID: "w2:p1", Agent: "mobile-000000000000"}
+	first := s.Execute(context.Background(), r, func(context.Context, Request) Result {
+		return Result{Status: "accepted", Code: "AGENT_NOT_READY", Created: created}
+	})
+	restarted, _ := Open(dir)
+	again := restarted.Execute(context.Background(), r, func(context.Context, Request) Result { t.Fatal("start dispatched twice"); return Result{} })
+	if first.Created == nil || again.Created == nil || *again.Created != *created || again.Code != "AGENT_NOT_READY" {
+		t.Fatalf("first %+v again %+v", first, again)
+	}
+	r.Payload.Placement = "new_tab"
+	if got := restarted.Execute(context.Background(), r, func(context.Context, Request) Result { t.Fatal("conflict dispatched"); return Result{} }); got.Code != "COMMAND_ID_CONFLICT" {
+		t.Fatalf("placement change: %+v", got)
 	}
 }
