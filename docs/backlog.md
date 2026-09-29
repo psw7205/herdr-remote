@@ -37,6 +37,7 @@
 | P1-11 | Design foundation | `done (2026-09-25)`. `light-dark()` color token, system font, Lucide icon, 화면별 CSS Module로 바꿨고, 2026-09-27에 배색을 cool graphite로 바꿨다. 근거는 dev 전용 fixture page(`web/fixture.html`) screenshot과 Web Interface Guidelines audit이다. [근거](records/verification.md#p1-11-design-foundation) | component는 token만 쓰고, 두 theme과 reduced motion에서도 상태 표시가 구분된다. |
 | P1-12 | transcript 이동 뒤 경로 재해석 | `todo`. 2026-09-25 관찰: Claude Code session이 worktree로 working directory를 옮기자, transcript 파일이 다른 project directory로 옮겨지고 원래 파일은 사라졌다. 실행 중인 Bridge는 discovery 때 찾은 경로를 계속 watch해서, 그 session의 Chat이 이동 시점 이후로 갱신되지 않았다. 새로 시작한 Bridge는 새 경로를 찾았다. | transcript 파일의 이동이나 삭제를 감지하면 native session ID로 경로를 다시 찾고 새 epoch snapshot으로 복구한다. 입력 보호와 Terminal에는 영향이 없다. |
 | P1-13 | 장기 실행 Bridge의 resource 상한 | `todo`. 2026-09-28에 `ended`·`superseded` item의 transcript watcher를 닫아 본 적 있는 session 수에 비례하던 fd 증가를 없앴다(`internal/session` test). 남은 한계: macOS kqueue는 감시 directory의 파일마다 fd를 열어 active session 수 × project directory 파일 수만큼 fd를 쓴다. 시작 시 `fsnotify.NewWatcher`가 실패하면 재시도하지 않는다. 종료된 item도 message·ring·projection을 계속 보유한다. `doctor`는 `Services[*].TCP` forward를 검사하지 않고, MagicDNS host를 얻지 못하면 Serve 상태를 읽지 않는다. | 수 주 실행해도 fd와 memory가 active session 수에만 비례하고, watcher 생성 실패는 재시도나 명확한 오류로 드러난다. |
+| P1-14 | Herdr에서 새 session 시작 | `todo`, ADR-037. P0-03~06 이후 착수한다. 다른 kind는 P1-01/02 이후. Herdr `v0.9.1` 공개 API(`workspace.create`·`tab.create`·`agent.start`)로 가능함을 문서로 확인했고 실제 호출은 하지 않았다([조사](records/integration-findings.md#2026-09-28--새-session-생성-api-조사)). | `-project-root` 후보(root 또는 한 단계 아래 Git repo)와 열린 workspace를 opaque ID로 보여 주고, 새 workspace 또는 기존 workspace의 새 tab에서 `claude`만 인자 없이 시작한다. dispatch 직전 경로를 재검증한다. `session_start` receipt로 retry가 같은 결과를 반환하고 `delivery_unknown`을 자동 재시도하지 않는다. Bridge·HTTP timeout은 `agent.start` 준비 대기(기본 30s)보다 길게 잡아 정상 시작이 `delivery_unknown`이 되지 않게 한다. 새 session이 기존 discovery로 `claude:<native-id>`가 된 뒤에만 입력이 열린다. 격리 환경에서 처음 여는 폴더의 신뢰 확인 화면과 desktop 미접속 pane 크기를 실측한다. |
 
 ## P2 — 필요가 확인될 때 추가할 기능
 
@@ -50,6 +51,7 @@
 | P2-06 | Receipt·event buffer 운영 | 명령량/장기 실행에서 크기 문제가 관찰될 때. | command ID 만료 뒤 재수락 금지를 유지하며 disk retention을 설계한다. replay buffer miss는 언제나 native snapshot으로 복구한다. conversation DB/Redis/broker를 추가하지 않는다. |
 | P2-07 | Client preference·검색 | 첫 handoff UX에서 필요가 확인될 때. | 읽음 위치, 즐겨찾기 또는 session 검색은 presentation state로만 저장하고 native transcript를 복제하지 않는다. |
 | P2-08 | Local command의 compact 표시 | slash command 호출과 결과를 대화에 남길 필요가 확인될 때. 지금은 P1-10에 따라 숨긴다. | PRD §15 Status Event처럼 대화를 방해하지 않게 작게 표시한다. 이를 위한 event는 ADR과 함께 추가하고, 사용자 입력과 구분한다. |
+| P2-09 | Worktree로 새 작업 시작 | P1-14 이후, branch 단위 작업 시작이 필요할 때. Herdr `worktree.create`가 checkout과 workspace를 함께 만든다. | 후보 repo와 branch 이름으로 Herdr가 worktree를 만들고 P1-14와 같은 규칙으로 agent를 시작한다. checkout 위치는 Herdr worktree 설정을 따르고 Bridge가 경로를 정하지 않는다. |
 
 ## 계속 범위 밖인 항목
 
@@ -59,7 +61,8 @@ full IDE·source editor, mobile Git commit/push/merge는 현 PRD의 non-goal이�
 
 **의도:** 기존 Herdr session의 무결성과 모바일에서의 복구 가능성을 먼저 완성한다.
 **추천:** P0-02의 남은 실기기 확인(reconnect, PWA)을 닫은 뒤
-P0-03~06을 격리 환경에서 검증한다. 이어서 P1-01/02 Codex adapter로 확장한다 — 이유는
+P0-03~06을 격리 환경에서 검증한다. 이어서 P1-01/02 Codex adapter로 확장하고, 새 session 시작(P1-14)은
+P0-03~06 이후 `claude`부터 진행한다 — 이유는
 remote 사용 경로와 잘못된 process 입력 방지가 Rich Chat 기능보다 먼저 증명돼야 하기 때문이다.
 UI/UX 개편(P1-03, P1-09~P1-11)은 2026-09-25 소유자 요청으로 이 순서보다 먼저 진행했다.
 남은 실기기 확인은 P0-02와 같은 실기기 세션에서 한다.

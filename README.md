@@ -11,7 +11,7 @@
 
 Herdr에서 이미 실행 중인 coding agent를 모바일 브라우저에서 확인하고 같은 session에
 입력하는 single-user, single-host client다. Herdr가 process와 PTY를 소유하고,
-Chat은 native transcript를 읽어 표시한다. Bridge가 agent를 start/resume하지 않는다.
+Chat은 native transcript를 읽어 표시한다. Bridge는 agent를 직접 실행하거나 resume하지 않는다.
 repo와 Go module 이름은 `herdr-remote`다.
 
 [Herdr](https://github.com/herdrdev/herdr)는 여러 coding agent를 terminal pane에서 실행하고
@@ -35,6 +35,7 @@ repo와 Go module 이름은 `herdr-remote`다.
 | 모바일 UI | 상태별 session 목록, Chat, light/dark theme, code 복사, 특수 키가 있는 Terminal, PWA. 실기기 keyboard와 설치형 PWA는 미검증 |
 | Tailnet | Serve 경유 소유자 phone에서 Chat·prompt·Terminal 확인. 화면 잠금·네트워크 전환 뒤 reconnect와 다른 사용자 거부의 실측은 미검증 |
 | Codex | 미지원. native transcript 구조만 조사했다 |
+| 새 session 생성 | 미구현. 설정한 폴더에서 Herdr로 시작하는 방식으로 결정했다(ADR-037) |
 | Tool card·Changed Files·attachment·notification | 미구현 |
 
 Claude의 localhost handoff와 Bridge 재시작 복구는 실제 process에서 검증했다.

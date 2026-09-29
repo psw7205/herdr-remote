@@ -250,7 +250,7 @@ network 계층 ACL은 [Backlog P0-03](backlog.md#p0--배포와-핵심-안정성)
 | ID | Invariant | 강제 위치 |
 | --- | --- | --- |
 | I1 | Chat이 가능한 item 하나는 Herdr가 검증한 기존 native session 하나다 | `internal/session` `claude:<native-id>` identity, `internal/claude` `Resolve`의 단일 경로 조건 |
-| I2 | Mobile 입력은 agent process를 만들지 않는다 | `internal/herdr`에 start/resume 경로 없음. 입력은 `agent.bound_input`만 |
+| I2 | Mobile 입력은 agent process를 만들지 않는다. 새 session은 별도 명시 command로만 Herdr에 요청한다(ADR-037, 미구현) | `internal/herdr`에 start/resume 경로 없음. 입력은 `agent.bound_input`만 |
 | I3 | Transcript는 read-only다 | `internal/transcript`는 `os.Open`만 사용. Bridge의 disk write는 `internal/command` receipt뿐 |
 | I4 | browser/WS 종료는 agent, pane, session에 영향을 주지 않는다 | `internal/httpapi` WS 종료 시 구독 해제만 수행 |
 | I5 | Agent-specific parsing은 Bridge 안에만 있다 | `internal/claude` |
@@ -291,6 +291,7 @@ resource 상한은 [Backlog P1-13](backlog.md#p1--핵심-ux와-다음-agent)에�
 | Notification | Web Push 없음 | [P2-05](backlog.md#p2--필요가-확인될-때-추가할-기능) |
 | Streaming delta | 완성된 JSONL text record만 전송 | [P1-07](backlog.md#p1--핵심-ux와-다음-agent) |
 | transcript 이동 | 발견 시점 경로를 계속 watch | [P1-12](backlog.md#p1--핵심-ux와-다음-agent) |
+| 새 session 생성 | route, 폴더 후보, `agent.start` 호출 없음 | [P1-14](backlog.md#p1--핵심-ux와-다음-agent) |
 
 ## Decision Priority
 

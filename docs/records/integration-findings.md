@@ -214,3 +214,23 @@ assistant message 수는 31개로 같았다.
 새 working directory에 해당하는 project directory로 옮겨지고 원래 경로의 파일은 사라졌다. 이미 실행
 중이던 Bridge는 discovery 때 찾은 원래 경로를 계속 watch했다. 그래서 그 session의 Chat이 이동 시점
 이후로 갱신되지 않았다. 이후에 시작한 Bridge는 새 경로를 찾았다(backlog P1-12).
+
+## 2026-09-28 — 새 session 생성 API 조사
+
+모바일에서 새 session을 시작하는 경로(ADR-037)를 위해 Herdr `v0.9.1` tag의 socket API·CLI
+문서를 읽었다. 실제 생성 호출은 하지 않았다.
+
+- `workspace.create`는 `cwd`, `label`, `env`, `focus`를 받고 첫 tab과 root pane을 함께 만든다.
+  응답에 `workspace`, `tab`, `root_pane`이 있다. `tab.create`도 `workspace_id`, `cwd`를 받고
+  `tab`, `root_pane`을 반환한다. 생성은 기본적으로 focus를 바꾸지 않는다. raw socket의 `cwd`는
+  절대 경로여야 한다.
+- `agent.start`는 name, `kind`, pane을 받는다. 대상 pane의 interactive shell이 foreground를
+  소유하고 다른 command·editor·agent가 없어야 한다. topology는 별도로 만들어야 한다.
+  name은 live agent 사이에서 unique하고 `[a-z][a-z0-9_-]{0,31}`이다. `--` 뒤 인자는
+  agent executable에 그대로 전달된다. agent가 같은 terminal을 소유하고 입력 준비가 된 뒤에
+  성공을 반환하며, 시작 중 `blocked`가 보이면 `agent_not_ready`를 즉시 반환한다. 기본 timeout은
+  30000ms다. 지원 kind에는 `claude`, `codex`, `pi`, `opencode` 등 24종이 있다.
+- 실행 중 agent의 cwd를 바꾸는 API는 없다. 다른 폴더에서 작업하려면 새 pane과 새 session이 필요하다.
+- `worktree.create`는 Git checkout과 workspace·tab·root pane을 함께 만든다. 이 method의
+  `trust_repository`는 다른 사용자가 소유한 Git repo 거부를 한 번 우회하는 Git 옵션이며,
+  agent의 폴더 신뢰와는 관계없다.
