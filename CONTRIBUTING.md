@@ -77,6 +77,43 @@ mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
 실행한 항목과 unit test로만 확인한 항목을 구분해 기록한다. 더 상세한 미완료 acceptance는
 [Backlog P0](docs/backlog.md#p0--배포와-핵심-안정성)를 따른다.
 
+## 격리 Herdr 환경
+
+binding·dispatch·lifecycle을 바꾸거나 Herdr patch·binary를 전환할 때는 기존 사용자 server를
+건드리지 않고 이름 있는 격리 server에서 실제 agent로 확인한다. 화면에 드러나는 UI 동작은
+사용하면서 확인한다([검증 수준 원칙](docs/backlog.md#herdr-mobile-chat-backlog)).
+
+```sh
+E2E="$(mktemp -d)"; mkdir "$E2E/proj"; git -C "$E2E/proj" init -q
+# 격리 server. coding agent의 환경변수(HERDR_*, CLAUDE_CODE_*)를 물려주지 않는다.
+cat > "$E2E/h" <<EOF
+#!/bin/sh
+exec env -i HOME="$HOME" USER="$USER" SHELL="$SHELL" TERM=xterm-256color LANG="${LANG:-en_US.UTF-8}" PATH="$PATH" herdr --session e2e "\$@"
+EOF
+chmod +x "$E2E/h"
+nohup "$E2E/h" server > "$E2E/server.log" 2>&1 &
+herdr session list                      # e2e의 socket 경로 확인
+"$E2E/h" workspace create --cwd "$E2E/proj" --no-focus
+"$E2E/h" agent start a --kind claude --pane <pane-id> -- --model <작은 model>
+# Bridge는 별도 port·receipt와 tailnet off로 띄운다.
+mise exec -- go run ./cmd/bridge -herdr-socket <e2e socket> -receipts-dir "$E2E/receipts" \
+  -listen 127.0.0.1:8797 -origins http://127.0.0.1:8797 -tailnet-host off
+```
+
+- 모든 Herdr 명령은 `"$E2E/h"`로 실행한다. `--session` 없는 `herdr`나 상속된 `HERDR_SOCKET_PATH`는
+  default server를 가리킨다. 시작 전에 default의 `herdr pane list`와 agent PID를 기록하고 끝난 뒤 비교한다.
+- `env -i`를 빼면 Claude Code 안에서 띄운 server의 새 Claude가 transcript를 저장하지 않는다.
+- 처음 여는 폴더는 신뢰 확인 화면에서 `agent start`가 `agent_not_ready`로 끝난다.
+  `"$E2E/h" pane send-keys <pane-id> down enter`로 수락한 뒤 다시 시작한다.
+- `agent start`는 사용자 shell에서 실행되므로 alias가 붙인 옵션이 적용된다. permission 대기를
+  재현하려면 pane에 `command claude ...`를 직접 입력한다.
+- native session은 첫 prompt 뒤 생긴다. Bridge `prompt`는 `claude:<native-id>` item에만 전달된다.
+- stock 전환은 설치 binary를 바꾸지 않고 `"$E2E/h" server live-handoff --import-exe <binary>`로 한다.
+- 정리 순서: Bridge 종료 → `"$E2E/h" server stop` → `herdr session delete e2e` →
+  Claude transcript root(Bridge `-claude-dir` 기본값) 아래 임시 directory 이름의 test transcript 삭제 →
+  default pane·PID 비교.
+- 결과는 `docs/records/verification.md`에 날짜 section으로 남기고 native ID·binding은 placeholder로 쓴다.
+
 ## 문서와 변경 제출
 
 작업 시작 시 관련 backlog ID와 성공 기준을 정한다. 작은 구현 선택은 code로 설명하고,

@@ -174,6 +174,48 @@ test는 `-run`으로 따로 실행해도 통과했다.
 막히는지, 장기 실행 Bridge의 실제 fd 수, 실제 `tailscale serve --tcp` 설정에서의 `doctor` 출력,
 이미 설치한 PWA의 cache 갱신. 남은 resource 한계는 backlog P1-13에서 추적한다.
 
+## 격리 Herdr session integrity 검증 (2026-09-28)
+
+범위는 backlog P0-04·P0-05·P0-06의 잘못된 process 입력, 조용한 중단, stock 전환이다.
+실행 방법은 [CONTRIBUTING.md](../../CONTRIBUTING.md#격리-herdr-환경)의 격리 환경 절차로 정리했다.
+
+환경: `env -i`로 띄운 이름 있는 headless Herdr server(patched `0.9.1`), 임시 Git directory의
+workspace, Claude Code `2.1.283`(Haiku 4.5), 이 repo의 Bridge를 별도 port·receipt directory와
+`-tailnet-host off`로 실행. desktop client는 붙이지 않았다. 기존 default Herdr server에는 연결하지
+않았고, 실행 전후 default의 pane 9개(`pane_id`·`terminal_id`·agent)와 기존 process PID가 같았다.
+
+| 시나리오 | 결과 |
+| --- | --- |
+| 기본 전달 | Bridge prompt가 transcript에 user/assistant 한 번씩 기록됐다. 같은 `command_id` retry는 202이고 message가 늘지 않았다. 같은 ID에 다른 body는 409 `COMMAND_ID_CONFLICT` |
+| A 종료 → 같은 pane의 shell | A binding의 `prompt`·`terminal_input`·`interrupt`가 모두 409 `SESSION_CHANGED`. shell에 입력이 나타나지 않았다. 종료된 item은 목록에서 빠지고, claude pane이 없으면 `conditional_input`은 `unknown`이다(설계대로) |
+| A → 같은 pane의 새 session B | B는 새 native ID와 새 binding을 받았다. A binding으로 A·B ID에 보낸 세 종류 command가 모두 409 `SESSION_CHANGED`. B transcript에는 B 자신의 대화만 있다 |
+| 같은 process의 `/clear` | 새 native ID에 새 binding이 발급됐다. 이전 binding은 이전·새 ID 모두에서 409 |
+| `/exit`과 Bridge prompt 경합 | native session이 있는 상태에서 `/exit` 입력과 prompt 사이 간격을 0~400ms로 바꿔 7회 실행. 6회는 `accepted`, 400ms는 409 `SESSION_ENDED`. shell 실행을 드러내는 marker 파일은 한 번도 생기지 않았다. `accepted` 6회 중 5회는 종료 중인 같은 Claude에 쓰였다가 transcript에 남지 않았고, 1회는 같은 Claude가 prompt를 처리했다 |
+| interrupt | Bash tool `sleep 40` 실행 중 Bridge `interrupt`가 202, 약 2초 뒤 `idle`, pane에 `Interrupted`. binding 유지 |
+| WS 종료 | `sleep 12` 작업 시작 6초 뒤 events WS를 닫았다. agent는 작업을 끝내고 최종 message를 기록했다. binding 유지 |
+| permission 대기 | default permission mode에서 Bash 권한 요청 시 status `needs_attention`. Chat prompt는 409로 거부(이 검증에서 code를 `SESSION_CHANGED`에서 `AGENT_NOT_READY`로 고쳤다). binding을 붙인 Terminal 조회는 200, `terminal_input` Esc로 거절하자 파일이 만들어지지 않고 `idle`로 돌아왔다 |
+| patch → stock live handoff | `herdr server live-handoff --import-exe <stock 백업>`. Claude PID·shell PID 유지. `/api/sessions`는 `conditional_input: unsupported`, item은 `unverified`·`terminal: false`·binding 없음. 이전 binding의 세 종류 command는 Bridge에서 409 `SESSION_CHANGED`(binding이 비어 Herdr까지 가지 않는다). `doctor`는 `unsupported`와 blocker를 보고했다 |
+| stock → patch live handoff | PID 유지, `supported`, item `active`, 새 binding. 이전 binding은 409, 새 binding prompt는 전달되고 응답했다 |
+
+부수 관찰:
+
+- 처음 여는 폴더에서 `agent start`는 신뢰 확인 화면이 뜬 채 `agent_not_ready`("blocked during
+  startup")로 끝났다. 그 시점의 binding 발급 여부는 측정하지 않았다(P1-14).
+- `agent start`는 pane의 사용자 shell에서 agent를 실행하므로 shell alias·함수가 적용된다.
+  새 session의 permission mode는 사용자 shell 환경을 따르며 Bridge가 보장하지 않는다.
+- coding agent 안에서 Herdr server를 띄우면 그 agent의 환경변수를 물려받는다. Claude Code는
+  상속된 child-session 표식 때문에 transcript를 저장하지 않았다. `env -i`로 다시 띄워 해결했다.
+
+알려진 잔여 창: Herdr는 text와 Enter를 쓰기 직전에 binding을 다시 검증한다. 검증을 통과해 쓴
+byte를 종료 직전의 process가 읽지 않고 끝나면, 다음 foreground process(shell)가 읽을 수 있다.
+위 경합 7회에서는 관찰되지 않았고 guard가 막는 범위도 아니다.
+
+확인하지 않은 것: stale binding으로 Terminal 조회가 거부되는지(A→shell 단계의 요청에
+binding header가 빠져 근거로 쓰지 않는다), handoff 전후 pane geometry(P1-08, desktop client
+없음), patch → patch 재적용, 새 release rebase(upstream 최신이 `v0.9.1`), Bridge 재시작.
+실행 후 격리 server·Bridge·test transcript는 삭제했다. Claude Code의 폴더 신뢰 기록은 사용자
+설정이라 지우지 않았다.
+
 ## 남은 범위
 
 첫 vertical slice 이후의 Codex adapter는 Herdr 안에서 실행 중인 Codex의 실제 CLI transcript와
@@ -199,19 +241,19 @@ Bridge 재시작 복구는 사용자 `launchd` job으로 실행하던 때 확인
 
 ### P0-02 실제 mobile Tailnet handoff
 
-`todo`, P0-01 이후.
+`in-use`, P0-01 이후. 핵심 handoff는 2026-09-24에 확인했고, 남은 것은 사용하면서 확인한다.
 
 2026-09-24 소유자 phone에서 Tailnet HTTPS로 확인한 것: 기존 session 목록과 대화 표시. phone에서 보낸 prompt가 같은 Herdr pane의 기존 Claude Code session에 정확히 한 번 도착했고 그 agent가 같은 native session에서 응답했다(그 시점 새 command receipt는 `accepted` 하나, 새 agent process 없음). Terminal에서 pane 화면 표시. Serve 경유 `Origin: https://evil.example`·`Origin: null`은 403이고, 올바른 Origin은 Origin 검사를 통과했다(이후 request body 검증에서 400, dispatch 없음, receipt 수 불변). client가 넣은 `Tailscale-User-Login` header는 Serve가 실제 identity로 덮어쓰며 소유자 device 요청은 수락된다.
 
-남은 것: 다른 tailnet 사용자 identity 거부는 단일 사용자 tailnet이라 unit test로만 검증했다. 화면 잠금·네트워크 전환 후 WebSocket reconnect는 미검증이다. PWA 홈 화면 설치는 P1-06에 남아 있다. phone 화면이 full screen이 아니었다는 관찰은 P1-06에 기록했다.
+남은 것: 다른 tailnet 사용자 identity 거부는 unit test로만 검증했다. tailnet에 다른 사용자·공유·tagged node를 추가하면 실측한다. 화면 잠금·네트워크 전환 후 WebSocket reconnect는 사용 중 확인한다. 끊긴 화면은 새로고침으로 native snapshot에서 복구된다. PWA 홈 화면 설치는 P1-06에 남아 있다. phone 화면이 full screen이 아니었다는 관찰은 P1-06에 기록했다.
 
 ### P0-04 Herdr patch 유지·업데이트 경로
 
-`todo`. 조건부 입력은 fork `psw7205/herdr`의 `mobile-binding` branch와 설치된 patched binary에 의존한다. upstream PR 경로가 없어 fork를 소유·유지한다(ADR-036, runbook §8).
+`blocked`(새 Herdr release 대기). 조건부 입력은 fork `psw7205/herdr`의 `mobile-binding` branch와 설치된 patched binary에 의존한다. upstream PR 경로가 없어 fork를 소유·유지한다(ADR-036, runbook §8).
 
 2026-09-28 fork `master`를 upstream과 sync하고 `mobile-binding`을 공개했다. stock `0.9.1`에는 API가 없고 두 binary의 version 문자열이 같다. `/api/sessions`의 `herdr.conditional_input`(`supported`/`unsupported`/`unknown`), `doctor`의 `conditional_input`·blocker, Web UI 안내로 감지를 노출하며 Bridge는 fail closed한다. build·백업·설치·live handoff·rollback·upgrade 절차는 [Herdr patch runbook](../herdr-patch.md)에 기록했다.
 
-stock server에서의 `unsupported` 판정, rollback, 새 release rebase, 실행 중 Claude session이 patch→stock 전환에서 `unverified`로 남고 patch 복구 후 `active`로 돌아오는 P0-07 scenario는 격리 환경에서 실행하지 않았다. P0-07과 연결된다.
+2026-09-28 격리 server에서 patch→stock live handoff(rollback)와 stock→patch 재적용을 실측했다. agent PID가 유지됐고, stock에서는 `unsupported`·`unverified`로 fail closed했으며, patch 복구 후 새 binding으로 `active`가 됐다([격리 검증](#격리-herdr-session-integrity-검증-2026-09-28)). 남은 것: 새 release가 나오면 rebase와 patch → patch 재적용을 확인한다. upstream stable 최신은 `v0.9.1`이다.
 
 후속 patch 후보: `pane.read` 응답에 frame과 같은 lock에서 읽은 실제 PTY cols/rows를 넣는다(P1-05).
 
@@ -219,7 +261,7 @@ stock server에서의 `unsupported` 판정, rollback, 새 release rebase, 실행
 
 `done (2026-09-24)`, P0-04와 연결.
 
-근거: fake gateway를 쓴 `internal/session` unit test(`TestBindingLossKeepsSessionUnverified`, `TestBindingLossEndsOnlyOnConfirmedEnd`, `TestBindingRecovery`, `TestVerifiedObservationWinsOverContinuity`, `TestRejectedBindingForAnotherNativeEndsContinuity`, `TestPaneItemSupersededByVerifiedNativeSession`, `TestPaneItemSupersededBySessionMovedToItsPane`, `TestEndedSessionRevivesOnVerifiedBinding`, `TestAmbiguousPaneGetsNoContinuity`, `TestSameNativeVerifiedOnTwoPanesIsAmbiguous`, `TestDuplicatedPaneSupersedesNothing`, `TestConcurrentRefreshAndReads`)와 `web/src/api.test.ts`. 실제 stock binary 실행과 App의 successor 전환 render test는 아니며 P0-04의 격리 환경 검증에 남는다.
+근거: fake gateway를 쓴 `internal/session` unit test(`TestBindingLossKeepsSessionUnverified`, `TestBindingLossEndsOnlyOnConfirmedEnd`, `TestBindingRecovery`, `TestVerifiedObservationWinsOverContinuity`, `TestRejectedBindingForAnotherNativeEndsContinuity`, `TestPaneItemSupersededByVerifiedNativeSession`, `TestPaneItemSupersededBySessionMovedToItsPane`, `TestEndedSessionRevivesOnVerifiedBinding`, `TestAmbiguousPaneGetsNoContinuity`, `TestSameNativeVerifiedOnTwoPanesIsAmbiguous`, `TestDuplicatedPaneSupersedesNothing`, `TestConcurrentRefreshAndReads`)와 `web/src/api.test.ts`. 실제 stock binary 전환은 2026-09-28 격리 환경에서 `unverified`→`active` 복구까지 확인했다([격리 검증](#격리-herdr-session-integrity-검증-2026-09-28)). App의 successor 전환 render test는 없다.
 
 binding·capability를 잃은 `claude:<native-id>` session은 lifecycle `unverified`로 남고 `runtime_binding`을 비워 prompt·interrupt·Terminal을 fail closed한다. 같은 `pane_id`에서 claude가 보고되고 `agent_session`과 성공한 `agent.binding`의 native ID가 없거나 같을 때만 유지하며, 검증된 관찰이 먼저 ID를 차지하고, 한 pane에 active item이 둘이면 유지하지 않는다.
 
@@ -251,7 +293,7 @@ Apache-2.0 LICENSE를 추가하고 Go module을 `github.com/psw7205/herdr-remote
 
 ### P1-05 Terminal mobile 조작·화면 크기
 
-`todo`. `pane.read` visible ANSI frame을 xterm.js에 교체 표시하고 Herdr PTY resize는 호출하지 않는다.
+`in-use`. `pane.read` visible ANSI frame을 xterm.js에 교체 표시하고 Herdr PTY resize는 호출하지 않는다.
 
 Herdr 공개 API에는 정확한 PTY cols가 없어(rows는 `pane.get`/`session.snapshot`의 `scroll.viewport_rows`뿐) Bridge가 read-only `pane.layout`의 pane `rect`(zoomed tab의 focused pane이면 tab `area`)를 terminal frame 응답의 additive `cols`·`rows`로 넣는다([integration findings](integration-findings.md#2026-09-25--terminal-grid-크기-조사), ADR-035). rect는 border·scrollbar cell을 포함한 상한이고 direct attach resize lock이 있으면 PTY와 다를 수 있다.
 
@@ -271,7 +313,7 @@ Herdr patch 권고(P0-04 범위): `pane.read` 응답에 frame과 같은 lock에�
 
 ### P1-06 PWA 실제 기기 복구
 
-`todo`, P0-02 이후. manifest, 192/512 PNG, service worker와 foreground reconnect는 구현했다. 홈 화면 설치와 화면 잠금·네트워크 전환 후 복구는 실기기에서 확인하지 않았다.
+`in-use`. manifest, 192/512 PNG, service worker와 foreground reconnect는 구현했다. 홈 화면 설치와 화면 잠금·네트워크 전환 후 복구는 실기기에서 확인하지 않았다.
 
 2026-09-24 관찰: phone에서 화면이 full screen이 아니었다. 2026-09-25 headless Chrome 390×844에서는 P1-05 변경 전에도 layout 높이가 viewport와 같아 재현되지 않았다. 가장 유력한 원인은 설치된 PWA가 아닌 browser tab 실행이라 manifest의 `display: standalone`이 적용되지 않은 것(설치된 PWA에만 적용)이다. Terminal 고정 grid가 phone 폭을 넘던 문제는 P1-05에서 fit으로 바꿨다. 설치된 PWA full screen은 실기기에서 미검증이다.
 
@@ -281,7 +323,7 @@ Herdr patch 권고(P0-04 범위): `pane.read` 응답에 frame과 같은 lock에�
 
 ### P1-09 화면 틀·scroll·navigation
 
-`todo`, 실기기 확인만 남음.
+`in-use`, 실기기 확인만 남음.
 
 2026-09-25 구현: 화면 틀을 visual viewport에 고정해 header·연결 띠·composer는 그대로 두고 대화 영역만 scroll한다. 맨 아래에 있을 때만 새 메시지를 따라가고, 아니면 "최신으로" 버튼과 새 메시지 수를 보인다. keyboard는 Android에서 viewport의 `interactive-widget=resizes-content`로, iOS에서 visual viewport 보정으로 처리한다. session과 view를 hash에 반영해 Back이 Terminal → Chat → 목록 순서로 돌아간다. Terminal은 연 시점의 `runtime_binding`을 유지한다.
 

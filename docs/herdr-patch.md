@@ -185,10 +185,15 @@ mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
 - 열린 `claude:` session은 `ended`가 아닌 `unverified`로 남고 입력과 Terminal이 fail closed한다
   (P0-07). agent 종료로 해석하지 않는다.
 
-상태: **미검증**. patch server → stock import의 handoff 호환성, `unsupported` 판정,
-UI 안내는 실행해 보지 않았다. 사용자 agent가 있는 server에서 처음 시도하지 않는다.
-[AGENTS.md](../AGENTS.md#herdr-및-실제-runtime-작업)에 따라 별도 이름의 격리 Herdr server에서
-먼저 검증하고 생성한 테스트 자원을 정리한다.
+상태: 격리 server에서 **실측**(2026-09-28). 설치 binary를 바꾸지 않고
+`herdr --session <name> server live-handoff --import-exe <stock 백업>`으로 patch → stock을,
+`--import-exe <patched binary>`로 stock → patch를 실행했다. 두 방향 모두 Claude PID와 shell PID가
+유지됐다. stock에서는 `conditional_input: unsupported`, item `unverified`, 이전 binding 거부,
+`doctor` blocker를 확인했다. patch로 돌아오면 terminal ID가 바뀌어 새 binding이 발급되고 이전
+binding은 거부됐다. UI 안내는 browser로 보지 않았다. 실제 사용자 server의 rollback은 실행하지 않았다.
+결과는 [verification.md](records/verification.md#격리-herdr-session-integrity-검증-2026-09-28)에 있다.
+사용자 agent가 있는 server에 적용하기 전에는 [격리 Herdr 환경](../CONTRIBUTING.md#격리-herdr-환경)에서
+같은 전환을 먼저 확인하고 생성한 테스트 자원을 정리한다.
 
 ## 7. upgrade 정책
 

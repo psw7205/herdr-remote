@@ -234,3 +234,19 @@ assistant message 수는 31개로 같았다.
 - `worktree.create`는 Git checkout과 workspace·tab·root pane을 함께 만든다. 이 method의
   `trust_repository`는 다른 사용자가 소유한 Git repo 거부를 한 번 우회하는 Git 옵션이며,
   agent의 폴더 신뢰와는 관계없다.
+
+## 2026-09-28 — 격리 server에서 본 `agent.start`와 실행 환경
+
+patched Herdr `0.9.1`의 이름 있는 격리 server와 Claude Code `2.1.283`으로 실측했다. 결과 전체는
+[verification.md](verification.md#격리-herdr-session-integrity-검증-2026-09-28)에 있다.
+
+- 처음 여는 폴더에서 `agent start --kind claude`는 Claude의 폴더 신뢰 확인 화면에서 멈춘 채
+  `agent_not_ready`("blocked during startup")를 반환했다. 문서의 "시작 중 `blocked`면 즉시 반환"과
+  일치한다. pane에는 agent가 남아 확인 화면을 기다린다. 확인 뒤 다시 시작하면 화면 없이 준비됐다.
+- `agent.start`는 pane의 interactive shell에 명령을 입력하는 방식이라 사용자 shell의 alias·함수가
+  적용된다. `--` 뒤 인자로 지정한 permission mode보다 alias가 붙인 옵션이 우선할 수 있다.
+- `herdr --session <name> server`는 실행한 process의 환경변수를 pane에 물려준다. Claude Code 안에서
+  띄우면 child-session 표식이 상속돼 새 Claude가 transcript를 저장하지 않았다. `env -i`로 최소
+  환경만 넘기면 정상 저장됐다.
+- `herdr server live-handoff --import-exe <path>`는 `--session`으로 지정한 server에만 적용됐다.
+  default server의 PID는 바뀌지 않았다.
