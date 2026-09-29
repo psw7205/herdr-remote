@@ -85,6 +85,13 @@ func inspectTailnet(ctx context.Context, run tailnet.Runner, cliErr error, liste
 		} else {
 			r.Issues = append(r.Issues, fmt.Sprintf("Tailnet host unavailable (%v); enable MagicDNS in the Tailscale admin console.", err))
 		}
+		// Funnel and raw TCP forwards are still read: they expose Bridge
+		// whether or not the HTTPS proxy can be set up.
+		if serve, err := tailnet.ReadServeConfig(ctx, run); err != nil {
+			r.Issues = append(r.Issues, fmt.Sprintf("tailscale serve status failed: %v", err))
+		} else {
+			r.inspectExposure(serve, "", listen)
+		}
 		return r
 	}
 	r.Host = host
@@ -103,10 +110,7 @@ func inspectTailnet(ctx context.Context, run tailnet.Runner, cliErr error, liste
 		return r
 	}
 	r.ServeProxy = serve.ProxiesTo(host, listen)
-	r.Funnel = serve.FunnelEnabled(host)
-	if ports := serve.TCPForwardsTo(listen); len(ports) > 0 {
-		r.TCPForward, r.TCPForwardPorts = true, ports
-	}
+	r.inspectExposure(serve, host, listen)
 	if !r.ServeProxy {
 		port := listen
 		if _, p, err := net.SplitHostPort(listen); err == nil {
@@ -115,6 +119,15 @@ func inspectTailnet(ctx context.Context, run tailnet.Runner, cliErr error, liste
 		r.Issues = append(r.Issues, fmt.Sprintf("Tailscale Serve does not proxy https://%s/ to http://%s; run `tailscale serve --bg %s`.", host, listen, port))
 	}
 	return r
+}
+
+// inspectExposure records Funnel on host (any host when "") and raw TCP
+// forwards to Bridge.
+func (r *tailnetReport) inspectExposure(serve tailnet.ServeConfig, host, listen string) {
+	r.Funnel = serve.FunnelEnabled(host)
+	if ports := serve.TCPForwardsTo(listen); len(ports) > 0 {
+		r.TCPForward, r.TCPForwardPorts = true, ports
+	}
 }
 
 func diagnose(ctx context.Context, gateway reader, tn tailnetReport, out io.Writer) error {
@@ -162,10 +175,14 @@ func diagnose(ctx context.Context, gateway reader, tn tailnetReport, out io.Writ
 		r.Blockers = append(r.Blockers, "No verified native runtime binding; conditional input remains unavailable.")
 	}
 	if tn.Funnel {
-		r.Blockers = append(r.Blockers, fmt.Sprintf("Tailscale Funnel is enabled for %s and would expose Bridge to the public internet; clear it with `tailscale funnel reset` (this resets all Serve config), then re-create the tailnet-only proxy with `tailscale serve --bg <Bridge port>`.", tn.Host))
+		target := tn.Host
+		if target == "" {
+			target = "this node"
+		}
+		r.Blockers = append(r.Blockers, fmt.Sprintf("Tailscale Funnel is enabled for %s and would expose Bridge to the public internet; clear it with `tailscale funnel reset` (this resets all Serve config), then re-create the tailnet-only proxy with `tailscale serve --bg <Bridge port>`.", target))
 	}
 	if tn.TCPForward {
-		r.Blockers = append(r.Blockers, fmt.Sprintf("Tailscale Serve forwards raw TCP port(s) %s to Bridge; tailnet peers would reach Bridge from loopback without Tailscale identity headers. Remove each with `tailscale serve --tcp=<port> off` (or `--tls-terminated-tcp=<port> off`), stop any foreground `tailscale serve` process, and expose Bridge only through the HTTPS proxy `tailscale serve --bg <Bridge port>`.", strings.Join(tn.TCPForwardPorts, ", ")))
+		r.Blockers = append(r.Blockers, fmt.Sprintf("Tailscale Serve forwards raw TCP port(s) %s to Bridge; tailnet peers would reach Bridge from loopback without Tailscale identity headers. Remove each with `tailscale serve --tcp=<port> off` (or `--tls-terminated-tcp=<port> off`; for a `svc:<name>:<port>` entry add `--service=svc:<name>`), stop any foreground `tailscale serve` process, and expose Bridge only through the HTTPS proxy `tailscale serve --bg <Bridge port>`.", strings.Join(tn.TCPForwardPorts, ", ")))
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")

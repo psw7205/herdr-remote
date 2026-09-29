@@ -270,3 +270,32 @@ func TestInspectTailnetWithoutCLI(t *testing.T) {
 		t.Fatalf("stopped backend: %+v", stopped)
 	}
 }
+
+// Without a MagicDNS name the HTTPS proxy cannot be checked, but Funnel and raw
+// TCP forwards (here on a Tailscale Service) still expose Bridge.
+func TestDoctorBlocksExposureWithoutMagicDNS(t *testing.T) {
+	status := `{"BackendState":"Running","Self":{"DNSName":"","UserID":7},"User":{"7":{"ID":7,"LoginName":"owner@example.com"}}}`
+	serve := `{"AllowFunnel":{"node.example-tailnet.ts.net:443":true},"Services":{"svc:web":{"TCP":{"10000":{"TCPForward":"127.0.0.1:8787"}}}}}`
+	tn := inspectTailnet(context.Background(), tailnetRunner(status, serve), nil, "127.0.0.1:8787")
+	if tn.Host != "" || !tn.Funnel || !tn.TCPForward || len(tn.TCPForwardPorts) != 1 || tn.TCPForwardPorts[0] != "svc:web:10000" {
+		t.Fatalf("exposure missed without host: %+v", tn)
+	}
+	if len(tn.Issues) != 1 || !strings.Contains(tn.Issues[0], "MagicDNS") {
+		t.Fatalf("issues: %v", tn.Issues)
+	}
+	var out bytes.Buffer
+	if err := diagnose(context.Background(), fixtureReader{binding: true}, tn, &out); err != nil {
+		t.Fatal(err)
+	}
+	var got report
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Blockers) != 2 || !strings.Contains(got.Blockers[0], "Funnel is enabled for this node") || !strings.Contains(got.Blockers[1], "--service=svc:<name>") {
+		t.Fatalf("blockers: %v", got.Blockers)
+	}
+	tn = inspectTailnet(context.Background(), tailnetRunner(status, "{}"), nil, "127.0.0.1:8787")
+	if tn.Funnel || tn.TCPForward || len(tn.Issues) != 1 {
+		t.Fatalf("clean serve without host: %+v", tn)
+	}
+}

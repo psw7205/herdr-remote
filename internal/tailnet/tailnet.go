@@ -325,18 +325,22 @@ func (id Identity) unverifiedTailnetOrigin(origin string) bool {
 // foreground `tailscale serve`/`funnel` run stores its own config in
 // Foreground, keyed by CLI session ID, for as long as that CLI process lives.
 // TCP is keyed by the exposed port; `--tcp` and `--tls-terminated-tcp` store
-// their host:port (or unix:path) target in TCPForward.
+// their host:port (or unix:path) target in TCPForward. Services holds the same
+// TCP config per Tailscale Service (`--service=svc:<name>`), keyed by name.
 type ServeConfig struct {
-	TCP map[string]*struct {
-		TCPForward string
-	}
+	TCP TCPHandlers
 	Web map[string]*struct {
 		Handlers map[string]*struct {
 			Proxy string
 		}
 	}
+	Services    map[string]*struct{ TCP TCPHandlers }
 	AllowFunnel map[string]bool
 	Foreground  map[string]*ServeConfig
+}
+
+type TCPHandlers map[string]*struct {
+	TCPForward string
 }
 
 // ReadServeConfig runs `tailscale serve status --json`.
@@ -366,9 +370,10 @@ func (c ServeConfig) ProxiesTo(host, listen string) bool {
 
 // FunnelEnabled reports whether Funnel is allowed on any port of host, in
 // background or any foreground config, like upstream ServeConfig.IsFunnelOn.
+// An empty host, when the node's MagicDNS name is unknown, matches any host.
 func (c ServeConfig) FunnelEnabled(host string) bool {
 	for hostPort, allowed := range c.AllowFunnel {
-		if h, _, err := net.SplitHostPort(hostPort); allowed && err == nil && strings.EqualFold(h, host) {
+		if h, _, err := net.SplitHostPort(hostPort); allowed && err == nil && (host == "" || strings.EqualFold(h, host)) {
 			return true
 		}
 	}
@@ -381,7 +386,8 @@ func (c ServeConfig) FunnelEnabled(host string) bool {
 }
 
 // TCPForwardsTo returns the sorted exposed ports whose raw TCP forward, in
-// background or any foreground config, targets the Bridge listen address.
+// background or any foreground config, targets the Bridge listen address. A
+// Service's port is reported as "<service>:<port>", e.g. "svc:web:10000".
 // Such a forward bypasses the Serve web proxy: peers reach Bridge from
 // loopback with client-controlled Host and headers.
 func (c ServeConfig) TCPForwardsTo(listen string) []string {
@@ -396,14 +402,23 @@ func (c ServeConfig) TCPForwardsTo(listen string) []string {
 }
 
 func (c ServeConfig) collectTCPForwards(listen string, seen map[string]bool) {
-	for port, h := range c.TCP {
-		if h != nil && h.TCPForward != "" && proxyTargets(h.TCPForward, listen) {
-			seen[port] = true
+	c.TCP.collect("", listen, seen)
+	for name, svc := range c.Services {
+		if svc != nil {
+			svc.TCP.collect(name+":", listen, seen)
 		}
 	}
 	for _, fg := range c.Foreground {
 		if fg != nil {
 			fg.collectTCPForwards(listen, seen)
+		}
+	}
+}
+
+func (t TCPHandlers) collect(prefix, listen string, seen map[string]bool) {
+	for port, h := range t {
+		if h != nil && h.TCPForward != "" && proxyTargets(h.TCPForward, listen) {
+			seen[prefix+port] = true
 		}
 	}
 }
