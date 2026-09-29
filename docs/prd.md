@@ -113,9 +113,10 @@ Terminal은 모든 interaction의 fallback이며 primary UI가 아니다.
 
 ### 3.2 Existing session first
 
-새로운 agent process나 conversation을 생성하지 않는다.
+Chat, prompt, Terminal은 새로운 agent process나 conversation을 생성하지 않는다.
 
 가능한 경우 항상 현재 Herdr pane에서 실행 중인 agent session을 그대로 사용한다.
+새 session은 사용자가 명시적으로 요청할 때만 Herdr가 만든다([§4 G7](#g7-herdr에서-새-session-시작), [ADR-037](adr.md#adr-037--새-session-생성은-herdr에-요청한다)).
 
 ```text
 Herdr Pane
@@ -238,6 +239,13 @@ PC terminal에서 직접 입력하는 것과 동일한 session context를 유지
 ### G6. Terminal fallback
 
 Chat UI에서 처리할 수 없는 interaction이 존재할 경우 같은 pane의 Terminal View로 즉시 전환할 수 있다.
+
+### G7. Herdr에서 새 session 시작
+
+후속 기능이다([P1-14](backlog.md#p1--핵심-ux와-다음-agent)). 사용자는 설정한 project root 아래의 폴더나
+이미 열린 Herdr workspace를 골라 새 agent session을 시작할 수 있다. 생성과 process는 Herdr가
+소유하고, 새 session은 기존 session과 같은 discovery·binding 규칙을 따른다.
+기존 session의 resume과 agent 인자 전달은 제공하지 않는다. 범위는 [ADR-037](adr.md#adr-037--새-session-생성은-herdr에-요청한다)을 따른다.
 
 ## 5. Non-Goals
 
@@ -1020,6 +1028,7 @@ event normalization
 WebSocket/API
 prompt forwarding
 terminal proxy
+session start request to Herdr (후속)
 attachment handling (후속)
 reconnect support
 notification trigger (후속)
@@ -1130,6 +1139,7 @@ write-enabled UI를 구현 완료로 간주하지 않는다. 세부 gate와 미�
 | Live updates (완성된 message 단위) | Yes   |
 | Streaming delta              | 후속 ([P1-07](backlog.md#p1--핵심-ux와-다음-agent)) |
 | Send prompt to existing pane | Yes   |
+| Start new session via Herdr | 후속 ([P1-14](backlog.md#p1--핵심-ux와-다음-agent)) |
 | Interrupt                    | Yes   |
 | Reconnect                    | Yes   |
 | Terminal fallback            | Yes   |
@@ -1207,6 +1217,7 @@ PC terminal에서 입력한 대화와 모바일에서 입력한 대화가 동일
 ### No duplicate agent
 
 모바일에서 prompt를 보내더라도 새로운 Claude/Codex process 또는 session이 생성되지 않는다.
+새 session은 사용자의 명시적 시작 요청으로만 생긴다.
 
 ### Mobile usability
 
@@ -1287,6 +1298,7 @@ MVP의 핵심 질문은 항상 다음이어야 한다.
 | Conversation source | Native transcript | [ADR-002](adr.md#adr-002--chat은-새로운-conversation이-아니라-projection이다), [ADR-003](adr.md#adr-003--native-agent-session-id를-conversation-identity로-사용한다) |
 | Interactive source of truth | PTY | [ADR-005](adr.md#adr-005--pty를-interactive-truth로-유지한다) |
 | Chat model | Projection over existing session | [ADR-002](adr.md#adr-002--chat은-새로운-conversation이-아니라-projection이다) |
+| New session | 사용자 요청 시 Herdr가 생성 | [ADR-037](adr.md#adr-037--새-session-생성은-herdr에-요청한다) |
 | User input path | Existing Herdr pane | [ADR-004](adr.md#adr-004--read-path와-write-path를-분리한다), [ADR-034](adr.md#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다) |
 | First client | Web / PWA | [ADR-012](adr.md#adr-012--webpwa를-첫-client로-사용한다) |
 | Network | localhost 또는 Tailscale Serve | [ADR-024](adr.md#adr-024--tailnet을-primary-security-boundary로-사용한다) |

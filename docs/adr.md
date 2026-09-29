@@ -43,6 +43,7 @@
 | [ADR-034](#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다) | ADR-034 — Herdr가 runtime binding을 검증한 command만 전달한다 | Accepted |
 | [ADR-035](#adr-035--mobile-terminal은-기존-pty의-passive-mirror다) | ADR-035 — Mobile Terminal은 기존 PTY의 passive mirror다 | Accepted |
 | [ADR-036](#adr-036--herdr-patch는-소유-fork에서-유지한다) | ADR-036 — Herdr patch는 소유 fork에서 유지한다 | Accepted |
+| [ADR-037](#adr-037--새-session-생성은-herdr에-요청한다) | ADR-037 — 새 session 생성은 Herdr에 요청한다 | Accepted |
 
 ---
 
@@ -89,7 +90,9 @@ Mobile backend
 
 Herdr를 유일한 agent runtime owner로 유지한다.
 
-Herdr Mobile Chat은 agent를 직접 실행하거나 resume하지 않는다.
+Herdr Mobile Chat은 agent를 직접 실행하거나 기존 native session을 resume하지 않는다.
+사용자가 명시적으로 새 session을 요청하면 Herdr 공개 API로 생성을 요청할 수 있고, 그 범위는
+[ADR-037](#adr-037--새-session-생성은-herdr에-요청한다)을 따른다.
 
 ```text
 Herdr
@@ -2059,3 +2062,83 @@ stable release마다 rebase와 `just ci`·설치 검증을 거쳐 갱신한다. 
 사용자는 fork의 patched Herdr를 직접 build·설치해야 한다. Herdr release를 따라가는 rebase
 비용은 이 project가 진다. Bridge는 patch 유무를 version이 아니라 `doctor`의
 `conditional_input`으로 판별하므로(P0-04) stock으로 바뀌어도 fail closed한다.
+
+---
+
+## ADR-037 — 새 session 생성은 Herdr에 요청한다
+
+### Status
+
+Accepted (2026-09-28, 미구현. [Backlog P1-14](backlog.md#p1--핵심-ux와-다음-agent))
+
+### Context
+
+ADR-001은 자체 agent runner와 기존 session resume을 거부했다. 두 경우 모두 같은 agent에
+lifecycle owner가 둘이 되거나 같은 conversation에 process가 둘 붙는다. 이 결정이 요약 문서로
+옮겨지면서 "Bridge는 agent를 start하지 않는다"는 절대 금지로 일반화됐지만, 사용자가 명시적으로
+요청해 Herdr가 새 native session을 만드는 경우는 검토한 적이 없다.
+
+Herdr 공개 API는 `workspace.create`, `tab.create`, `agent.start`로 Herdr가 소유하는 pane에서
+agent를 시작할 수 있다. 실행 중 agent의 cwd를 바꾸는 API는 없다. 조사 기록은
+[2026-09-28 새 session 생성 API 조사](records/integration-findings.md#2026-09-28--새-session-생성-api-조사)에 있다.
+
+### Decision
+
+사용자의 명시적 요청이 있을 때 Bridge는 Herdr 공개 API로 새 session 생성을 요청한다.
+process는 Herdr가 시작하고 소유한다. Bridge가 process를 직접 실행하거나, shell pane에
+`pane.send_text`로 실행 명령을 입력하지 않는다.
+
+**흐름.** 새 workspace는 `workspace.create(cwd)`의 root pane에서, 이미 열린 workspace는
+`tab.create(workspace_id, cwd)`의 root pane에서 `agent.start`를 호출한다. 생성은 focus를 바꾸지
+않고 `env`를 전달하지 않는다. agent name은 Bridge가 `[a-z][a-z0-9_-]{0,31}` 안에서 만든다.
+
+**Kind와 인자.** `kind`는 allowlist로 받는다. 첫 허용값은 `claude`다. 다른 kind는 해당
+adapter의 transcript와 조건부 입력이 검증된 뒤에만 추가하며(Codex는 P1-01/02), 허용 여부는
+ADR-022 capability로 노출한다. `agent.start`의 `--` 뒤 인자는 받지 않는다. 인자를 받으면
+`--resume`·`--continue`로 ADR-001이 거부한 resume이 다시 가능해지고, permission 우회 옵션도
+원격에서 켤 수 있기 때문이다.
+
+**폴더 후보.** Bridge는 `-project-root` flag(반복 가능)로 root를 받는다. root가 Git repo면 root
+하나가 후보이고, 아니면 바로 아래 한 단계의 Git repo(`.git` directory 또는 file)만 후보다.
+hidden directory는 제외한다. symlink를 해석한 실제 경로가 root 밖이면 제외한다. 여기에 Herdr
+`workspace.list`의 열린 workspace cwd를 합치고 "열려 있음"으로 표시한다. 열린 workspace를 고르면
+기본 동작은 그 workspace에 새 tab을 여는 것이다. 같은 cwd의 workspace를 중복으로 만들지 않는다.
+root가 없으면 새 workspace 생성은 비활성이다.
+
+**경로 경계.** client는 절대 경로를 보내지 않는다. 후보는 server가 발급한 opaque ID로만
+식별하고 server가 경로로 해석한다. dispatch 직전에 경로를 다시 `EvalSymlinks`하여 root 안의
+directory인지(열린 workspace라면 여전히 열려 있는지) 확인하고, 실패하면 reject한다.
+host filesystem 탐색, 임의 경로 입력, transcript에서 추출한 최근 project, Herdr 내부 state
+파일 읽기는 제공하지 않는다.
+
+**중복 방지.** 생성은 새 command type `session_start`이며 ADR-033 receipt를 따른다. digest는
+후보 ID, kind, 배치(new workspace 또는 기존 workspace의 new tab)로 만든다. `runtime_binding`은
+없다. receipt에는 생성된 workspace·tab·pane ID를 함께 남겨 같은 ID의 retry가 같은 결과를
+반환한다. Herdr 호출과 receipt 기록 사이의 timeout이나 crash는 `delivery_unknown`이며 자동
+재시도하지 않는다. workspace는 생성됐지만 `agent.start`가 실패하면 생성된 ID와 실패를 함께
+반환하고, 만든 자원을 자동으로 닫거나 다시 시도하지 않는다.
+
+**생성 이후.** 새 session은 특별 경로 없이 기존 discovery를 따른다. `pane:<pane-id>`로 보이고
+native session이 검증되면 `claude:<native-id>`가 된다. Chat·prompt·Terminal 입력은 binding이
+검증된 뒤에만 열린다(ADR-034, ADR-035).
+
+### Consequences
+
+* PC 없이 모바일에서 작업을 시작할 수 있다. owner는 여전히 Herdr 하나다.
+* Herdr가 실행 중이어야 한다. 새 workspace는 `-project-root`를 설정해야 쓸 수 있다.
+* root 아래 directory 이름이 소유자 identity 경계 안에서 노출된다. root는 agent를 실행해도 되는
+  폴더라는 신뢰 경계이기도 하다. 폴더 안 설정(hooks, MCP 등)은 agent 실행 시 동작할 수 있다.
+* desktop client가 붙지 않은 상태에서 만든 pane은 Herdr fallback 크기를 쓸 수 있다(P1-08).
+  모바일은 여전히 PTY를 resize하지 않는다.
+* 처음 여는 폴더에서 agent가 신뢰 확인 같은 시작 화면에 멈추면, native session이 아직 없어
+  binding이 발급되지 않을 수 있다. 이때 모바일 Terminal 입력은 fail closed하므로 PC에서 처리해야
+  한다. 실제 동작은 P1-14에서 검증한다.
+* 실행 중 agent의 폴더 이동, 모바일에서 workspace·tab·pane 닫기는 제공하지 않는다.
+
+기각한 대안:
+
+- Bridge가 agent process를 직접 실행: ADR-001의 자체 runner다.
+- shell pane에 실행 명령을 raw input으로 입력: 준비 상태 확인이 없고, 미지원 API를 raw pane input으로
+  우회하지 않는다는 원칙에 어긋난다.
+- 임의 경로 입력이나 host filesystem 탐색: 경로 검증이 공격면이 되고 신뢰 경계가 사라진다.
+- agent 인자 허용: resume과 permission 우회가 가능해진다.

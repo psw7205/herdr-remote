@@ -12,7 +12,9 @@
 
 ## 제품 불변식
 
-- Herdr가 pane, PTY, agent process와 lifecycle의 owner다. Bridge에서 agent를 start/resume하지 않는다.
+- Herdr가 pane, PTY, agent process와 lifecycle의 owner다. Bridge는 agent를 직접 실행하거나 기존 session을
+  resume하지 않는다. 새 session은 사용자의 명시적 요청이 있을 때 Herdr 공개 API(`workspace.create`·`tab.create`·
+  `agent.start`)로만 요청하며, agent 인자와 임의 경로는 받지 않는다(`docs/adr.md` ADR-037).
 - Chat history의 source of truth는 native transcript다. transcript에는 쓰지 않는다.
 - prompt, interrupt, raw input은 현재 Herdr `runtime_binding`을 검증하는 경로만 사용한다. 미지원 API를 raw pane input으로 우회하지 않는다.
 - 같은 `command_id`는 한 번만 dispatch한다. timeout이나 crash는 미전달의 증거가 아니며 `delivery_unknown`을 자동 재전송하지 않는다.
