@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Copy to ~/Library/LaunchAgents/herdr-remote.plist, replace __HOME__ and
+  __REPO__ with absolute paths, and follow "Bridge 상시 실행" in README.md.
+  The binary path must match `mise run install` (PREFIX, default __HOME__/.local).
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>herdr-remote</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__HOME__/.local/bin/herdr-remote-bridge</string>
+		<string>-static</string>
+		<string>__REPO__/web/dist</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>__REPO__</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<false/>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>StandardOutPath</key>
+	<string>__HOME__/.local/state/herdr-remote/bridge.log</string>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/.local/state/herdr-remote/bridge.log</string>
+</dict>
+</plist>

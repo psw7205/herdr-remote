@@ -52,6 +52,7 @@ dev server의 CSS는 build처럼 낮춰지지 않는다(`light-dark()` 등). 색
 | Go Bridge | `mise run test`, `mise run vet` |
 | React/TypeScript/PWA | `mise exec -- pnpm --dir web test`, `mise exec -- pnpm --dir web build` |
 | protocol·두 영역 공통 변경 | 위 네 명령 모두 |
+| `scripts/`·`mise.toml` task | `mise exec -- shellcheck scripts/*.sh`, scratch `PREFIX`와 별도 LaunchAgent로 실제 task 실행 |
 | 문서 | `git diff --check`, relative link·실제 명령·개인 경로 유입 확인 |
 | Herdr 본체 | `herdr` repo가 요구하는 검증 및 affected runtime scenario |
 

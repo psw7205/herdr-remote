@@ -2,6 +2,7 @@
 go = "1.25.14"
 node = "24.19.0"
 pnpm = "10.33.2"
+shellcheck = "0.11.0"
 
 [tasks.test]
 run = "go test -race ./..."
@@ -11,3 +12,12 @@ run = "go vet ./..."
 
 [tasks.doctor]
 run = "go run ./cmd/doctor"
+
+[tasks.build]
+run = "scripts/deploy.sh build"
+
+[tasks.install]
+run = "scripts/deploy.sh install"
+
+[tasks.redeploy]
+run = "scripts/deploy.sh redeploy"
