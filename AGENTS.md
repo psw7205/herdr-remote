@@ -40,6 +40,7 @@
 | `internal/httpapi/` | HTTP/WS, Origin·Host·identity 경계 |
 | `internal/tailnet/` | Tailscale CLI 조회, owner·host 자동 감지. `tailscale.com` dependency 없음 |
 | `web/src/`, `web/public/` | thin client, Markdown, Terminal, PWA |
+| `scripts/`, `contrib/` | 로컬 build·install·redeploy, process manager 예시. host별 값은 Git 밖 |
 
 Agent-specific parser나 Herdr socket logic을 browser로 옮기지 않는다. Go에서는 `net/http`,
 `coder/websocket`, `fsnotify`, `log/slog`를 사용하고 frontend는 React/TypeScript/Vite를 유지한다.

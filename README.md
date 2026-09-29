@@ -180,10 +180,40 @@ Chat command → durable receipt → Herdr binding 검증 → 기존 PTY
 ## 운영과 알려진 제한
 
 정적 파일 변경은 `pnpm --dir web build`, Go 변경은 binary 재빌드와 **Bridge만의 재시작**이
-필요하다. 사용자 `launchd` 등 process manager를 쓸 수 있으며 host별 실행 설정은 Git 밖에서
-관리한다. 이 repo에는 자동 service 설치 script가 없다. `launchd`는 PATH가 최소한이고 macOS에서는
-Tailscale CLI가 app bundle wrapper로만 있을 수 있으므로, 자동 탐색이 실패하면
-`-tailscale-bin`으로 CLI 경로를 지정한다.
+필요하다. Bridge 재시작은 Herdr와 agent process를 중단하지 않는다.
+
+### Bridge 상시 실행
+
+| 명령 | 동작 |
+| --- | --- |
+| `mise run build` | `web/dist`와 `bin/herdr-remote-bridge`를 build |
+| `mise run install` | build 뒤 `$PREFIX/bin/herdr-remote-bridge`(기본 `~/.local`)에 설치. 직전 binary는 `.prev`로 남긴다 |
+| `mise run redeploy` | vet·test 통과 뒤 install, LaunchAgent 재시작, health 확인. 응답이 없으면 `.prev`로 되돌리고 다시 재시작한다 |
+
+`redeploy`는 macOS `launchd` 전용이며, LaunchAgent가 설치한 binary를 실행할 때만 진행한다.
+다른 process manager는 `install` 뒤 직접 재시작한다. 되돌리는 것은 binary뿐이고 `web/dist`는 새
+build로 남는다.
+
+LaunchAgent는 [`contrib/launchd/herdr-remote.plist.example`](contrib/launchd/herdr-remote.plist.example)을
+`~/Library/LaunchAgents/herdr-remote.plist`로 복사하고 `__HOME__`·`__REPO__`를 절대 경로로 바꾼 뒤
+등록한다. `-project-root`, `-tailnet-host` 같은 flag는 `ProgramArguments`에 추가한다.
+
+```sh
+mkdir -p ~/.local/state/herdr-remote
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/herdr-remote.plist
+```
+
+label·설치 경로·health URL이 기본값과 다르면 gitignore된 `mise.local.toml`에 둔다.
+
+```toml
+[env]
+HERDR_REMOTE_LAUNCHD_LABEL = "com.example.herdr-remote"
+PREFIX = "{{env.HOME}}/opt/herdr-remote"
+HERDR_REMOTE_HEALTH_URL = "http://127.0.0.1:8788/api/sessions"
+```
+
+`launchd`는 PATH가 최소한이고 macOS에서는 Tailscale CLI가 app bundle wrapper로만 있을 수
+있으므로, 자동 탐색이 실패하면 `-tailscale-bin`으로 CLI 경로를 지정한다.
 
 Herdr live handoff는 테스트에서 agent PID·native session을 보존했지만 terminal ID를
 재발급했고 desktop client가 끊긴 동안 geometry를 기본 120×40으로 변경했다. 이 동작은

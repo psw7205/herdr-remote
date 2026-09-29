@@ -4,8 +4,9 @@ web/dist/
 web/tsconfig.tsbuildinfo
 web/coverage/
 
-# Go build output (`go build ./cmd/...` without `-o`)
+# Go build output (`go build ./cmd/...` without `-o`, `mise run build`)
 /bridge
+/bin/
 /doctor
 *.test
 *.out
