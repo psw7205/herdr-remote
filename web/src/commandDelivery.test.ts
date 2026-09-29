@@ -31,3 +31,8 @@ it('explains a rejection from a Herdr build without conditional input', () => {
   expect(rejectedMessage('INPUT_REJECTED')).toBe('전달이 거부됐습니다 (INPUT_REJECTED).')
   expect(rejectedMessage('SESSION_CHANGED')).toBe('세션이 바뀌어 전달하지 않았습니다. 목록에서 다시 여세요.')
 })
+it('points a busy or waiting agent to Terminal instead of the session list', () => {
+  const text = rejectedMessage('AGENT_NOT_READY')
+  expect(text).toContain('Terminal')
+  expect(text).not.toContain('목록')
+})

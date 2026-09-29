@@ -130,7 +130,7 @@ Composer / Stop / Terminal key
   → Herdr agent.bound_input { target, binding, input{type, text} }
   → 결과 mapping 후 finish: temp file → rename → fsync(dir)
       accepted          → 202
-      rejected + code   → 409 (RUNTIME_BINDING_MISMATCH, SESSION_ENDED, HERDR_UNSUPPORTED, SESSION_CHANGED …)
+      rejected + code   → 409 (RUNTIME_BINDING_MISMATCH, SESSION_ENDED, AGENT_NOT_READY, HERDR_UNSUPPORTED, SESSION_CHANGED …)
       delivery_unknown  → 202 (Herdr delivery_unknown, 분류 불가 오류, receipt 읽기·완료 기록 실패)
 ```
 

@@ -228,7 +228,10 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "chat transcript unavailable" {
 			return command.Result{Status: "rejected", Code: "CHAT_UNAVAILABLE"}
 		}
-		if err.Error() == "session binding changed" || err.Error() == "session not found" || err.Error() == "agent is not ready for a chat prompt" || err.Error() == "terminal unavailable" {
+		if err.Error() == "agent is not ready for a chat prompt" {
+			return command.Result{Status: "rejected", Code: "AGENT_NOT_READY"}
+		}
+		if err.Error() == "session binding changed" || err.Error() == "session not found" || err.Error() == "terminal unavailable" {
 			return command.Result{Status: "rejected", Code: "SESSION_CHANGED"}
 		}
 		slog.Warn("bound input delivery uncertain", "error", err)

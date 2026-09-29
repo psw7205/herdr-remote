@@ -142,6 +142,27 @@ func TestUnsupportedBoundInputIsDurablyRejected(t *testing.T) {
 		t.Fatalf("retry re-dispatched: %d", sessions.count.Load())
 	}
 }
+func TestBusyAgentPromptIsNotReportedAsSessionChange(t *testing.T) {
+	server, sessions := newTestServer(t)
+	sessions.boundErr = errors.New("agent is not ready for a chat prompt")
+	body := `{"command_id":"00000000-0000-4000-8000-000000000003","session_id":"claude:native","runtime_binding":"bound","command_type":"prompt","payload":{"text":"hello"}}`
+	r, e := http.NewRequest(http.MethodPost, server.URL+"/api/sessions/claude:native/commands", strings.NewReader(body))
+	if e != nil {
+		t.Fatal(e)
+	}
+	r.Header.Set("Origin", "http://localhost:5173")
+	r.Header.Set("Content-Type", "application/json")
+	res, e := http.DefaultClient.Do(r)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var result command.Result
+	e = json.NewDecoder(res.Body).Decode(&result)
+	res.Body.Close()
+	if e != nil || res.StatusCode != 409 || result != (command.Result{Status: "rejected", Code: "AGENT_NOT_READY"}) {
+		t.Fatalf("status %d result %+v err %v", res.StatusCode, result, e)
+	}
+}
 func TestSessionsReportsHerdrConditionalInput(t *testing.T) {
 	server, sessions := newTestServer(t)
 	for _, want := range []string{"supported", "unsupported", "unknown"} {
