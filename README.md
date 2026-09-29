@@ -118,7 +118,8 @@ Bridge는 항상 loopback에만 bind하고, Serve가 tailnet HTTPS 요청을 Bri
    넘긴다. 그렇지 않으면 Serve proxy 확인(`serve_proxy`)이 거짓 음성이 된다. CLI 경로는 Bridge와
    같이 `-tailscale-bin`으로 명시할 수 있다. Funnel이 켜져 있거나, identity header 없이 Bridge에
    닿는 Serve TCP forward(`--tcp`/`--tls-terminated-tcp`)가 있으면 top-level blocker다. 둘 다
-   `--bg` 없이 실행한 foreground 설정까지 확인한다.
+   `--bg` 없이 실행한 foreground 설정까지 확인하고, TCP forward는 `--service`로 만든 Tailscale
+   Service 설정도 확인한다. MagicDNS host를 얻지 못해도 이 두 검사는 수행한다.
 5. 소유자 계정으로 로그인한 mobile device에서 `https://<tailnet-host>`에 접속한다. 화면 잠금·
    네트워크 전환 뒤 WebSocket reconnect는 아직 실기기에서 검증하지 않았다.
 

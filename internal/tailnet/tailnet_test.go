@@ -245,6 +245,16 @@ const serveForegroundTCP = `{
   }
 }`
 
+// Source-derived from ipn.ServeConfig.Services (map of "svc:<name>" to a
+// ServiceConfig with its own TCP handlers), not observed:
+// `tailscale serve --service=svc:web --tcp 10000 tcp://127.0.0.1:8787`.
+const serveServiceTCP = `{
+  "Services": {
+    "svc:web": {"TCP": {"10000": {"TCPForward": "127.0.0.1:8787"}, "443": {"HTTPS": true}}},
+    "svc:db": {"TCP": {"5432": {"TCPForward": "127.0.0.1:5432"}}}
+  }
+}`
+
 func TestServeConfigTCPForward(t *testing.T) {
 	cases := []struct {
 		name, fixture, listen string
@@ -252,6 +262,7 @@ func TestServeConfigTCPForward(t *testing.T) {
 	}{
 		{"background", serveTCPBridge, "127.0.0.1:8787", []string{"10000", "8443"}},
 		{"foreground", serveForegroundTCP, "127.0.0.1:8787", []string{"8787"}},
+		{"service", serveServiceTCP, "127.0.0.1:8787", []string{"svc:web:10000"}},
 		{"other listen port", serveTCPBridge, "127.0.0.1:8788", []string{}},
 		{"other listen family", serveTCPBridge, "[::1]:8787", []string{}},
 	}
