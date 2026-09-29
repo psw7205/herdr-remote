@@ -13,8 +13,13 @@ import (
 	"sync"
 )
 
+// Payload fields other than Text belong to session_start (ADR-037). They are
+// omitted when empty so prompt digests stay byte-identical to older receipts.
 type Payload struct {
-	Text string `json:"text"`
+	Text        string `json:"text"`
+	CandidateID string `json:"candidate_id,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	Placement   string `json:"placement,omitempty"`
 }
 type Request struct {
 	CommandID      string  `json:"command_id"`
@@ -26,6 +31,15 @@ type Request struct {
 type Result struct {
 	Status string `json:"status"`
 	Code   string `json:"code,omitempty"`
+	// Created is the topology a session_start made, kept so a retry of the
+	// same command ID returns it instead of creating another.
+	Created *Created `json:"created,omitempty"`
+}
+type Created struct {
+	WorkspaceID string `json:"workspace_id"`
+	TabID       string `json:"tab_id"`
+	PaneID      string `json:"pane_id"`
+	Agent       string `json:"agent"`
 }
 type receipt struct {
 	Digest string `json:"digest"`

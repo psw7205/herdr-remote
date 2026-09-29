@@ -23,6 +23,11 @@ describe('hash route', () => {
     expect(parseRoute('#session=claude%3Anative-a&view=changes')).toEqual(chat)
     expect(parseRoute('#view=terminal')).toEqual(list)
   })
+  it('reads the new session screen without a session', () => {
+    expect(parseRoute('#view=start')).toEqual({ session: null, view: 'start' })
+    expect(formatRoute({ session: null, view: 'start' })).toBe('#view=start')
+    expect(backAction({ session: null, view: 'start' }, 0)).toEqual({ kind: 'replace', route: list })
+  })
 })
 
 describe('superseded ids in history', () => {

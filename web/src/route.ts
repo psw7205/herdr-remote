@@ -2,10 +2,12 @@ import type { Session } from './api'
 
 // Hash routes keep the Bridge's static serving and the service worker's
 // navigation handling unchanged: every view is the same document.
-export type View = 'chat' | 'terminal'
+// 'start' has no session: it is the screen that asks Herdr for a new one.
+export type View = 'chat' | 'terminal' | 'start'
 export type Route = { session: string | null; view: View }
 
 export const listRoute: Route = { session: null, view: 'chat' }
+export const startRoute: Route = { session: null, view: 'start' }
 
 export function parseRoute(hash: string): Route {
   const params = new Map<string, string>()
@@ -14,14 +16,14 @@ export function parseRoute(hash: string): Route {
     if (index > 0) params.set(part.slice(0, index), part.slice(index + 1))
   }
   const raw = params.get('session')
-  if (!raw) return listRoute
+  if (!raw) return params.get('view') === 'start' ? startRoute : listRoute
   let session: string
   try { session = decodeURIComponent(raw) } catch { return listRoute }
   return { session, view: params.get('view') === 'terminal' ? 'terminal' : 'chat' }
 }
 
 export function formatRoute(route: Route): string {
-  if (!route.session) return ''
+  if (!route.session) return route.view === 'start' ? '#view=start' : ''
   const session = `#session=${encodeURIComponent(route.session)}`
   return route.view === 'terminal' ? `${session}&view=terminal` : session
 }

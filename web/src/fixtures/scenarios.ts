@@ -1,6 +1,6 @@
 // Anonymous sample data for the dev-only fixture page. Nothing here comes from
 // a real transcript, pane or host; every name, path and message is invented.
-import type { ConditionalInput, Delivery, Message, Session } from '../api'
+import type { ConditionalInput, Delivery, Message, Session, StartCandidate, StartCapability, StartDelivery } from '../api'
 
 export type FixtureSession = { session: Session; messages: Message[] }
 export type Scenario = {
@@ -16,8 +16,10 @@ export type Scenario = {
   liveEvery: number
   // A pane: item that Herdr later re-keys to a verified claude: session.
   supersede?: { from: string; to: FixtureSession; after: number }
+  // New session start (ADR-037): capability, folders and the start answer.
+  start: { capability: StartCapability; candidates: StartCandidate[]; result: StartDelivery; latency: number }
 }
-export const scenarioNames = ['default', 'long', 'live', 'disconnected', 'delivery-unknown', 'rejected', 'empty', 'herdr-down', 'unsupported', 'slow', 'superseded'] as const
+export const scenarioNames = ['default', 'long', 'live', 'disconnected', 'delivery-unknown', 'rejected', 'empty', 'herdr-down', 'unsupported', 'slow', 'superseded', 'start-trust', 'start-unknown', 'no-root'] as const
 export type ScenarioName = typeof scenarioNames[number]
 
 const minute = 60_000
@@ -138,8 +140,16 @@ function sessions(): FixtureSession[] {
   ]
 }
 
+const startCandidates: StartCandidate[] = [
+  { id: 'fixture-candidate-open', name: 'sample-api', root: 'workspace', open: true, workspace: 'sample-api', placement: 'new_tab' },
+  { id: 'fixture-candidate-docs', name: 'docs-site', root: 'workspace', open: false, placement: 'new_workspace' },
+  { id: 'fixture-candidate-infra', name: 'infra-notes', root: 'workspace', open: false, placement: 'new_workspace' },
+]
+const created = { workspace_id: 'w9', tab_id: 'w9:t1', pane_id: 'w9:p1', agent: 'mobile-fixture' }
+
 export function scenario(name: ScenarioName): Scenario {
-  const out: Scenario = { name, sessions: sessions(), conditionalInput: 'supported', command: { status: 'accepted' }, latency: 60, listFails: false, socketFails: false, liveEvery: 0 }
+  const out: Scenario = { name, sessions: sessions(), conditionalInput: 'supported', command: { status: 'accepted' }, latency: 60, listFails: false, socketFails: false, liveEvery: 0,
+    start: { capability: { kinds: ['claude'], new_workspace: true }, candidates: startCandidates, result: { status: 'accepted', created }, latency: 2500 } }
   switch (name) {
     case 'long': {
       const long = longConversation(400)
@@ -166,6 +176,12 @@ export function scenario(name: ScenarioName): Scenario {
       out.supersede = { from: pane.id, to: { session: withPreview({ ...pane, id: 'claude:fixture-successor', runtime_binding: 'fixture-binding-successor', chat: true }, next), messages: next }, after: 4000 }
       break
     }
+    case 'start-trust': out.start.result = { status: 'accepted', code: 'AGENT_NOT_READY', created }; break
+    case 'start-unknown': out.start.result = { status: 'delivery_unknown', code: 'DELIVERY_UNKNOWN' }; break
+    case 'no-root':
+      out.start.capability = { kinds: ['claude'], new_workspace: false }
+      out.start.candidates = startCandidates.filter(item => item.open)
+      break
     case 'default': break
   }
   return out
