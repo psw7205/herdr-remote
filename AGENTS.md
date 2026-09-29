@@ -51,13 +51,18 @@ Package manager는 pnpm, toolchain 기준은 `mise.toml`이다.
 - 별도 `herdr` repo를 수정할 때는 그 repo의 지침과 변경 상태도 확인한다. 이 repo의 검증만으로 Herdr patch 검증을 대신하지 않는다.
 - 설치된 binary·사용자 hook·LaunchAgent 변경은 code 변경과 구분하고, 작업 범위 안에서 backup과 복구 방법을 확보한다.
 - 기존 사용자 agent를 종료하거나 새 session으로 교체해 handoff 성공을 만들지 않는다.
-- lifecycle 재현이 필요하면 명시적으로 분리한 테스트 환경을 사용하고, 생성한 테스트 자원과 설정 변경을 정리한다.
+- lifecycle 재현이 필요하면 `CONTRIBUTING.md`의 격리 Herdr 환경을 사용하고, 생성한 테스트 자원과 설정 변경을 정리한다.
 - `doctor`의 성공은 capability 관찰이다. 실제 PTY handoff나 모든 race의 통과를 의미하지 않는다.
 
 ## 검증과 완료
 
 실행 명령과 변경별 검증 범위는 `CONTRIBUTING.md`를 따른다. 구현하지 않은 기능이나
 실행하지 않은 scenario를 완료로 표시하지 않는다. 문서만 바꿀 때는 관련 링크·경로·diff를 검증한다.
+
+검증 수준은 실패 형태로 정한다. 잘못된 process 입력, 중복 dispatch, agent가 모르게 멈추는 경우,
+identity·Origin 경계처럼 조용히 실패하거나 되돌릴 수 없는 변경은 unit test와 격리 Herdr 실측을
+완료 조건으로 둔다. 화면에 드러나고 새로고침·재시도로 복구되는 UI·실기기 동작은 test와 fixture
+확인 뒤 backlog `in-use`로 두고 사용하면서 고친다. 실기기 확인이 없다는 이유로 다른 작업을 막지 않는다.
 
 Architecture 책임, persistence, identity, security, protocol 의미가 바뀌면 PRD/ADR을 함께
 갱신한다. 남은 작업은 `docs/backlog.md`에 기존 ID와 의존 관계를 유지하며 기록한다.
