@@ -21,3 +21,15 @@ run = "scripts/deploy.sh install"
 
 [tasks.redeploy]
 run = "scripts/deploy.sh redeploy"
+
+[tasks.status]
+run = "scripts/deploy.sh status"
+
+[tasks.stop]
+run = "scripts/deploy.sh stop"
+
+[tasks.start]
+run = "scripts/deploy.sh start"
+
+[tasks.restart]
+run = "scripts/deploy.sh restart"
