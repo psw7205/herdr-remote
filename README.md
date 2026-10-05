@@ -3,10 +3,11 @@
 > **English summary.** Herdr Mobile Chat (`herdr-remote`) is a single-user companion for
 > [Herdr](https://github.com/herdrdev/herdr). It lets you read and continue Claude Code sessions
 > that are already running in Herdr panes from a phone browser, over localhost or Tailscale Serve.
-> The Bridge never starts or resumes agents: Herdr owns the processes and PTYs, and chat history
-> is read from Claude Code's native transcripts. It requires macOS, Claude Code, and a Herdr build
+> The Bridge never runs or resumes agents itself: Herdr owns the processes and PTYs, new sessions
+> are started only by asking Herdr, and chat history is read from Claude Code's native transcripts. It requires macOS, Claude Code, and a Herdr build
 > with the conditional input patch ([`psw7205/herdr`](https://github.com/psw7205/herdr/tree/mobile-binding),
-> branch `mobile-binding`); stock Herdr `0.9.1` lacks the required API. Codex is not supported yet.
+> branch `mobile-binding`); stock Herdr lacks the required API. Codex CLI sessions are shown as
+> read-only chat when Herdr's Codex hook reports their session; Codex input is not supported yet.
 > This is a personal project, not affiliated with Herdr. The documentation is in Korean.
 
 Herdr에서 이미 실행 중인 coding agent를 모바일 브라우저에서 확인하고 같은 session에
@@ -34,12 +35,14 @@ repo와 Go module 이름은 `herdr-remote`다.
 | 입력 보호 | Herdr binding 검증, durable command receipt, 같은 command 재전송 방지 |
 | 모바일 UI | 상태별 session 목록, Chat, light/dark theme, code 복사, 특수 키가 있는 Terminal, PWA. 실기기 keyboard와 설치형 PWA는 미검증 |
 | Tailnet | Serve 경유 소유자 phone에서 Chat·prompt·Terminal 확인. 화면 잠금·네트워크 전환 뒤 reconnect와 다른 사용자 거부의 실측은 미검증 |
-| Codex | 미지원. native transcript 구조만 조사했다 |
+| Codex CLI | Herdr Codex hook이 보고한 session의 rollout을 read-only Chat으로 표시(ADR-038). prompt·interrupt·Terminal은 미지원. 실제 Herdr Codex pane에서는 미실측 |
 | 새 session 생성 | `-project-root` 아래 Git repo의 새 workspace나 열린 workspace의 새 tab에서 Herdr로 Claude를 시작(ADR-037). 격리 Herdr에서 실측, 실기기는 사용 중 확인 |
-| Tool card·Changed Files·attachment·notification | 미구현 |
+| 변경된 파일 | session 폴더의 Git 변경 목록, +/− 줄 수, 파일별 diff를 read-only로 표시(ADR-016). 수정·commit·push는 없다. Bridge host에 git 2.31 이상이 필요하다 |
+| Tool card | Claude tool 호출을 Chat에 compact group으로 보이고 입력·결과를 펼쳐 본다(ADR-039). 상세는 8 KiB까지. Codex는 미지원. 실제 session에서는 미실측 |
+| Attachment·notification | 미구현 |
 
 Claude의 localhost handoff와 Bridge 재시작 복구는 실제 process에서 검증했다.
-미검증 scenario와 우선순위는 [Backlog](docs/backlog.md)에 있다.
+미검증 scenario와 우선순위는 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)에 있다.
 
 ## 기술 스택
 
@@ -53,15 +56,15 @@ Claude의 localhost handoff와 Bridge 재시작 복구는 실제 process에서 �
 
 | 항목 | 조건 |
 | --- | --- |
-| OS·agent | macOS에서 Herdr pane으로 실행 중인 Claude Code interactive session |
+| OS·agent | macOS에서 Herdr pane으로 실행 중인 Claude Code interactive session. Codex CLI의 read-only Chat에는 Herdr Codex integration hook이 필요하다(`herdr integration status`로 확인) |
 | Herdr | 조건부 입력 patch가 적용된 Herdr server가 실행 중이어야 한다. 아래 설명 참조 |
 | Toolchain | [`mise`](https://mise.jdx.dev). Go·Node.js·pnpm version은 `mise.toml`이 고정한다 |
 | Tailscale | 모바일 원격 접속에만 필요하다. Bridge host와 mobile device가 같은 tailnet에 로그인돼 있어야 한다 |
 
-Bridge는 Herdr가 꺼졌을 때 대신 시작하지 않는다. stock Herdr `0.9.1`에는 필수 API인
+Bridge는 Herdr가 꺼졌을 때 대신 시작하지 않는다. stock Herdr에는 필수 API인
 `agent.binding`과 `agent.bound_input`이 없다. 필요한 patch는 fork
 [`psw7205/herdr`의 `mobile-binding` branch](https://github.com/psw7205/herdr/tree/mobile-binding)
-(`v0.9.1` 위의 단일 commit `0e672c5e`)다. build·설치·rollback·upgrade 절차는
+(`v0.9.3` 위의 단일 commit `de31ede9`)다. build·설치·rollback·upgrade 절차는
 [Herdr patch runbook](docs/herdr-patch.md)을 따른다. stock과 patched binary가 같은 version
 문자열을 사용할 수 있으므로 version이 아니라 `doctor`로 확인한다. Herdr updater가 stock
 binary를 설치하면 조건부 입력이 비활성화되며 Bridge는 입력을 fail closed한다.
@@ -146,6 +149,7 @@ network 경계도 좁히도록 tailnet ACL/grant로 Bridge host의 HTTPS 접근�
 | --- | --- |
 | `-herdr-socket` | `$HOME/.config/herdr/herdr.sock`. 다른 named session은 명시적으로 지정 |
 | `-claude-dir` | `$HOME/.claude`. Claude native transcript root |
+| `-codex-dir` | `$HOME/.codex`. Codex home. `sessions/` 아래 rollout만 read-only로 읽는다 |
 | `-receipts-dir` | `$HOME/.local/state/herdr-remote/receipts`. durable command receipts |
 | `-listen` | `127.0.0.1:8787`. loopback만 허용 |
 | `-static` | `web/dist`. 시작 시 `index.html` 존재 확인 |
@@ -165,17 +169,13 @@ network 경계도 좁히도록 tailnet ACL/grant로 Bridge host의 HTTPS 접근�
 Chat command → durable receipt → Herdr binding 검증 → 기존 PTY
 ```
 
-- Chat 메시지는 native transcript에서 관찰된 뒤 표시한다. `accepted`는 PTY 전달 결과다.
-- `delivery_unknown`은 자동 재전송하지 않는다. 같은 초안은 browser reload 뒤에도 같은 `command_id`를 사용한다.
-- transcript가 불명확하면 Chat prompt를 막는다. 검증된 binding이 있으면 같은 Terminal로 전환한다.
-- Terminal은 frame을 교체 표시한다. raw output history 전체를 replay하거나 mobile 크기로 PTY를 resize하지 않는다.
-- Herdr binding이나 capability를 잃어도 agent가 같은 pane에서 계속 보고되면 검증됐던 `claude:` session은 `ended`가 아닌 `unverified`로 남고 입력과 Terminal은 fail closed한다. 같은 native session의 binding이 다시 검증되면 `active`로 돌아간다.
-- native session을 식별하지 못한 `pane:` item은 binding이 없으면 `unbound`다. 같은 pane에서 `claude:` session이 새로 검증되면 `pane:` item은 `superseded`와 `successor_id`를 보고하고, Web UI는 successor의 binding으로 Chat·Terminal을 이어 간다.
-- WS 종료나 Bridge 종료는 Herdr process를 중단하지 않는다. Bridge restart는 새 epoch로 native history를 복구한다.
-- receipts를 임의로 지우면 오래된 command ID의 재수락을 막는 근거가 사라진다.
-- 새 session은 Herdr `workspace.create`·`tab.create`·`agent.start`로만 요청한다. client는 경로 대신 opaque 후보 ID를 보내고 Bridge가 dispatch 직전에 경로를 다시 검증한다. `session_start` receipt가 생성된 workspace·tab·pane ID를 남겨 같은 ID의 retry는 같은 결과를 받는다.
-- agent 인자는 전달하지 않는다. Herdr가 pane의 사용자 shell에서 agent를 실행하므로 permission mode 등은 shell alias·설정을 따르며 Bridge가 보장하지 않는다. 처음 여는 폴더의 신뢰 확인 화면은 PC의 Herdr에서 수락한다.
-- 새 session도 기존 discovery를 거친다. `pane:<pane-id>`로 먼저 보이고 native session이 검증돼 `claude:<native-id>`가 된 뒤에 Chat 입력이 열린다.
+동작 규칙과 invariant는 [Architecture](docs/architecture.md#8-invariants)가 기준이다. 운영에서 알아 둘 것:
+
+- `delivery_unknown`은 자동 재전송하지 않는다. 전달 여부는 Chat의 native transcript나 Terminal에서 확인한다.
+- receipts directory를 지우면 오래된 command ID의 재수락을 막는 근거가 사라진다.
+- WS 종료나 Bridge 재시작은 Herdr process를 중단하지 않는다.
+- 새 session은 agent 인자 없이 pane의 사용자 shell에서 시작하므로 permission mode 등은 shell alias·설정을
+  따른다. 처음 여는 폴더의 신뢰 확인 화면은 PC의 Herdr에서 수락한다.
 
 ## 운영과 알려진 제한
 
@@ -188,15 +188,32 @@ Chat command → durable receipt → Herdr binding 검증 → 기존 PTY
 | --- | --- |
 | `mise run build` | `web/dist`와 `bin/herdr-remote-bridge`를 build |
 | `mise run install` | build 뒤 `$PREFIX/bin/herdr-remote-bridge`(기본 `~/.local`)에 설치. 직전 binary는 `.prev`로 남긴다 |
-| `mise run redeploy` | vet·test 통과 뒤 install, LaunchAgent 재시작, health 확인. 응답이 없으면 `.prev`로 되돌리고 다시 재시작한다 |
+| `mise run redeploy` | vet·test 통과 뒤 install, LaunchAgent 재시작, health 확인. 응답이 없으면 `.prev`로 되돌리고 다시 재시작한다. 응답한 Bridge가 HEAD와 `web/dist`를 실행하지 않으면 실패로 끝낸다 |
+| `mise run status` | HEAD, 설치된 binary, `web/dist`, 응답하는 Bridge의 revision과 client build를 한 줄씩 보인다. 실행 중인 Bridge가 HEAD·`web/dist`와 다르거나 응답이 없으면 1로 끝난다 |
+| `mise run stop` | LaunchAgent를 내린다(`launchctl bootout`). 이미 내려가 있으면 안내만 한다. 내린 뒤 `redeploy`를 쓰려면 먼저 `start`한다 |
+| `mise run start` | 내려간 LaunchAgent를 `~/Library/LaunchAgents/<label>.plist`(또는 `HERDR_REMOTE_LAUNCHD_PLIST`)로 올리고 Bridge를 시작해 health를 확인한다. 이미 올라가 있으면 실행만 보장한다 |
+| `mise run restart` | `stop` 뒤 plist를 다시 올려 시작한다. `ProgramArguments`를 바꾼 뒤에는 `redeploy`의 `kickstart`로 반영되지 않으므로 이 task를 쓴다 |
 
-`redeploy`는 macOS `launchd` 전용이며, LaunchAgent가 설치한 binary를 실행할 때만 진행한다.
-다른 process manager는 `install` 뒤 직접 재시작한다. 되돌리는 것은 binary뿐이고 `web/dist`는 새
+`redeploy`·`stop`·`start`·`restart`는 macOS `launchd` 전용이며, `redeploy`는 LaunchAgent가 설치한 binary를
+실행할 때만 진행한다. 다른 process manager는 `install` 뒤 직접 재시작한다. 되돌리는 것은 binary뿐이고 `web/dist`는 새
 build로 남는다.
 
 LaunchAgent는 [`contrib/launchd/herdr-remote.plist.example`](contrib/launchd/herdr-remote.plist.example)을
 `~/Library/LaunchAgents/herdr-remote.plist`로 복사하고 `__HOME__`·`__REPO__`를 절대 경로로 바꾼 뒤
-등록한다. `-project-root`, `-tailnet-host` 같은 flag는 `ProgramArguments`에 추가한다.
+등록한다. `-project-root`, `-tailnet-host` 같은 flag는 `ProgramArguments`에 추가하고, 바꾼 뒤에는
+`mise run restart`로 다시 올린다.
+
+### 실행 중인 version 확인
+
+release tag 없이 Git revision이 version이다. `go build`는 checkout의 `vcs.revision`·`vcs.modified`를 binary에
+심고, web build는 bundle hash를 `web/dist/index.html`의 `herdr-build` meta와 service worker cache 이름에 함께
+적는다. Bridge는 두 값을 `GET /api/sessions`의 `bridge`와 시작 로그에 보고한다.
+
+- 세션 목록 제목 아래에 Bridge의 short revision이 보인다. `-dirty`는 untracked 파일을 포함해 변경이 있는 tree에서
+  build했다는 뜻이고, `dev`는 `go run`으로 띄워 stamp가 없다는 뜻이다.
+- 설치된 client build가 열려 있는 화면과 다르면 목록 위에 새로고침 안내가 뜬다.
+- 터미널에서는 `mise run status`가 같은 값을 HEAD와 비교한다. 설치된 binary 파일과 실행 중인 process는 다를 수
+  있으므로 실행 중인 값은 API 응답에서만 읽는다.
 
 ```sh
 mkdir -p ~/.local/state/herdr-remote
@@ -235,10 +252,10 @@ prompt와 transcript 본문은 log에 쓰지 않는다.
 | [PRD](docs/prd.md) | 제품 요구와 범위 |
 | [ADR](docs/adr.md) | architecture 결정 |
 | [Architecture](docs/architecture.md) | 결정을 조합한 runtime 구조, data flow, invariant |
-| [검증 기록](docs/records/verification.md) | 구현 경계와 실제 검증 결과 |
+| [검증 기록](docs/records/verification.md) | 날짜별 실제 검증 결과 |
 | [Integration 조사](docs/records/integration-findings.md) | Herdr/Claude/Codex 코드·runtime 근거 |
 | [Herdr patch runbook](docs/herdr-patch.md) | 조건부 입력 patch의 확인·설치·rollback·upgrade |
-| [Backlog](docs/backlog.md) | 남은 작업의 우선순위·의존 관계·완료 기준 |
+| [Issues](https://github.com/psw7205/herdr-remote/issues) | 남은 작업과 완료 기준. label `P0`~`P2`는 우선순위, `in-use`·`blocked`·`optional`은 상태 |
 
 ## License
 

@@ -264,3 +264,135 @@ patched Herdr `0.9.1` 격리 server에서 P1-14를 구현하며 확인했다. �
   pane cwd는 symlink를 해석한 실제 경로로 보고된다.
 - `workspace.create`·`tab.create`에 `focus: false`를 주면 기존 focused workspace가 바뀌지 않았다.
 - agent 인자 없이 시작한 Claude 안에서 `/model`을 쓰면 사용자 설정의 기본 model이 바뀐다.
+
+## 2026-09-30 — Herdr 0.9.3 반영 중 확인
+
+결과 전체는 [verification.md](verification.md#herdr-093-patch-전환-검증-2026-09-30)에 있다.
+
+- `herdr update`가 patch를 stock `0.9.3`으로 교체했다. [runbook §7](../herdr-patch.md#7-upgrade-정책)이
+  예상한 경우다. 이때 Bridge는 `unsupported` 대신 `supported`를 보고했다.
+- 원인: Herdr `0.9.2`부터 socket error 응답이 원래 request ID를 유지한다(upstream #4344). unknown
+  method 거절도 `"id":""`가 아니라 요청 ID를 돌려준다. error code와 message 형식은 `0.9.1`과 같다.
+- `0.9.2`의 `pane.graphics.*` 제거와 `events_lost` error는 Bridge가 쓰지 않는 method·경로다.
+- patch build에는 vendored libghostty-vt용 Zig `0.16.0`이 필요해졌다.
+
+## 2026-10-05 — Codex rollout field 범위와 Herdr Codex hook 보고 형식
+
+[ADR-038](../adr.md#adr-038--codex-chat은-herdr가-보고한-native-session으로-read-only-표시한다) 구현 중
+로컬 Codex rollout을 field 이름과 개수만 jq로 집계했다. 원문은 보지 않고 남기지도 않았다. 표본은
+`sessions/` 아래 rollout 424개(`cli_version` `0.116.0`~`0.158.0`, Desktop·CLI 혼재)다.
+
+- 모든 `response_item`(54,574개)에 top-level `ordinal`(number)이 있었다. Chat message ID로 쓴다.
+- assistant `message`의 `content_item_kinds`는 있으면 `unknown`(89개)이었고, 나머지 5,465개는
+  passthrough가 없었다. assistant 표시는 kinds로 거르지 않는다.
+- user `message`의 passthrough는 표본에서 `0.142.4` 이후 rollout에만 있었다. 그 이전 rollout은
+  주입 context와 사용자 입력을 구별할 field가 없어 user 입력을 Chat에 표시하지 않는다.
+- Herdr `v0.9.3`의 Codex `SessionStart` hook asset은 `pane.report_agent_session`에 `source: herdr:codex`,
+  `agent: codex`, `agent_session_id`를 보낸다. Herdr schema `AgentSessionInfo`는 `source`, `agent`, `kind`,
+  `value`를 노출하므로 Bridge와 `doctor`는 `agent_session.agent == agent`인 `kind: id`만 보고된 native
+  session으로 본다.
+- unresolved: hook이 설치된 실제 Herdr Codex pane에서 보고 → Chat 표시와 PTY round-trip은 실측하지 않았다.
+
+## 2026-10-05 — Claude transcript live 기록 단위와 tool 식별자
+
+[P1-07](https://github.com/psw7205/herdr-remote/issues/9)의 delta 유무와
+[P2-01](https://github.com/psw7205/herdr-remote/issues/14)의 착수 조건을 Claude Code `2.1.289`에서 확인했다.
+Codex는 범위 밖이다. 원문은 출력하거나 저장하지 않았고 record 종류·개수·길이·관계만 셌다.
+
+방법:
+
+- 실측: [격리 Herdr 환경](../../CONTRIBUTING.md#격리-herdr-환경)(Herdr `0.9.3`, Haiku 4.5)에서 prompt 세 개를
+  `agent prompt --wait --until idle`로 보냈다. 약 800단어 설명(tool 없음), Bash `ls` 한 번, 한 응답 안의
+  Bash 병렬 두 번이다. 그동안 test transcript를 50ms 간격으로 읽어 크기, 완성된 줄 수, 끝의 미완성 줄,
+  이미 읽은 부분의 hash 변화, 새 줄의 `type`·`uuid`/`parentUuid`·`message.id`·`stop_reason`·block 종류와
+  text 길이를 기록했다.
+- 집계: 로컬 transcript 71개(Claude Code `2.1.257`~`2.1.289`, 비-sidechain assistant record 7,707개)를
+  read-only로 셌다.
+
+실측 결과:
+
+- delta는 없다. 5,199자 text block은 prompt 뒤 약 13.6초가 지나 앞의 thinking record와 같은 50ms
+  sample에 완성된 한 줄로 나타났다. Herdr가 `idle`을 보고한 시점(prompt 전송 뒤 약 14.3초)과 거의 같다.
+  그 전까지 assistant record는 없었다. 크기가 바뀐 sample 15번 모두 줄 끝에서 끝났고(미완성 줄 0번),
+  이미 쓴 부분은 바뀌지 않았다.
+- assistant record 하나는 content block 하나다. 한 API message(`message.id`)는 thinking·text·tool_use마다
+  record로 나뉘고, 각 record의 `parentUuid`는 직전 record다. 같은 message의 모든 record가 최종
+  `stop_reason`(`tool_use`·`end_turn`)을 가진다. message가 끝난 뒤 한꺼번에 쓰인다는 뜻이다. Haiku의
+  thinking block은 text 길이가 0이었다.
+- tool 앞뒤 text는 서로 다른 `message.id`다. tool 결과를 받은 뒤의 응답은 새 API message다.
+
+집계 결과(로컬 transcript):
+
+- 모든 assistant record의 content block은 1개다(7,707/7,707). `message.id` 3,364개의 record 수는
+  1개 738, 2개 1,286, 3개 1,115, 4개 133, 5개 이상 92다.
+- text record가 없는 message가 2,076개, 1개인 message가 1,287개, 2개인 message가 1개다. 흔한 모양은
+  `thinking+tool_use`(902), `thinking+text+tool_use`(729), `tool_use`(610)다. 빈 text block은 0개였다.
+- assistant record의 부모가 assistant record면 항상 같은 `message.id`였다(3,952/3,952). uuid 중복과
+  다시 쓴 record는 0개였다.
+
+Chat 표현 결론: 화면에 쓸 수 있는 delta source가 transcript에 없다. Bridge는 지금처럼 완성된 text record를
+보내고, 그 사이는 Herdr `working` 상태(상단 badge, 입력창의 작업 중 안내와 중단 버튼)로 보인다. text
+record는 대부분 message당 하나라 record 단위 표시가 응답을 쪼개지 않는다. thinking·tool record는 text가 없어
+빈 message를 만들지 않는다.
+
+P2-01용 tool 식별자:
+
+- `tool_use` block의 `id`와 이어지는 user record `tool_result.tool_use_id`가 같다. 실측 3건 모두 일치했고
+  집계에서는 `tool_result` 3,382개가 모두 앞선 `tool_use` id와 맞았다. `tool_use` 3,407개 중 25개는 result가
+  없었다. 원인(중단·진행 중 종료 등)은 확인하지 않았다.
+- `tool_use` record는 API message가 끝나 실행이 시작될 때 쓰이고, `tool_result`는 실행이 끝날 때 쓰인다.
+  `ls` 한 번은 두 record 사이가 약 1.6초였다. 실행 중에는 result 없는 `tool_use`만 있다.
+- 병렬 tool은 `tool_use`(A) → `tool_result`(A) → `tool_use`(B) → `tool_result`(B) 순이었다. 같은 `message.id`의
+  `tool_use`(B)는 `tool_result`(A) record를 부모로 가진다. 집계에서도 tool_result 뒤에 같은 `message.id`가
+  다시 나온 경우가 379번이었다. parent chain은 한 줄로 이어진다.
+- `server_tool_use`·`advisor_tool_result`처럼 user `tool_result`와 짝을 이루지 않는 block도 있다.
+
+unresolved: 기록 시점은 Haiku로만 실측했다. 다른 model과 긴 thinking은 로컬 집계로 record 구조만
+확인했다. Claude Code가 이 기록 방식을 공개 계약으로 보장하는지는 확인하지 못했다.
+
+## 2026-10-05 — Herdr worktree.create 조사
+
+[P2-09](https://github.com/psw7205/herdr-remote/issues/22)를 위해 Herdr `v0.9.3` tag의
+`src/api/schema/worktrees.rs`, `src/app/api/worktrees.rs`와 그 아래 `deferred.rs`·`reads.rs`,
+`src/worktree.rs`, `src/cli/worktree.rs`, `src/config/model.rs`, `src/workspace/git/discovery.rs`를 읽고
+격리 server에서 확인했다.
+
+결론: Bridge에서 worktree를 만드는 기능은 구현하지 않기로 했다. Herdr가 만든 checkout은 Bridge가
+정리하지 않는 `~/.herdr/worktrees` 아래에 쌓이고, worktree가 필요하면 Claude Code session 안에서 만들고
+정리할 수 있다.
+
+- params는 `workspace_id`, `cwd`, `branch`, `base`, `path`, `label`, `focus`, `trust_repository`다.
+  `workspace_id`와 `cwd`를 함께 주면 `invalid_request`다. 둘 다 없으면 active workspace가 source다.
+  `branch`가 없으면 `herdr/<형용사>-<명사>-<hex>`를 만들고, 공백만 있으면 `invalid_request`다.
+- source는 main checkout이어야 한다. Git work tree 밖이면 `not_git_worktree`, linked worktree면
+  `linked_worktree_source`다. `.git` file을 가진 폴더가 이 경우다.
+- checkout 위치는 `path`가 없으면 `<worktrees.directory>/<repo 이름>/<branch slug>`다. 설정 기본값은
+  `~/.herdr/worktrees`이고, repo 이름은 main checkout 폴더 이름이다. slug는 branch를 소문자로 바꾸고
+  영숫자가 아닌 연속 문자를 `-` 하나로 줄인 값이다. 그래서 `feat/x`와 `feat-x`는 같은 폴더를 가리킨다.
+  Herdr는 git을 실행하기 전에 부모 폴더를 만든다.
+- `base` 기본값은 `HEAD`이고 source checkout에서 git을 실행한다. 지금 checkout된 commit에서
+  branch가 갈라진다. commit이 없는 repo에서는 git이 실패한다.
+- local branch가 이미 있으면 `git worktree add <path> <branch>`로 그 branch를 checkout한다. 새로
+  만들지 않는다. 다른 worktree에서 checkout 중이면 git이 실패한다. 없으면 `git worktree add -b <branch>
+  <path> <base>`다. `trust_repository`는 이 git 실행에 `-c safe.directory=<repo>`를 붙이는 옵션이다.
+- 응답은 git이 끝난 뒤 온다. `type: worktree_created`, `workspace`, `tab`, `root_pane`, `worktree`
+  (`path`, `branch`, `is_linked_worktree`, `open_workspace_id`, `label` 등)다. 기본 label은 branch slug다.
+- source repo에 열린 parent workspace가 없으면 Herdr가 repo root에 parent workspace를 먼저 만들고
+  worktree workspace를 그 그룹에 넣는다. 닫힌 repo에서 한 번 호출하면 workspace가 둘 생긴다.
+  같은 checkout이 이미 열려 있으면 새 workspace 대신 그 workspace를 돌려준다.
+- error code: `invalid_request`, `workspace_not_found`, `not_git_worktree`, `linked_worktree_source`,
+  `worktree_operation_in_progress`(같은 checkout 위치의 create·remove 진행 중), `stale_worktree_operation`,
+  `worktree_create_failed`(git 실패, message는 git stderr), `worktree_open_failed`(checkout은 만들었으나
+  workspace를 열지 못함).
+- `worktree.list`는 source를 해석하고 `git worktree list`만 읽는다. workspace를 만들지 않는다.
+  `cwd: "/"`에는 `not_git_worktree`를 돌려준다.
+- `worktree.remove`는 `workspace_id`와 `force`를 받아 `git worktree remove`를 실행하고 workspace를 닫는다.
+  branch는 지우지 않는다. dirty checkout은 `force`가 필요하다.
+
+격리 server(Herdr `0.9.3`, git `2.54.0`)에서 추가로 본 것:
+
+- 설정에 `[worktrees]`가 없을 때 checkout은 `~/.herdr/worktrees/<repo>/<slug>`에 생겼다. 이름 있는
+  session도 같은 사용자 설정을 읽는다.
+- 이미 다른 branch가 쓰는 slug 폴더로 새 branch를 요청하면 `worktree_create_failed`였다. 이때 git은
+  실패 전에 새 branch를 만들어 두었다. 실패한 create가 branch를 남길 수 있다.
+- 새 checkout은 Claude가 처음 보는 폴더라 `agent.start`가 신뢰 확인 화면에서 `blocked`가 됐다.

@@ -29,7 +29,8 @@ mise exec -- go run ./cmd/bridge -herdr-socket "$HERDR_SOCKET_PATH" \
 mise exec -- pnpm --dir web dev --strictPort
 ```
 
-`http://127.0.0.1:5173`으로 접속한다. Vite는 `/api`와 WS를 `127.0.0.1:8787`로 proxy한다.
+`http://127.0.0.1:5173`으로 접속한다. Vite는 `/api`와 WS를 `127.0.0.1:8787`로 proxy한다. `go run`으로 띄운
+Bridge는 VCS stamp가 없어 세션 목록에 `dev`로 보이고, dev server의 page는 build id가 없어 새로고침 안내가 뜨지 않는다.
 `localhost`와 `127.0.0.1`은 다른 Origin이므로 주소와 allowlist를 일치시킨다.
 기존 Bridge가 port를 사용 중이면 해당 process/service를 확인한 뒤 개발용 instance와 조정한다.
 Herdr server나 사용자 agent를 종료해서 port 문제를 해결하지 않는다.
@@ -38,8 +39,12 @@ Herdr server나 사용자 agent를 종료해서 port 문제를 해결하지 않�
 
 Herdr와 Bridge 없이 UI 상태를 확인할 때는 Vite만 띄우고 `http://127.0.0.1:5173/fixture.html`에
 접속한다. `?scenario=`로 `long`, `live`, `disconnected`, `delivery-unknown`, `rejected`, `empty`,
-`herdr-down`, `unsupported`, `slow`, `superseded`, `start-trust`, `start-unknown`, `no-root`를 고를 수
-있다. `/`로 시작하는 입력은 transcript에서 숨는 slash command처럼 echo 없이 수락된다. 이 page는
+`herdr-down`, `unsupported`, `slow`, `superseded`, `start-trust`, `start-unknown`, `no-root`, `codex`, `changes-large`,
+`tools`, `stale-client`를 고를 수 있다. `stale-client`는 설치된 client build가 열린 화면과 달라 새로고침 안내가 뜨는
+상태다. `tools`는 작업 중 session에 tool group(접힘, 오류, 결과 없음, 잘린 결과)을 보이고, 실행 중인
+tool이 몇 초 뒤 `message.updated`로 끝나는 흐름을 재생한다. 변경된 파일 화면은 모든 scenario에서 session마다 다른 상태(수정·추가·삭제·이름 변경·binary,
+변경 없음, Git repository 아님, 조회 오류)를 보이고, `changes-large`는 파일 수와 diff 크기 상한에 걸린
+화면을 보인다. `/`로 시작하는 입력은 transcript에서 숨는 slash command처럼 echo 없이 수락된다. 이 page는
 fetch와 WebSocket만 가짜 Bridge로 바꾸고 실제 client code를 그대로 실행한다. 데이터는 `web/src/fixtures/`의 익명 sample뿐이며 production
 build에는 포함되지 않는다. 실제 session으로 화면을 확인할 때는 screenshot을 추적 파일에 남기지 않는다.
 dev server의 CSS는 build처럼 낮춰지지 않는다(`light-dark()` 등). 색이나 theme을 바꾸면 build한
@@ -76,13 +81,13 @@ mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
 5. unsupported interaction은 같은 Terminal에서 처리하고, mobile 화면 전환 전후 PTY geometry를 비교한다.
 
 실행한 항목과 unit test로만 확인한 항목을 구분해 기록한다. 더 상세한 미완료 acceptance는
-[Backlog P0](docs/backlog.md#p0--배포와-핵심-안정성)를 따른다.
+[`P0` issue](https://github.com/psw7205/herdr-remote/issues?q=is%3Aissue+is%3Aopen+label%3AP0)를 따른다.
 
 ## 격리 Herdr 환경
 
 binding·dispatch·lifecycle을 바꾸거나 Herdr patch·binary를 전환할 때는 기존 사용자 server를
 건드리지 않고 이름 있는 격리 server에서 실제 agent로 확인한다. 화면에 드러나는 UI 동작은
-사용하면서 확인한다([검증 수준 원칙](docs/backlog.md#herdr-mobile-chat-backlog)).
+사용하면서 확인한다([검증 수준 원칙](AGENTS.md#검증과-완료)).
 
 ```sh
 E2E="$(mktemp -d)"; mkdir "$E2E/proj"; git -C "$E2E/proj" init -q
@@ -115,12 +120,13 @@ mise exec -- go run ./cmd/bridge -herdr-socket <e2e socket> -receipts-dir "$E2E/
 - stock 전환은 설치 binary를 바꾸지 않고 `"$E2E/h" server live-handoff --import-exe <binary>`로 한다.
 - 정리 순서: Bridge 종료 → `"$E2E/h" server stop` → `herdr session delete e2e` →
   Claude transcript root(Bridge `-claude-dir` 기본값) 아래 임시 directory 이름의 test transcript 삭제 →
-  default pane·PID 비교.
+  Claude 사용자 설정 `~/.claude.json`의 `projects`에서 임시 directory 경로 항목 삭제(신뢰 확인 수락이 남긴
+  기록이다. 실행 중인 Claude도 이 파일을 쓰므로 백업 후 바꾸고 다시 확인한다) → default pane·PID 비교.
 - 결과는 `docs/records/verification.md`에 날짜 section으로 남기고 native ID·binding은 placeholder로 쓴다.
 
 ## 문서와 변경 제출
 
-작업 시작 시 관련 backlog ID와 성공 기준을 정한다. 작은 구현 선택은 code로 설명하고,
+작업 시작 시 관련 issue와 성공 기준을 정한다. 작은 구현 선택은 code로 설명하고,
 architecture 의미가 바뀔 때만 ADR을 수정한다. 실제 구현과 문서가 다르면 차이를 확인한 뒤
 완료 상태를 갱신한다. 기능 아이디어를 구현 완료로 바꾸지 않는다.
 
@@ -131,14 +137,14 @@ coding agent로 작업할 때의 push·main integration 규칙은 [AGENTS.md](AG
 
 개인 project이며 응답과 merge는 보장하지 않는다. 범위는 single-user, single-host다.
 multi-user, public internet 노출, 자체 agent runner, conversation DB 같은
-[PRD non-goal](docs/prd.md#5-non-goals)과 [계속 범위 밖인 항목](docs/backlog.md#계속-범위-밖인-항목)은 받지 않는다.
+[PRD non-goal](docs/prd.md#5-non-goals)과 [Explicitly Deferred](docs/prd.md#32-explicitly-deferred)는 받지 않는다.
 
 - 보안 취약점은 issue로 올리지 않고 [SECURITY.md](SECURITY.md)의 비공개 경로로 신고한다.
 - bug report에는 재현 절차, 이 repo의 commit, Herdr patch commit, Claude Code version을 적는다.
   `doctor` 출력은 [진단 출력 공유](README.md#진단-출력-공유)처럼 식별 정보를 placeholder로 바꾼다.
 - transcript 원문, 실제 prompt, binding token, screenshot의 실제 session 내용을 issue·PR·fixture에
   넣지 않는다. fixture는 실제 구조를 확인한 익명 sample로 만든다.
-- PR은 한 가지 변경에 집중하고, 위 [변경별 검증](#변경별-검증)을 통과시키고, 관련 backlog ID를 적는다.
+- PR은 한 가지 변경에 집중하고, 위 [변경별 검증](#변경별-검증)을 통과시키고, 관련 issue를 `#N`으로 적는다.
   [AGENTS.md](AGENTS.md)의 제품 불변식을 바꾸는 변경은 먼저 issue로 논의한다.
 - Herdr 조건부 입력 patch의 변경은 이 repo가 아니라 fork `psw7205/herdr`의 `mobile-binding` branch를
   대상으로 한다([Herdr patch runbook](docs/herdr-patch.md#8-fork-관리)).

@@ -22,7 +22,7 @@
 | [ADR-013](#adr-013--terminal은-chat과-동일-session의-secondary-view다) | ADR-013 — Terminal은 Chat과 동일 Session의 Secondary View다 | Accepted |
 | [ADR-014](#adr-014--file-editing은-제공하지-않고-review까지만-지원한다) | ADR-014 — File Editing은 제공하지 않고 Review까지만 지원한다 | Accepted |
 | [ADR-015](#adr-015--attachment는-host-file로-변환한-뒤-existing-agent에-전달한다) | ADR-015 — Attachment는 Host File로 변환한 뒤 Existing Agent에 전달한다 | Proposed |
-| [ADR-016](#adr-016--changed-files는-git을-read-only-source로-사용한다) | ADR-016 — Changed Files는 Git을 Read-only Source로 사용한다 | Proposed |
+| [ADR-016](#adr-016--changed-files는-git을-read-only-source로-사용한다) | ADR-016 — Changed Files는 Git을 Read-only Source로 사용한다 | Accepted |
 | [ADR-017](#adr-017--push-notification은-derived-event로-취급한다) | ADR-017 — Push Notification은 Derived Event로 취급한다 | Proposed |
 | [ADR-018](#adr-018--attention-state는-domain-level-derived-state로-관리한다) | ADR-018 — Attention State는 Domain-level Derived State로 관리한다 | Accepted |
 | [ADR-019](#adr-019--local-event-buffer는-제한적으로-유지한다) | ADR-019 — Local Event Buffer는 제한적으로 유지한다 | Accepted |
@@ -37,13 +37,15 @@
 | [ADR-028](#adr-028--terminal-stream과-semantic-event-stream을-논리적으로-분리한다) | ADR-028 — Terminal Stream과 Semantic Event Stream을 논리적으로 분리한다 | Accepted |
 | [ADR-029](#adr-029--server-restart를-agent-session-failure로-취급하지-않는다) | ADR-029 — Server Restart를 Agent Session Failure로 취급하지 않는다 | Accepted |
 | [ADR-030](#adr-030--graceful-degradation을-핵심-compatibility-strategy로-사용한다) | ADR-030 — Graceful Degradation을 핵심 Compatibility Strategy로 사용한다 | Accepted |
-| [ADR-031](#adr-031--mvp-구현-순서는-vertical-slice를-따른다) | ADR-031 — MVP 구현 순서는 Vertical Slice를 따른다 | Accepted |
-| [ADR-032](#adr-032--mvp-완료-기준은-architecture가-아니라-실제-handoff-flow다) | ADR-032 — MVP 완료 기준은 Architecture가 아니라 실제 Handoff Flow다 | Accepted |
+| [ADR-031](#adr-031--mvp-구현-순서는-vertical-slice를-따른다) | ADR-031 — MVP 구현 순서는 Vertical Slice를 따른다 | Completed |
+| [ADR-032](#adr-032--mvp-완료-기준은-architecture가-아니라-실제-handoff-flow다) | ADR-032 — MVP 완료 기준은 Architecture가 아니라 실제 Handoff Flow다 | Completed |
 | [ADR-033](#adr-033--command-receipt로-retry-중복-실행을-방지한다) | ADR-033 — Command receipt로 retry 중복 실행을 방지한다 | Accepted |
 | [ADR-034](#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다) | ADR-034 — Herdr가 runtime binding을 검증한 command만 전달한다 | Accepted |
 | [ADR-035](#adr-035--mobile-terminal은-기존-pty의-passive-mirror다) | ADR-035 — Mobile Terminal은 기존 PTY의 passive mirror다 | Accepted |
 | [ADR-036](#adr-036--herdr-patch는-소유-fork에서-유지한다) | ADR-036 — Herdr patch는 소유 fork에서 유지한다 | Accepted |
 | [ADR-037](#adr-037--새-session-생성은-herdr에-요청한다) | ADR-037 — 새 session 생성은 Herdr에 요청한다 | Accepted |
+| [ADR-038](#adr-038--codex-chat은-herdr가-보고한-native-session으로-read-only-표시한다) | ADR-038 — Codex Chat은 Herdr가 보고한 native session으로 read-only 표시한다 | Accepted |
+| [ADR-039](#adr-039--tool-호출은-chat-item으로-투영하고-결과는-message-갱신으로-보낸다) | ADR-039 — Tool 호출은 Chat item으로 투영하고 결과는 message 갱신으로 보낸다 | Accepted |
 
 ---
 
@@ -449,7 +451,7 @@ CodexAdapter
 ```
 
 현재 구현은 Claude adapter(`internal/claude`)뿐이다. `CodexAdapter`는 후속 작업이다
-(backlog P1-01/02).
+([P1-01](https://github.com/psw7205/herdr-remote/issues/4), [P1-02](https://github.com/psw7205/herdr-remote/issues/5)).
 
 ### Adapter Responsibilities
 
@@ -496,7 +498,8 @@ Adapter가:
 
 ### Status
 
-Accepted
+Accepted. Note (2026-10-05): 예약한 `tool.started`·`tool.completed`·`tool.failed`는 쓰지 않는다. tool 호출은
+Chat item(`message.tool`)이고 결과는 같은 item의 `message.updated`로 보낸다([ADR-039](#adr-039--tool-호출은-chat-item으로-투영하고-결과는-message-갱신으로-보낸다)).
 
 ### Context
 
@@ -937,6 +940,9 @@ Session
 `Changes`는 ADR-016(Proposed)이 채택될 때 추가하는 선택 화면이다. 현재 구현은 Chat과
 Terminal만 제공하며(`web/src/route.ts`) `view=changes` URL은 Chat으로 처리한다.
 
+**2026-10-05 note.** ADR-016이 Accepted되어 `view=changes`(변경된 파일 목록)와 `view=changes&file=<path>`
+(파일 diff)를 제공한다. Back은 diff → 목록 → Chat 순서다. Changes는 binding이 필요 없어 read-only session에서도 열린다.
+
 모든 화면(Chat, Terminal, 추가될 경우 Changes)은 동일한 SessionRef를 사용한다.
 
 Terminal은 별도의 workspace/session을 생성하지 않는다.
@@ -977,6 +983,9 @@ agent 작업 결과를 모바일에서 확인할 필요는 있다.
 
 Review·attachment 기능을 제공한다면 범위는 다음으로 제한한다. 이 기능들은
 ADR-015/016(Proposed)에 따르며 현재 어느 것도 구현되지 않았다.
+
+**2026-10-05 note.** changed files와 diff는 ADR-016(Accepted)으로 구현했다. basic file preview와
+attachment upload는 여전히 미구현이다.
 
 ```text
 changed files
@@ -1072,9 +1081,33 @@ MVP에서는 temporary attachment로 취급하며 retention 정책은 추후 확
 
 ### Status
 
-Proposed
+Accepted (2026-10-05). [P2-03](https://github.com/psw7205/herdr-remote/issues/16).
 
 후속 optional capability. 첫 slice 및 핵심 MVP의 필수 전제가 아니다.
+
+**2026-10-05 note — 구현 경계.** 아래 Decision을 다음 경계로 구현했다.
+
+- Repository는 registry item의 `project`(Herdr가 보고한 cwd)에서 `git rev-parse --show-toplevel`로 찾는다.
+  client는 directory를 보내지 않는다. `ended`·`unbound` item도 registry에 남아 있으면 읽을 수 있다.
+  Git 읽기는 agent write가 아니고 binding과 무관하기 때문이다. Git repository가 아니면 오류가 아닌
+  `repository: false`다.
+- 비교 기준은 HEAD다(index와 working tree를 합친 상태). commit이 없으면 empty tree와 비교한다.
+  목록은 `git status --porcelain=v2 -z`, 줄 수는 plumbing `git diff-index --numstat`, 파일 diff는
+  `git diff-index -p`다. porcelain `git diff <commit>`은 `--no-optional-locks`에서도 index를 다시 쓰므로
+  쓰지 않는다. untracked file은 추가로 보고 Bridge가 직접 읽어 줄 수를 센다.
+- diff 요청의 `path`는 같은 요청에서 다시 읽은 status 목록의 path와 정확히 같을 때만 git에 전달한다.
+  `--literal-pathspecs`와 `--` 뒤에 둔다.
+- repo config가 명령을 실행하지 못하게 한다. `core.fsmonitor=false`, `core.hooksPath`, config에 정의된
+  모든 `filter.<driver>`의 clean·smudge·process 비우기를 command scope(`GIT_CONFIG_COUNT`)로 덮고,
+  `--no-ext-diff`·`--no-textconv`·`--ignore-submodules=dirty`를 쓴다. 환경은 고정 목록만 넘긴다.
+  `GIT_CONFIG_COUNT`를 모르는 git 2.31 미만은 이 덮기가 빠지므로 시작 시 거부하고 Changed Files를 끈다.
+  system·global config는 남긴다(`core.excludesFile` 등). 그 결과 Git LFS 같은 filter가 있는 파일은 stat이
+  바뀐 경우 filter 없이 비교된다.
+- untracked file은 `os.Root` 안에서 Lstat한 regular file이고, 연 file이 같은 file일 때만 읽는다.
+  symlink와 FIFO는 읽지 않는다.
+- 목록은 500개, 파일 diff는 256 KiB에서 자르고 `truncated`로 표시한다. git 실행은 한 번에 2개, 각 10초다.
+- source 수정, stage, commit, push UI는 없다(ADR-014). Bridge의 polling이나 WS event는 없고 client가
+  화면을 열거나 새로 고칠 때만 읽는다.
 
 ### Context
 
@@ -1496,7 +1529,7 @@ Host도 명시한 배포 origin과 대조한다. README 배포 절차에 Tailsca
 ### Owner 자동 감지 기본값
 
 Status: Accepted (구현됨. 실제 mobile 검증의 남은 항목은
-[backlog P0-02](backlog.md#p0--배포와-핵심-안정성)에서 추적)
+[P0-02](https://github.com/psw7205/herdr-remote/issues/1)에서 추적)
 
 설치자가 host와 login을 직접 맞추지 않도록 Bridge는 시작 시 한 번 `tailscale status --json`을
 조회한다. 기본 host는 `Self.DNSName`에서 끝의 점을 제거한 값이고, 기본 소유자는 이 Tailscale
@@ -1790,7 +1823,8 @@ Terminal
 
 ### Status
 
-Accepted
+Accepted. Completed (2026-09-24): Slice 1~6을 구현했다. Slice 7·8은 [P2-03](https://github.com/psw7205/herdr-remote/issues/16)·[P2-05](https://github.com/psw7205/herdr-remote/issues/18)에서
+착수 조건이 생길 때 다룬다.
 
 ### Context
 
@@ -1867,7 +1901,8 @@ background / foreground recovery.
 
 ### Status
 
-Accepted
+Accepted. Completed (2026-09-24): 첫 vertical slice의 handoff flow를 실측했다
+([검증 기록](records/verification.md#첫-vertical-slice-검증-2026-09-24)). 실기기 reconnect는 [P0-02](https://github.com/psw7205/herdr-remote/issues/1)에서 추적한다.
 
 ### Decision
 
@@ -1957,6 +1992,9 @@ receipt는 conversation 본문을 저장하는 DB가 아니며 command digest와
 
 Accepted (stock Herdr `0.9.1`에는 미포함, 소유 fork `psw7205/herdr`의 `mobile-binding` patch에서
 구현. [ADR-036](#adr-036--herdr-patch는-소유-fork에서-유지한다))
+
+2026-10-05 note: `unbound`는 binding이 없는 `codex:<native-id>` item에도 쓴다. Codex의 identity와
+lifecycle은 [ADR-038](#adr-038--codex-chat은-herdr가-보고한-native-session으로-read-only-표시한다)을 따른다.
 
 ### Decision
 
@@ -2077,7 +2115,7 @@ stable release마다 rebase와 `just ci`·설치 검증을 거쳐 갱신한다. 
 
 ### Status
 
-Accepted (2026-09-28). 2026-09-29 구현, [Backlog P1-14](backlog.md#p1--핵심-ux와-다음-agent)
+Accepted (2026-09-28). 2026-09-29 구현, [P1-14](https://github.com/psw7205/herdr-remote/issues/13)
 
 ### Context
 
@@ -2154,3 +2192,147 @@ native session이 검증되면 `claude:<native-id>`가 된다. Chat·prompt·Ter
   우회하지 않는다는 원칙에 어긋난다.
 - 임의 경로 입력이나 host filesystem 탐색: 경로 검증이 공격면이 되고 신뢰 경계가 사라진다.
 - agent 인자 허용: resume과 permission 우회가 가능해진다.
+
+---
+
+## ADR-038 — Codex Chat은 Herdr가 보고한 native session으로 read-only 표시한다
+
+### Status
+
+Accepted (2026-10-05). [P1-02](https://github.com/psw7205/herdr-remote/issues/5). Codex 입력은
+[P1-01](https://github.com/psw7205/herdr-remote/issues/4)에서 다룬다.
+
+### Context
+
+Codex CLI rollout의 구조와 Herdr Codex hook의 `agent_session` 보고는
+[2026-09-24 격리 Herdr Codex CLI 조사](records/integration-findings.md#2026-09-24--격리-herdr-codex-cli-조사)에서
+확인했다. 조건부 입력 patch의 `agent.binding`은 Claude process의 PID별 native metadata로 binding을
+만든다. Codex hook이 보고한 session ID가 현재 foreground process incarnation과 결합돼 있는지는
+검증하지 않았으므로, Codex에는 ADR-034의 write 조건을 만족하는 binding이 없다. Transcript 읽기는
+write와 분리된 경로라(ADR-004) binding 없이도 열 수 있다.
+
+### Decision
+
+**Identity.** Codex pane의 native session은 Herdr의 `agent_session`(agent `codex`, kind `id`)이
+보고한 값만 쓴다. Bridge는 process 목록, cwd, 파일 수정 시각으로 추정하지 않는다. 보고된 ID의
+rollout을 찾으면 item ID는 `codex:<native-id>`다. 보고가 없거나 rollout이 아직 없으면 status만 있는
+`pane:<pane-id>` item이고, 이후 같은 pane에 `codex:` item이 새로 생기면 `pane:` item은 그 item으로
+supersede된다. 한 Refresh에서 두 pane이 같은 ID를 보고하면 어느 쪽도 `codex:` item을 새로 차지하지 않는다.
+
+**Binding 없음.** Codex pane에는 `agent.binding`을 호출하지 않는다. 그 결과가 server 단위 조건부 입력
+판정(`herdr.conditional_input`)에 쓰이므로 Codex 오류가 Claude 입력 가능 여부를 바꾸면 안 된다.
+`codex:` item에는 `runtime_binding`과 Terminal이 없고 lifecycle은 `unbound`다. prompt, interrupt,
+Terminal read/input은 모두 fail closed한다. `unbound`의 뜻은 "검증된 binding을 가진 적이 없는 item"으로
+넓힌다. `pane:` item과 `codex:` item이 여기에 해당한다.
+
+**Lifecycle.** `codex:` item은 pane이 snapshot에서 사라지거나, Herdr가 그 pane에서 codex를 더 이상
+보고하지 않거나, `agent_session`이 다른 native ID를 가리킬 때 `ended`가 된다. 보고가 비어 있는 동안은
+같은 pane의 item을 유지한다.
+
+**Rollout 찾기.** `<codex-dir>/sessions/*/*/*/rollout-*-<native-id>.jsonl`이 정확히 하나이고 첫 줄이
+같은 ID의 `session_meta`일 때만 Chat을 연다. `archived_sessions/`는 찾지 않는다. 실행 중인 session은
+`sessions/` 아래에 쓰며, archive의 사본을 붙이면 지난 대화를 현재 session으로 보일 수 있다.
+Codex home은 Bridge `-codex-dir`(기본 `~/.codex`)이다.
+
+**Projection.** rollout은 parent tree가 없는 선형 기록이다. `response_item` 중 `message`만 Chat으로
+옮긴다. user는 `internal_chat_message_metadata_passthrough.content_item_kinds`에서 같은 위치의 kind가
+`user.text`인 `input_text`만 표시한다. AGENTS.md와 환경 정보 같은 주입 context도 role `user`로 기록되기
+때문이다. kinds가 없거나 content와 길이가 다르면 그 user record는 숨긴다. assistant는 `output_text`를
+kinds와 무관하게 표시한다(관찰된 kind는 `unknown`). developer, reasoning, tool call과 결과, `event_msg`,
+알 수 없는 type은 표시하지 않는다. `event_msg`의 `item_completed`·`task_complete`는 같은 message를
+반복하므로 함께 쓰면 중복된다. message ID는 Codex가 모든 record에 쓰는 `ordinal`이다. 같은 ordinal이
+다른 내용으로 다시 나오거나 다른 session의 `session_meta`가 나오면 transcript를 invalid로 표시한다.
+
+### Consequences
+
+* Codex session을 mobile에서 읽을 수 있다. 입력과 Terminal은 PC의 Herdr에서 한다.
+* Herdr의 Codex integration hook이 설치돼 있어야 `agent_session`이 보고된다(`herdr integration status`로
+  확인). hook은 Codex의 trust review를 거쳐야 동작하고, 설치 전에 시작한 session의 SessionStart는
+  소급해 보고되지 않을 수 있다. 보고가 없으면 Codex pane은 status만 보인다.
+* `content_item_kinds`가 없는 이전 Codex version의 rollout은 사용자 입력이 Chat에 보이지 않고 assistant
+  응답만 보인다.
+* hook 보고가 빈 사이 같은 pane의 Codex가 다른 session으로 바뀌면 이전 rollout을 read-only로 계속 보일
+  수 있다. 입력 경로가 없으므로 다른 process에 쓰지는 않는다.
+* Codex write(prompt, interrupt, Terminal)는 Herdr가 Codex process incarnation에 결합한 binding을
+  발급하고 그 경계를 검증한 뒤 연다([P1-01](https://github.com/psw7205/herdr-remote/issues/4)).
+  새 session 시작의 kind는 여전히 `claude`뿐이다(ADR-037).
+
+기각한 대안:
+
+- process 목록, `lsof`, cwd, 최근 수정 시각으로 rollout 추정: 같은 cwd의 session을 구별하지 못하고
+  identity 판단을 Bridge heuristic에 넘긴다.
+- Codex pane에도 `agent.binding` 호출: Codex 실패가 server 단위 capability 판정에 섞여 Claude 입력을
+  막을 수 있다.
+- `event_msg`로 Chat 구성: `response_item`과 같은 message를 반복하므로 둘을 합치면 중복된다.
+- 읽은 줄 번호를 message ID로 사용: reader가 어디서부터 읽었는지에 따라 달라진다.
+
+---
+
+## ADR-039 — Tool 호출은 Chat item으로 투영하고 결과는 message 갱신으로 보낸다
+
+### Status
+
+Accepted (2026-10-05). [P2-01](https://github.com/psw7205/herdr-remote/issues/14). Claude만 해당한다.
+
+### Context
+
+Chat은 text record만 보여 agent가 tool을 실행하는 동안 무엇을 하는지 mobile에서 알 수 없었다.
+[2026-10-05 실측](records/integration-findings.md#2026-10-05--claude-transcript-live-기록-단위와-tool-식별자)에서
+Claude Code는 `tool_use` block을 실행 시작 때, 짝이 되는 user record의 `tool_result`(같은 `tool_use_id`)를
+실행이 끝날 때 쓴다. 병렬 tool은 같은 `message.id` 안에서 `tool_use`(A) → `tool_result`(A) → `tool_use`(B)
+순으로 섞이고 parent chain은 한 줄이다. result가 끝내 없는 `tool_use`도 있다.
+
+기존 stream은 뒤에 추가된 message만 Commit하고, 앞부분이 바뀌면 `Reset`으로 새 epoch snapshot을 보낸다.
+tool 결과가 도착할 때마다 앞의 item이 바뀌므로 그대로 두면 tool 하나마다 epoch가 바뀐다.
+
+### Decision
+
+**Projection.** `internal/claude`가 현재 branch(최신 leaf의 parent chain)의 `tool_use`마다 role `tool` item을
+transcript 순서대로 만든다. 같은 chain의 `tool_result`만 짝짓고, 짝이 없는 `tool_result`, `server_tool_use`처럼
+user `tool_result`와 짝을 이루지 않는 block은 표시하지 않는다. text message의 ID와 순서는 바뀌지 않는다.
+item ID는 `<record uuid>/<tool_use id>`다.
+
+**Item.** `Message`에 `tool` object를 더한다. `id`(tool_use id), `name`, `summary`, `state`, `input`,
+`input_truncated`, `result`, `result_truncated`다. user·assistant message에는 `tool`이 없어 wire 형태가 그대로다.
+`summary`는 Bridge가 잘 알려진 tool에서 한 줄로 만든다(Bash command 첫 줄, Read·Write·Edit 경로를 record `cwd`
+기준 상대 경로로, Grep·Glob pattern, Task·Agent description, WebFetch host, WebSearch·ToolSearch query, Skill 이름, TodoWrite 개수).
+그 밖의 tool은 빈 값이고 client는 이름만 보인다. `input`은 들여쓴 JSON, `result`는 text block을 이은 text다.
+image 등 text가 아닌 block은 `[image]`처럼 이름만 남기고 내용(base64)은 복사하지 않는다. 둘 다 8 KiB에서
+UTF-8 경계로 자르고 `*_truncated`를 켠다.
+
+**State.** `running`은 result가 아직 없는 호출이다. 결과가 있으면 `completed`, `is_error`가 참이면 `error`다.
+result 없이 chain이 넘어가면 `unknown`이다. 다른 `message.id`의 assistant record나 사용자 prompt(중단 안내
+포함)가 뒤에 오면 넘어간 것으로 본다. Claude Code는 모든 result를 쓴 뒤에야 다음 API message나 prompt로 가므로
+그때까지 없는 result는 오지 않는다. session 종료처럼 transcript가 더 바뀌지 않는 경우는 Bridge가 판정하지
+않는다. client가 `lifecycle`이 `ended`·`superseded`이거나 `status`가 `working`·`needs_attention`이 아닐 때
+`running`을 결과 없음으로 보인다. 이 정보는 이미 `Meta`와 `agent.status`에 있다.
+
+**Protocol.** 새 tool item은 `message.tool`, 기존 tool item의 상태·결과 변화는 `message.updated`(payload는 바뀐
+item 전체)로 보낸다. 둘 다 snapshot 갱신과 같은 `Commit`에서 sequence를 받으므로 cursor·replay·live의 원자성은
+그대로다. 한 batch의 갱신은 추가보다 먼저 나간다. 앞부분의 text message가 바뀌거나, item이 줄거나, 같은 자리의
+ID가 다르면 이전처럼 `Reset`이다. client는 모르는 role과 `tool` 없는 tool item을 건너뛰고, 갖지 않은 ID의
+`message.updated`는 버린다(다음 snapshot이 맞춘다). 목록 preview(`last_message`)는 tool item을 건너뛴 최신
+text message다.
+
+**Fail soft.** tool block의 field는 관대하게 읽는다. `id`·`name`이 문자열이 아닌 `tool_use`, `tool_use_id`가
+없는 `tool_result`는 버리고, 형식이 다른 `input`·`content`·`is_error`는 빈 값이나 거짓으로 둔다. tool block 때문에
+transcript가 invalid가 되지 않는다.
+
+### Consequences
+
+* Chat에서 tool 진행과 결과를 compact group으로 보고, 행을 눌러 입력과 결과를 펼친다.
+* tool 결과마다 epoch가 바뀌지 않아 재연결 replay가 그대로 동작한다.
+* snapshot이 tool마다 최대 16 KiB를 더 싣는다. 긴 session의 snapshot과 memory가 커지며, 상한(8 KiB)은 그
+  비용과 mobile에서 확인할 만한 양 사이의 선택이다. 전체 내용은 Terminal이나 PC에서 본다.
+* Codex rollout의 tool 기록은 표시하지 않는다.
+* `summary`의 경로 상대화는 record `cwd` 기준이라, session 도중 디렉터리를 옮기면 같은 project의 파일도 절대
+  경로로 보일 수 있다.
+
+기각한 대안:
+
+- `tool.started`·`tool.completed`·`tool.failed` 별도 event: 같은 item의 상태를 세 이름으로 나누면 처음부터 끝난
+  상태로 발견된 호출(재연결, 한 batch에 use와 result)을 다시 started부터 흉내 내야 한다. item 하나와 갱신 하나가
+  snapshot과 같은 모양이다.
+- result 도착마다 `Reset`: tool마다 새 epoch와 전체 snapshot을 보내 mobile 재전송이 커지고 replay가 의미를 잃는다.
+- 상세를 별도 HTTP endpoint로 지연 조회: snapshot은 작아지지만 Bridge가 transcript를 다시 찾거나 별도 cache를
+  가져야 하고 route·Origin 검사가 늘어난다. 상한으로 크기를 먼저 제한한다.

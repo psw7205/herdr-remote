@@ -1,6 +1,6 @@
 # Herdr Mobile Chat — Product Requirements Document
 
-- **Status:** Claude Code / macOS slice 구현. 현재 지원 범위는 [`README.md` 현재 지원 범위](../README.md#현재-지원-범위), 남은 작업은 [`backlog.md`](backlog.md)를 따른다.
+- **Status:** 2026-09-29 기준 제품 요구·범위의 결정 snapshot. 제품 범위가 바뀔 때만 고치고 구현 상태는 적지 않는다. 현재 지원 범위는 [`README.md` 현재 지원 범위](../README.md#현재-지원-범위), 남은 작업은 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues), 현재 구조는 [`architecture.md`](architecture.md)가 기준이다.
 - **Name:** repo와 Go module 이름은 `herdr-remote`, 제품 이름은 Herdr Mobile Chat이다.
 - **Upstream:** [Herdr](https://github.com/herdrdev/herdr)는 여러 coding agent를 terminal pane에서 동시에 실행하고 workspace·tab·pane, PTY, agent status를 관리하는 도구다.
 - **Product type:** Self-hosted mobile-first Herdr client
@@ -242,7 +242,7 @@ Chat UI에서 처리할 수 없는 interaction이 존재할 경우 같은 pane�
 
 ### G7. Herdr에서 새 session 시작
 
-2026-09-29에 `claude`로 구현했다([P1-14](backlog.md#p1--핵심-ux와-다음-agent)). 사용자는 설정한 project root 아래의 폴더나
+사용자는 설정한 project root 아래의 폴더나
 이미 열린 Herdr workspace를 골라 새 agent session을 시작할 수 있다. 생성과 process는 Herdr가
 소유하고, 새 session은 기존 session과 같은 discovery·binding 규칙을 따른다.
 기존 session의 resume과 agent 인자 전달은 제공하지 않는다. 범위는 [ADR-037](adr.md#adr-037--새-session-생성은-herdr에-요청한다)을 따른다.
@@ -291,7 +291,7 @@ MVP 지원 대상:
 Claude Code
 ```
 
-Codex는 다음 adapter다([P1-01/P1-02](backlog.md#p1--핵심-ux와-다음-agent)). 다른 agent는 adapter 확장으로 추후 지원한다.
+Codex는 다음 adapter다. 다른 agent는 adapter 확장으로 추후 지원한다.
 
 ### Public Internet access
 
@@ -368,7 +368,7 @@ notification (후속 optional)
 ## 7. Information Architecture
 
 전체 화면 구조는 다음과 같다. 첫 slice는 Sessions, Chat, Terminal에 한정하고
-Changes와 Settings는 후속 단계다. 현재 route는 `web/src/route.ts`의 Chat과 Terminal뿐이다.
+Changes와 Settings는 후속 단계다.
 
 ```text
 /
@@ -503,9 +503,9 @@ historical transcript만 남은 session을 탐색하는 기능은 첫 slice에�
 | assistant messages | Claude / Codex (native agent transcript) | |
 | tool execution records | Claude / Codex (native agent transcript) | |
 | native session metadata | Claude / Codex | |
-| durable command receipt | Herdr Mobile Chat Bridge | 구현. Bridge disk (`-receipts-dir`). 유일한 disk persistence |
-| event cursor | Herdr Mobile Chat Bridge | 구현. connection 단위 runtime state. 저장하지 않는다 |
-| draft / pending command | Herdr Mobile Chat client | 구현. browser `sessionStorage` |
+| durable command receipt | Herdr Mobile Chat Bridge | Bridge disk. 유일한 disk persistence |
+| event cursor | Herdr Mobile Chat Bridge | connection 단위 runtime state. 저장하지 않는다 |
+| draft / pending command | Herdr Mobile Chat client | browser storage |
 | mobile presentation state | Herdr Mobile Chat | |
 | unread / last read position | Herdr Mobile Chat | 후속 후보 |
 | notification state | Herdr Mobile Chat | 후속 후보 |
@@ -522,10 +522,7 @@ conversation 전체를 별도 DB에 복제하는 것은 기본 설계가 아니�
 
 Agent마다 transcript 형식과 interaction 방식이 다르기 때문에 adapter 계층을 둔다.
 
-아래는 개념적 경계이며 code에 `AgentAdapter` interface는 없다. 현재 Claude 해석은
-`internal/claude`, `internal/transcript`, `internal/session`에 나뉘어 있다.
-
-개념적으로 다음 책임을 만족한다.
+아래는 개념적 경계이며 code interface를 정하지 않는다. Adapter는 개념적으로 다음 책임을 만족한다.
 
 ```text
 AgentAdapter
@@ -539,12 +536,7 @@ interrupt()
 getCapabilities()
 ```
 
-Adapter 현황:
-
-```text
-Claude Code   구현 (internal/claude)
-Codex         후속 (P1-01/P1-02)
-```
+첫 adapter는 Claude Code, 다음은 Codex다.
 
 Adapter는 agent native event를 공통 domain event로 변환한다.
 
@@ -554,20 +546,20 @@ Adapter는 agent native event를 공통 domain event로 변환한다.
 
 Bridge에서 다음과 같은 semantic event로 normalize한다.
 
-| Event                     | 의미                | 상태 |
+| Event                     | 의미                | 범위 |
 | ------------------------- | ----------------- | ---- |
-| `session.snapshot`        | 연결 시점의 session 상태와 cursor. 다른 epoch나 replay 범위 밖 cursor에도 반환한다 | 구현 |
-| `message.user`            | 사용자 입력            | 구현 |
-| `message.assistant`       | assistant message | 구현 |
-| `message.assistant.delta` | streaming update  | 후속 ([P1-07](backlog.md#p1--핵심-ux와-다음-agent)) |
+| `session.snapshot`        | 연결 시점의 session 상태와 cursor. 다른 epoch나 replay 범위 밖 cursor에도 반환한다 | MVP |
+| `message.user`            | 사용자 입력            | MVP |
+| `message.assistant`       | assistant message | MVP |
+| `message.assistant.delta` | streaming update  | 후속 |
 | `tool.started`            | tool 실행 시작        | 후속 |
 | `tool.completed`          | tool 실행 완료        | 후속 |
 | `tool.failed`             | tool 실패           | 후속 |
 | `permission.requested`    | permission 필요     | 후속 |
 | `question.requested`      | user input 필요     | 후속 |
-| `agent.status`            | agent 상태 변경. `status`와 `lifecycle`(`active` \| `unverified` \| `unbound` \| `superseded` \| `ended`)을 담고, `superseded`이면 `successor_id`를 함께 담는다. 종료 시 `status`도 `completed`이므로 turn 완료와 process 종료는 `lifecycle`로 구분한다 | 구현 |
+| `agent.status`            | agent 상태 변경. `status`와 `lifecycle`(`active` \| `unverified` \| `unbound` \| `superseded` \| `ended`)을 담고, `superseded`이면 `successor_id`를 함께 담는다. 종료 시 `status`도 `completed`이므로 turn 완료와 process 종료는 `lifecycle`로 구분한다 | MVP |
 | `session.completed`       | 작업 완료             | 후속 |
-| `session.error`           | session 오류        | 구현 |
+| `session.error`           | session 오류        | MVP |
 
 초기 단계에서는 transcript에서 안정적으로 식별할 수 있는 event만 structured event로 노출한다.
 
@@ -693,7 +685,7 @@ Code block에는 모바일에서 쉽게 사용할 수 있는 copy action을 제�
 
 ### Tool Card
 
-후속 optional 기능이다. 현재 Chat은 tool 기록을 표시하지 않는다.
+후속 optional 기능이다.
 
 tool call은 기본적으로 compact하게 표시한다.
 
@@ -1028,7 +1020,7 @@ event normalization
 WebSocket/API
 prompt forwarding
 terminal proxy
-session start request to Herdr (후속)
+session start request to Herdr
 attachment handling (후속)
 reconnect support
 notification trigger (후속)
@@ -1137,9 +1129,9 @@ write-enabled UI를 구현 완료로 간주하지 않는다. 세부 gate와 미�
 | Markdown / code              | Yes   |
 | Tool cards                   | 후속 optional |
 | Live updates (완성된 message 단위) | Yes   |
-| Streaming delta              | 후속 ([P1-07](backlog.md#p1--핵심-ux와-다음-agent)) |
+| Streaming delta              | 후속 |
 | Send prompt to existing pane | Yes   |
-| Start new session via Herdr | 후속 ([P1-14](backlog.md#p1--핵심-ux와-다음-agent)) |
+| Start new session via Herdr | Yes (사용자 요청 시, ADR-037) |
 | Interrupt                    | Yes   |
 | Reconnect                    | Yes   |
 | Terminal fallback            | Yes   |
