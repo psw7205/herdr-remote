@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// newWatcher is replaced in tests to exercise the polling fallback.
+var newWatcher = fsnotify.NewWatcher
+
 // Watch establishes file observation before the initial read. Polling
 // reconciles missed notifications by reading only after the saved offset.
 // Cancelling ctx stops reading between batches and closes the fsnotify watcher.
@@ -22,7 +25,7 @@ func Watch(ctx context.Context, path string, apply func(Batch) error, failed fun
 	watching, warned := false, false
 	arm := func() {
 		if watcher == nil {
-			w, err := fsnotify.NewWatcher()
+			w, err := newWatcher()
 			if err != nil {
 				if !warned {
 					slog.Warn("transcript notifications unavailable; polling", "error", err)
