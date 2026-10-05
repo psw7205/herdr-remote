@@ -1,6 +1,6 @@
 # Herdr patch 유지 runbook
 
-2026-09-28 기준. Backlog [P0-04](backlog.md#p0--배포와-핵심-안정성)의 운영 절차다.
+2026-09-30 기준. [P0-04](https://github.com/psw7205/herdr-remote/issues/3)의 운영 절차다.
 Herdr 연동 근거는 [Integration 조사](records/integration-findings.md), 실제 검증 기록은
 [검증 기록](records/verification.md)을 따른다.
 
@@ -25,8 +25,8 @@ Herdr 연동 근거는 [Integration 조사](records/integration-findings.md), �
 Bridge의 Chat prompt, interrupt, Terminal 입력은 Herdr socket method `agent.binding`과
 `agent.bound_input`이 있어야 한다([ADR-034](adr.md#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다)).
 두 method는 fork [`psw7205/herdr`의 `mobile-binding` branch](https://github.com/psw7205/herdr/tree/mobile-binding),
-commit `0e672c5e`에만 있다.
-stock `0.9.1`에는 없다. patch는 macOS Claude foreground process의 PID·시작 시각·native
+commit `de31ede9`에만 있다.
+stock Herdr에는 없다. patch는 macOS Claude foreground process의 PID·시작 시각·native
 session metadata를 대조해 binding을 발급하고, PTY queue가 text와 Enter를 쓰기 직전에도
 binding을 다시 검증한다.
 
@@ -39,11 +39,11 @@ patch가 없거나 binding을 확인할 수 없으면 Bridge는 fail closed한�
 binding이 사라져도 agent가 같은 pane에서 계속 보고되면 기존 `claude:<native-id>` session은
 `ended`가 아닌 `unverified`로 남고, 같은 native session이 다시 검증되면 `active`로 돌아간다.
 native session을 식별하지 못한 `pane:<pane-id>` item은 `unbound`로 보인다
-([P0-07](backlog.md#p0--배포와-핵심-안정성), ADR-034).
+([검증 기록](records/verification.md#binding-손실과-agent-종료-구분-2026-09-24), ADR-034).
 
 ## 2. 현재 상태 확인
 
-stock과 patched binary는 모두 `herdr 0.9.1`을 출력한다. `herdr --version`과
+stock과 patched binary는 같은 version(현재 `herdr 0.9.3`)을 출력한다. `herdr --version`과
 `herdr status server`의 version으로 patch 여부를 판단하지 않는다.
 
 ```sh
@@ -78,14 +78,14 @@ write 전에 거부하므로 Bridge는 `delivery_unknown`이 아니라 `rejected
 receipt에 기록하고, 같은 `command_id` 재시도에는 재전송 없이 이 결과를 돌려준다. Chat UI는
 conditional input API가 없어 입력을 전달하지 않았다는 안내를 표시한다.
 
-상태: stock server를 상대로 `unsupported`가 표시되는지는 **미검증**이다. `doctor`의
-"No verified native runtime binding" blocker와 `conditional_input` blocker는 synthetic fixture
-test로 확인했다. `doctor` 성공은 capability 관찰이며 PTY handoff나 race 통과를 뜻하지 않는다.
+상태: stock `0.9.3` server를 상대로 `doctor`와 `/api/sessions`가 `unsupported`를 보고하는 것을
+**실측**했다(2026-09-30). `doctor`의 "No verified native runtime binding" blocker와
+`conditional_input` blocker는 synthetic fixture test로 확인했다. `doctor` 성공은 capability 관찰이며 PTY handoff나 race 통과를 뜻하지 않는다.
 
 ## 3. patch build
 
-`<patch-worktree>`에서 실행한다. branch는 `v0.9.1`(`065ef9d6`) 위의 단일 commit
-`0e672c5e`다. 새로 준비할 때는 fork를 clone한다.
+`<patch-worktree>`에서 실행한다. branch는 `v0.9.3`(`7b116c05`) 위의 단일 commit
+`de31ede9`다. 새로 준비할 때는 fork를 clone한다.
 
 ```sh
 git clone --branch mobile-binding https://github.com/psw7205/herdr.git <patch-worktree>
@@ -103,21 +103,28 @@ just build
 - `just build`는 `cargo build --release --locked`이며 결과는 `target/release/herdr`다.
   `CARGO_TARGET_DIR`을 쓰면 그 directory 아래에 생긴다.
 - 필요한 도구는 `herdr` repo의 `rust-toolchain.toml`, `justfile`, `CONTRIBUTING.md`를 따른다.
-  `just`, `cargo-nextest`, `python3`, `bun`이 필요하다.
+  `just`, `cargo-nextest`, `python3`, `bun`, vendored libghostty-vt build용 Zig `0.16.0`이 필요하다.
+- mise에 설치만 돼 있고 전역 version이 없으면 shim이 실패한다. 전역 설정을 바꾸지 않고
+  `mise exec just@<v> aqua:nextest-rs/nextest/cargo-nextest@<v> zig@0.16.0 -- just ci`처럼 지정한다.
 
-상태: **실측**. 2026-09-23 `just ci`에서 3,463개 테스트와 release build가 통과했다.
-설치된 `herdr`의 sha256은 `<patch-worktree>/target/release/herdr`와 같다.
+상태: **실측**(2026-09-30, `de31ede9`). `just lint`, maintenance·UI hot-path·integration asset
+test, release build가 통과했다. `cargo nextest`는 3,694개 중 5개가 실패했다
+(`api_ping`·`multi_client`의 출력 대기 2개씩, `live_handoff` 2개). stock `v0.9.3`에서도 같은
+5개가 같은 방식으로 실패하므로 patch 회귀는 아니다. 원인은 unresolved다(`SHELL=/bin/sh`와
+agent 환경변수 제거로는 바뀌지 않았다). 설치된 `herdr`의 sha256은
+`<patch-worktree>/target/release/herdr`와 같다.
 
 ## 4. stock binary 백업과 patch 설치
 
-최초 설치 전 stock binary를 같은 directory에 `<install-dir>/herdr-remote-original-0.9.1`로
+patch를 설치하기 전 stock binary를 같은 directory에 `<install-dir>/herdr-remote-original-<version>`으로
 남긴다. 이미 있는 백업은 덮어쓰지 않는다.
 
 ```sh
 INSTALL_DIR="$(dirname "$(command -v herdr)")"
-# 최초 1회. 현재 binary가 stock일 때만 실행한다.
-test -e "$INSTALL_DIR/herdr-remote-original-0.9.1" \
-  || cp -p "$INSTALL_DIR/herdr" "$INSTALL_DIR/herdr-remote-original-0.9.1"
+VERSION=0.9.3
+# version마다 1회. 현재 binary가 stock일 때만 실행한다.
+test -e "$INSTALL_DIR/herdr-remote-original-$VERSION" \
+  || cp -p "$INSTALL_DIR/herdr" "$INSTALL_DIR/herdr-remote-original-$VERSION"
 
 cp -p <patch-worktree>/target/release/herdr "$INSTALL_DIR/herdr.patch-new"
 mv "$INSTALL_DIR/herdr.patch-new" "$INSTALL_DIR/herdr"
@@ -130,7 +137,7 @@ shasum -a 256 "$INSTALL_DIR/herdr" <patch-worktree>/target/release/herdr
   그 binary로 띄운 격리 server에서 `conditional_input: unsupported`를 확인하는 방법이 있다.
 - 설치된 binary는 Git 밖의 host 상태다. repo 변경과 구분해 기록한다.
 
-상태: 백업과 설치는 **실측**. 백업 명령의 정확한 실행 형태는 기록되지 않았다.
+상태: **실측**(2026-09-30). 위 명령으로 stock `0.9.3`을 백업하고 patch를 설치했다.
 
 ## 5. 실행 중 server에 적용: live handoff
 
@@ -160,19 +167,20 @@ mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
 | --- | --- |
 | agent PID·native session ID·shell PID | 보존됐다 |
 | terminal ID | 새로 발급돼 기존 binding이 무효화된다. Bridge가 새 binding을 다시 조회해야 한다 |
-| pane geometry | desktop client가 끊긴 동안 기본 120×40으로 바뀌었다. desktop client가 다시 붙으면 크기 소유권을 되찾는다([P1-08](backlog.md#p1--핵심-ux와-다음-agent)) |
+| pane geometry | desktop client가 끊긴 동안 기본 120×40으로 바뀌었다. desktop client가 다시 붙으면 크기 소유권을 되찾는다([P1-08](https://github.com/psw7205/herdr-remote/issues/10)) |
 | mobile Terminal | resize를 호출하지 않는다. geometry 변화는 handoff 자체의 동작이다 |
 
-상태: stock → patch handoff는 **실측**. Herdr server log에 live handoff 시작, import server
-생성, pane 4개 import, 이전 server 종료가 기록됐다. 두 Claude PID와 native session ID가
-유지됐다. 실행한 CLI 인자는 기록되지 않았다. patch → patch 재적용은 **미검증**이다.
+상태: stock → patch handoff는 **실측**(2026-09-30, `0.9.3`). 격리 server에서 먼저 확인한 뒤
+실제 server에 `herdr server live-handoff --import-exe "$INSTALL_DIR/herdr"`로 적용했다. pane 8개와
+Claude PID가 유지됐고 terminal ID는 새로 발급됐다. patch → patch 재적용은 **미검증**이다.
 
 ## 6. 원본 binary로 rollback
 
 ```sh
 INSTALL_DIR="$(dirname "$(command -v herdr)")"
-cp -p "$INSTALL_DIR/herdr" "$INSTALL_DIR/herdr-remote-patched-0.9.1"   # patch 보존
-cp -p "$INSTALL_DIR/herdr-remote-original-0.9.1" "$INSTALL_DIR/herdr.rollback-new"
+VERSION=0.9.3
+cp -p "$INSTALL_DIR/herdr" "$INSTALL_DIR/herdr-remote-patched-$VERSION"   # patch 보존
+cp -p "$INSTALL_DIR/herdr-remote-original-$VERSION" "$INSTALL_DIR/herdr.rollback-new"
 mv "$INSTALL_DIR/herdr.rollback-new" "$INSTALL_DIR/herdr"
 herdr server live-handoff --import-exe "$INSTALL_DIR/herdr"
 mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
@@ -185,7 +193,7 @@ mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
 - 열린 `claude:` session은 `ended`가 아닌 `unverified`로 남고 입력과 Terminal이 fail closed한다
   (P0-07). agent 종료로 해석하지 않는다.
 
-상태: 격리 server에서 **실측**(2026-09-28). 설치 binary를 바꾸지 않고
+상태: 격리 server에서 **실측**(2026-09-28 `0.9.1`, 2026-09-30 `0.9.3`). 설치 binary를 바꾸지 않고
 `herdr --session <name> server live-handoff --import-exe <stock 백업>`으로 patch → stock을,
 `--import-exe <patched binary>`로 stock → patch를 실행했다. 두 방향 모두 Claude PID와 shell PID가
 유지됐다. stock에서는 `conditional_input: unsupported`, item `unverified`, 이전 binding 거부,
@@ -201,8 +209,8 @@ binding은 거부됐다. UI 안내는 browser로 보지 않았다. 실제 사용
 
 - Herdr의 background check는 새 version을 알리기만 한다. 수동 `herdr update`는 stable
   channel의 binary를 내려받아 설치 경로에 rename한다(`src/update.rs`).
-- stable channel은 최신 version이 현재 version보다 높을 때만 설치한다. patch도 `0.9.1`로
-  보고하고 최신 tag가 `v0.9.1`이므로 지금은 설치할 update가 없다. 다음 stable release 이후
+- stable channel은 최신 version이 현재 version보다 높을 때만 설치한다. patch는 기반 stock과 같은
+  version을 보고하므로 같은 version의 update는 없다. 다음 stable release 이후
   `herdr update`(또는 `--handoff`)를 실행하면 patch가 stock으로 교체된다. 자동 설치는 없다.
 - `herdr update --handoff`는 교체 후 live handoff까지 수행한다. agent는 살아 있지만 조건부
   입력만 조용히 사라진다. `conditional_input` 감지가 이 경우를 드러내는 신호다.
@@ -214,13 +222,14 @@ binding은 거부됐다. UI 안내는 browser로 보지 않았다. 실제 사용
 
 ```sh
 git -C <herdr-repo> fetch upstream --tags
-git -C <patch-worktree> rebase --onto <new-tag> v0.9.1 mobile-binding
+git -C <patch-worktree> rebase --onto <new-tag> <old-tag> mobile-binding
 # <patch-worktree>에서
 just ci
 just build
 ```
 
-1. `<new-tag>`로 rebase하거나 새 branch에 `0e672c5e`를 cherry-pick한다. 충돌은 patch가
+1. 이전 head를 §8의 `mobile-binding-<old-tag>` tag로 남긴 뒤 `<new-tag>`로 rebase하거나 새 branch에
+   patch commit을 cherry-pick한다. 충돌은 patch가
    수정한 아래 `herdr` repo 파일에서 날 수 있다.
    - 추가: `src/runtime_binding.rs`, `src/app/api/bound_input.rs`
    - API schema·server: `src/api/mod.rs`, `src/api/schema.rs`, `src/api/schema/agents.rs`,
@@ -237,9 +246,12 @@ just build
    compatibility를 먼저 본다.
 5. `doctor`에서 `conditional_input: supported`, 대상 agent의 `verified_binding: true`를
    확인한다.
-6. stock backup도 새 version의 stock으로 갱신할지 결정하고 파일명에 version을 넣는다.
+6. 새 version의 stock backup을 §4의 이름 규칙으로 남긴다.
 
-상태: **미검증**. rebase, 새 version build, version 간 handoff를 end-to-end로 실행한 적이 없다.
+상태: **실측**(2026-09-30, `v0.9.1` → `v0.9.3`). 충돌은 양쪽이 `src/platform/mod.rs` 끝에
+함수를 추가한 한 곳이었고 둘 다 남겼다. `git range-diff`에서 PTY·server hunk는 바뀌지 않았다.
+격리 server에서 stock → patch → stock → patch handoff, stale token 거부, 새 token prompt 전달,
+Bridge 목록 상태를 확인한 뒤 실제 server에 적용했다([검증 기록](records/verification.md#herdr-093-patch-전환-검증-2026-09-30)).
 
 ## 8. fork 관리
 
