@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"github.com/psw7205/herdr-remote/internal/command"
+	"github.com/psw7205/herdr-remote/internal/gitstate"
 	"github.com/psw7205/herdr-remote/internal/herdr"
 	"github.com/psw7205/herdr-remote/internal/httpapi"
 	"github.com/psw7205/herdr-remote/internal/session"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -28,6 +30,7 @@ func main() {
 	}
 	socket := flag.String("herdr-socket", filepath.Join(home, ".config", "herdr", "herdr.sock"), "existing Herdr API socket")
 	claudeDir := flag.String("claude-dir", filepath.Join(home, ".claude"), "Claude native transcript root")
+	codexDir := flag.String("codex-dir", filepath.Join(home, ".codex"), "Codex home whose sessions/ holds rollout transcripts (read-only Chat)")
 	receiptDir := flag.String("receipts-dir", filepath.Join(home, ".local", "state", "herdr-remote", "receipts"), "durable command receipts")
 	listen := flag.String("listen", "127.0.0.1:8787", "loopback HTTP address")
 	origins := flag.String("origins", "http://127.0.0.1:8787", "comma-separated exact browser Origins")
@@ -63,7 +66,7 @@ func main() {
 		slog.Error("invalid -project-root", "error", err)
 		os.Exit(2)
 	}
-	registry := session.NewRegistry(ctx, gateway, *claudeDir)
+	registry := session.NewRegistry(ctx, gateway, *claudeDir, session.WithCodexRoot(*codexDir))
 	if err = registry.Refresh(ctx); err != nil {
 		slog.Error("Herdr unavailable", "error", err)
 		os.Exit(1)
@@ -93,8 +96,15 @@ func main() {
 		allowed = tailnet.WithOrigin(allowed, identity.Host)
 	}
 	api := httpapi.New(registry, receipts, allowed, *staticDir)
+	info, _ := debug.ReadBuildInfo()
+	api.SetBuild(httpapi.BuildFromInfo(info))
 	api.SetTailnetIdentity(identity.Host, identity.Login)
 	api.SetStarter(starter)
+	gitBin, err := gitstate.Find()
+	if err != nil {
+		slog.Warn("git not found; Changed Files unavailable", "error", err)
+	}
+	api.SetChanges(gitstate.New(gitBin))
 	if err = api.ValidateOrigins(); err != nil {
 		slog.Error("invalid Origin config", "error", err)
 		os.Exit(2)
@@ -114,7 +124,8 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(shutdownCtx)
 	}()
-	slog.Info("Bridge listening", "address", *listen, "origins", allowed, "project_roots", len(projectRoots))
+	build := api.Build()
+	slog.Info("Bridge listening", "address", *listen, "origins", allowed, "project_roots", len(projectRoots), "revision", build.Revision, "modified", build.Modified, "client_build", build.ClientBuild)
 	if err = server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("Bridge failed", "error", err)
 		os.Exit(1)
