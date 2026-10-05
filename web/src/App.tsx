@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { listSessions, noStart, supersededBy, type ConditionalInput, type Session, type StartCapability } from './api'
-import { backAction, followAlias, formatRoute, parseRoute, resolveTerminal, startRoute, type Route } from './route'
+import { listSessions, noStart, supersededBy, type BridgeBuild, type ConditionalInput, type Session, type StartCapability } from './api'
+import { loadedClientBuild } from './build'
+import { backAction, followAlias, formatRoute, parseRoute, resolveTerminal, startRoute, successorRoute, type Route } from './route'
+import { ChangedFiles, FileDiffView } from './ChangesView'
 import { SessionChat } from './SessionChat'
 import { SessionList } from './SessionList'
 import { StartSession } from './StartSession'
 import { TerminalView } from './TerminalView'
 import { useVisualViewportShell } from './viewport'
+
+const loadedBuild = loadedClientBuild(typeof document === 'undefined' ? null : document)
 
 // History entries this app pushed above the current one (0 for a deep link).
 function historyDepth(): number {
@@ -30,6 +34,7 @@ export function App() {
   const [error, setError] = useState('')
   const [conditionalInput, setConditionalInput] = useState<ConditionalInput>('unknown')
   const [start, setStart] = useState<StartCapability>(noStart)
+  const [bridge, setBridge] = useState<BridgeBuild | null>(null)
   const open = useRef<string | null>(null)
   const ended = useRef(new Set<string>())
   // Superseded pane: ids mapped to their successors, for older history entries.
@@ -56,15 +61,15 @@ export function App() {
         const from = open.current
         const successor = await supersededBy(from, list.sessions, ended.current)
         if (!alive) return
-        setSessions(list.sessions); setConditionalInput(list.conditionalInput); setStart(list.start); setError(''); setLoaded(true)
+        setSessions(list.sessions); setConditionalInput(list.conditionalInput); setStart(list.start); setBridge(list.bridge); setError(''); setLoaded(true)
         if (successor) {
-          // Follow a pane: item re-keyed to its verified claude: session, with
-          // the successor's own binding from the list. Replacing the entry
-          // keeps Back pointing where it pointed before.
+          // Follow a pane: item re-keyed to its identified claude: or codex:
+          // session, with the successor's own binding (if any) from the list.
+          // Replacing the entry keeps Back pointing where it pointed before.
           if (from) aliases.current.set(from, successor.id)
           const current = parseRoute(location.hash)
           if (current.session === from) {
-            const next: Route = { session: successor.id, view: current.view === 'terminal' && successor.terminal ? 'terminal' : 'chat' }
+            const next = successorRoute(current, successor)
             writeRoute(next, true)
             setRoute(next)
           }
@@ -101,17 +106,24 @@ export function App() {
     navigate({ session: session.id, view: 'terminal' })
   }, [navigate])
 
+  const openChanges = useCallback((session: Session) => navigate({ session: session.id, view: 'changes' }), [navigate])
+
   const chatSession = listed ?? (terminal?.id === route.session ? terminal : undefined)
   let screen
   if (route.view === 'start') {
     screen = <StartSession start={start} onBack={back} />
+  } else if (route.view === 'changes' && route.session && chatSession) {
+    const id = route.session
+    screen = route.file
+      ? <FileDiffView key={`${id}:${route.file}`} session={chatSession} path={route.file} onBack={back} />
+      : <ChangedFiles key={id} session={chatSession} onBack={back} onOpen={path => navigate({ session: id, view: 'changes', file: path })} />
   } else if (terminalTarget) {
     screen = <TerminalView key={`${terminalTarget.id}:${terminalTarget.runtime_binding}`} session={terminalTarget} onBack={back} />
   } else if (route.session && chatSession && (route.view === 'chat' || fallbackToChat)) {
-    screen = <SessionChat key={route.session} initial={chatSession} onBack={back} onTerminal={openTerminal} />
+    screen = <SessionChat key={route.session} initial={chatSession} onBack={back} onTerminal={openTerminal} onChanges={openChanges} />
   } else {
     // A deep link waits on the first list load under the list's own skeleton.
-    screen = <SessionList sessions={route.session && !loaded ? [] : sessions} loaded={loaded} error={error} conditionalInput={conditionalInput} canStart={start.kinds.includes('claude')} onStart={() => navigate(startRoute)} onOpen={item => navigate({ session: item.id, view: 'chat' })} />
+    screen = <SessionList sessions={route.session && !loaded ? [] : sessions} loaded={loaded} error={error} conditionalInput={conditionalInput} bridge={bridge} loadedBuild={loadedBuild} canStart={start.kinds.includes('claude')} onStart={() => navigate(startRoute)} onOpen={item => navigate({ session: item.id, view: 'chat' })} />
   }
   return <div className="app-shell" ref={shell}>{screen}</div>
 }

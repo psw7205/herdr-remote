@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/coder/websocket"
 	"github.com/psw7205/herdr-remote/internal/command"
+	"github.com/psw7205/herdr-remote/internal/gitstate"
 	"github.com/psw7205/herdr-remote/internal/herdr"
 	"github.com/psw7205/herdr-remote/internal/session"
 	"github.com/psw7205/herdr-remote/internal/stream"
@@ -28,6 +29,7 @@ type Sessions interface {
 	List() []session.Meta
 	Get(string) (stream.Snapshot, session.Meta, error)
 	Stream(string) (*stream.Session, error)
+	Project(string) (string, error)
 	BoundInput(context.Context, string, string, string, string) error
 	Terminal(context.Context, string, string) (herdr.TerminalSnapshot, error)
 	ConditionalInput() string
@@ -40,12 +42,22 @@ type Starter interface {
 	Kinds() []string
 	NewWorkspace() bool
 }
+
+// ChangeReader reads a project's Git working tree (ADR-016). A nil
+// ChangeReader disables the Changed Files routes.
+type ChangeReader interface {
+	Changes(ctx context.Context, dir string) (gitstate.Changes, error)
+	Diff(ctx context.Context, dir, path string) (gitstate.Diff, error)
+}
 type Server struct {
 	registry     Sessions
 	starter      Starter
+	changes      ChangeReader
 	receipts     *command.Store
 	origins      []string
 	static       http.Handler
+	staticDir    string
+	build        Build
 	tailnetHost  string
 	tailnetLogin string
 }
@@ -55,9 +67,10 @@ func New(registry Sessions, receipts *command.Store, origins []string, staticDir
 	if staticDir != "" {
 		files = http.FileServer(noListingFS{http.Dir(staticDir)})
 	}
-	return &Server{registry: registry, receipts: receipts, origins: origins, static: files}
+	return &Server{registry: registry, receipts: receipts, origins: origins, static: files, staticDir: staticDir}
 }
-func (s *Server) SetStarter(starter Starter) { s.starter = starter }
+func (s *Server) SetStarter(starter Starter)     { s.starter = starter }
+func (s *Server) SetChanges(reader ChangeReader) { s.changes = reader }
 func (s *Server) SetTailnetIdentity(host, login string) {
 	s.tailnetHost = strings.TrimSuffix(host, ".")
 	s.tailnetLogin = login
@@ -71,6 +84,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/events", s.events)
 	mux.HandleFunc("GET /api/sessions/{id}/terminal", s.terminal)
 	mux.HandleFunc("POST /api/sessions/{id}/commands", s.command)
+	mux.HandleFunc("GET /api/sessions/{id}/changes", s.changedFiles)
+	mux.HandleFunc("GET /api/sessions/{id}/changes/diff", s.changedFileDiff)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if s.static == nil {
 			http.NotFound(w, r)
@@ -156,7 +171,7 @@ func problem(w http.ResponseWriter, status int, code string) {
 	jsonResponse(w, status, map[string]string{"error": code})
 }
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
-	jsonResponse(w, 200, map[string]any{"sessions": s.registry.List(), "herdr": map[string]string{"conditional_input": s.registry.ConditionalInput()}, "start": s.startCapability()})
+	jsonResponse(w, 200, map[string]any{"sessions": s.registry.List(), "herdr": map[string]string{"conditional_input": s.registry.ConditionalInput()}, "start": s.startCapability(), "bridge": s.Build()})
 }
 
 // startCapability tells the client which agent kinds it may start and
@@ -271,6 +286,86 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, 200, frame)
+}
+
+// changesTimeout bounds one Changed Files request: a few git runs of at most
+// 10s each, behind at most two other requests. The server has no WriteTimeout.
+const changesTimeout = 30 * time.Second
+
+// maxDiffPath bounds the path query; git paths are far shorter (PATH_MAX).
+const maxDiffPath = 4096
+
+func (s *Server) changedFiles(w http.ResponseWriter, r *http.Request) {
+	dir, ok := s.changesProject(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), changesTimeout)
+	defer cancel()
+	changes, err := s.changes.Changes(ctx, dir)
+	if err != nil {
+		changesProblem(w, err)
+		return
+	}
+	jsonResponse(w, 200, changes)
+}
+func (s *Server) changedFileDiff(w http.ResponseWriter, r *http.Request) {
+	dir, ok := s.changesProject(w, r)
+	if !ok {
+		return
+	}
+	query := r.URL.Query()
+	path := query.Get("path")
+	if len(query["path"]) != 1 || path == "" || len(path) > maxDiffPath || strings.ContainsRune(path, 0) {
+		problem(w, 400, "INVALID_PATH")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), changesTimeout)
+	defer cancel()
+	diff, err := s.changes.Diff(ctx, dir, path)
+	if err != nil {
+		changesProblem(w, err)
+		return
+	}
+	jsonResponse(w, 200, diff)
+}
+
+// changesProject resolves the item's directory from the registry; the client
+// never names a directory. A same-origin GET carries no Origin header, so only
+// a present Origin is checked: a cross-site page reading source is refused
+// before any git run, not just left unable to read the response.
+func (s *Server) changesProject(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if r.Header.Get("Origin") != "" && !originAllowed(r, s.origins) {
+		problem(w, 403, "ORIGIN_REJECTED")
+		return "", false
+	}
+	if s.changes == nil {
+		problem(w, 404, "CHANGES_UNAVAILABLE")
+		return "", false
+	}
+	dir, err := s.registry.Project(r.PathValue("id"))
+	if err != nil {
+		problem(w, 404, "SESSION_NOT_FOUND")
+		return "", false
+	}
+	return dir, true
+}
+func changesProblem(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, gitstate.ErrUnavailable):
+		problem(w, 503, "GIT_UNAVAILABLE")
+	case errors.Is(err, gitstate.ErrProjectMissing):
+		problem(w, 404, "PROJECT_NOT_FOUND")
+	case errors.Is(err, gitstate.ErrNotRepository):
+		problem(w, 404, "NOT_A_REPOSITORY")
+	case errors.Is(err, gitstate.ErrNotChanged):
+		problem(w, 404, "FILE_NOT_CHANGED")
+	case errors.Is(err, context.DeadlineExceeded):
+		problem(w, 504, "GIT_TIMEOUT")
+	default:
+		slog.Warn("git read failed", "error", err)
+		problem(w, 500, "GIT_FAILED")
+	}
 }
 func originAllowed(r *http.Request, origins []string) bool {
 	origin := r.Header.Get("Origin")

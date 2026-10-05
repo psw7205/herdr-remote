@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { Session } from './api'
-import { backAction, followAlias, formatRoute, parseRoute, resolveTerminal, type Route } from './route'
+import { backAction, followAlias, formatRoute, parseRoute, resolveTerminal, successorRoute, type Route } from './route'
 
 const list: Route = { session: null, view: 'chat' }
 const chat: Route = { session: 'claude:native-a', view: 'chat' }
 const terminal: Route = { session: 'claude:native-a', view: 'terminal' }
+const changes: Route = { session: 'claude:native-a', view: 'changes' }
+const diff: Route = { session: 'claude:native-a', view: 'changes', file: 'src/a b&c=#.ts' }
 
 describe('hash route', () => {
   it('reads the list, a chat and a terminal view', () => {
@@ -20,13 +22,38 @@ describe('hash route', () => {
   })
   it('falls back to the list for a malformed id and to chat for an unknown view', () => {
     expect(parseRoute('#session=%E0%A4%A')).toEqual(list)
-    expect(parseRoute('#session=claude%3Anative-a&view=changes')).toEqual(chat)
+    expect(parseRoute('#session=claude%3Anative-a&view=unknown')).toEqual(chat)
     expect(parseRoute('#view=terminal')).toEqual(list)
   })
   it('reads the new session screen without a session', () => {
     expect(parseRoute('#view=start')).toEqual({ session: null, view: 'start' })
     expect(formatRoute({ session: null, view: 'start' })).toBe('#view=start')
     expect(backAction({ session: null, view: 'start' }, 0)).toEqual({ kind: 'replace', route: list })
+  })
+})
+
+describe('changed files route', () => {
+  it('reads the list and a file diff, and round-trips paths that need encoding', () => {
+    expect(parseRoute('#session=claude%3Anative-a&view=changes')).toEqual(changes)
+    expect(parseRoute(formatRoute(diff))).toEqual(diff)
+    expect(formatRoute(changes)).toBe('#session=claude%3Anative-a&view=changes')
+  })
+  it('drops a malformed or empty file and ignores file outside Changes', () => {
+    expect(parseRoute('#session=claude%3Anative-a&view=changes&file=%E0%A4%A')).toEqual(changes)
+    expect(parseRoute('#session=claude%3Anative-a&view=changes&file=')).toEqual(changes)
+    expect(parseRoute('#session=claude%3Anative-a&file=a.ts')).toEqual(chat)
+    expect(parseRoute('#view=changes')).toEqual(list)
+  })
+  it('goes back diff → list → Chat on a deep link', () => {
+    expect(backAction(diff, 0)).toEqual({ kind: 'replace', route: changes })
+    expect(backAction(changes, 0)).toEqual({ kind: 'replace', route: chat })
+    expect(backAction(diff, 1)).toEqual({ kind: 'history' })
+  })
+  it('keeps the view when a pane item is re-keyed to its successor', () => {
+    expect(successorRoute({ ...diff, session: 'pane:w1:p2' }, { id: 'claude:native-a', terminal: false })).toEqual(diff)
+    expect(successorRoute({ session: 'pane:w1:p2', view: 'terminal' }, { id: 'claude:native-a', terminal: false })).toEqual(chat)
+    expect(successorRoute({ session: 'pane:w1:p2', view: 'terminal' }, { id: 'claude:native-a', terminal: true })).toEqual(terminal)
+    expect(successorRoute({ session: 'pane:w1:p2', view: 'chat' }, { id: 'claude:native-a', terminal: true })).toEqual(chat)
   })
 })
 

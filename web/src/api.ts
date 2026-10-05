@@ -14,15 +14,20 @@ export type Session = {
   // Newest visible Chat message, as a native transcript timestamp and a short
   // preview. Absent when the session has no visible message or no Chat.
   last_activity?: string
-  last_message?: { role: Message['role']; text: string }
+  last_message?: { role: 'user' | 'assistant'; text: string }
 }
 // unverified: a verified claude: session lost its runtime binding while Herdr
 // still runs the agent, so every input and Terminal stays closed until it is
-// verified again. unbound: a pane: item whose native session was never
-// identified has no binding. superseded: the pane: item continues as
-// successor_id, which carries its own binding.
+// verified again. unbound: the item never had a binding: a pane: item whose
+// native session was never identified, or a read-only codex: session.
+// superseded: the pane: item continues as successor_id, which carries its own
+// binding if it has one.
 export type Lifecycle = 'active' | 'unverified' | 'unbound' | 'superseded' | 'ended'
-export type Message = { id: string; role: 'user' | 'assistant'; text: string; timestamp: string }
+// A tool item (role 'tool') carries tool and an empty text. Input and result
+// are capped by the Bridge; the truncated flags say so. A result-less call is
+// 'running' until the transcript moves on, then 'unknown'.
+export type ToolActivity = { id: string; name: string; summary: string; state: 'running' | 'completed' | 'error' | 'unknown'; input: string; input_truncated: boolean; result: string; result_truncated: boolean }
+export type Message = { id: string; role: 'user' | 'assistant' | 'tool'; text: string; timestamp: string; tool?: ToolActivity }
 export type Cursor = { epoch: string; sequence: number }
 export type Snapshot = { cursor: Cursor; data: Message[] }
 export type Event = { type: string; cursor: Cursor; payload: unknown; event_id: string }
@@ -32,7 +37,8 @@ export type ConditionalInput = 'supported' | 'unsupported' | 'unknown'
 // workspace is possible (only with a -project-root). ADR-037.
 export type StartCapability = { kinds: string[]; new_workspace: boolean }
 export const noStart: StartCapability = { kinds: [], new_workspace: false }
-export type SessionList = { sessions: Session[]; conditionalInput: ConditionalInput; start: StartCapability }
+export type BridgeBuild = { revision: string; modified: boolean; clientBuild: string }
+export type SessionList = { sessions: Session[]; conditionalInput: ConditionalInput; start: StartCapability; bridge: BridgeBuild | null }
 export type Placement = 'new_workspace' | 'new_tab'
 // A folder a new session may start in. The Bridge resolves the opaque id to
 // a path; the client never sends one.
@@ -45,8 +51,9 @@ async function readJSON<T>(response: Response): Promise<T> {
   return body as T
 }
 export async function listSessions(): Promise<SessionList> {
-  const body = await readJSON<{ sessions: Session[]; herdr?: { conditional_input?: ConditionalInput }; start?: StartCapability }>(await fetch('/api/sessions', { cache: 'no-store' }))
-  return { sessions: body.sessions, conditionalInput: body.herdr?.conditional_input ?? 'unknown', start: body.start ?? noStart }
+  const body = await readJSON<{ sessions: Session[]; herdr?: { conditional_input?: ConditionalInput }; start?: StartCapability; bridge?: { revision: string; modified: boolean; client_build: string } }>(await fetch('/api/sessions', { cache: 'no-store' }))
+  const bridge = body.bridge ? { revision: body.bridge.revision, modified: body.bridge.modified, clientBuild: body.bridge.client_build } : null
+  return { sessions: body.sessions, conditionalInput: body.herdr?.conditional_input ?? 'unknown', start: body.start ?? noStart, bridge }
 }
 export async function listStartCandidates(): Promise<{ candidates: StartCandidate[]; start: StartCapability }> {
   return readJSON(await fetch('/api/start-candidates', { cache: 'no-store' }))
@@ -70,11 +77,12 @@ export function sessionLifecycle(session: Pick<Session, 'active' | 'lifecycle'>)
 export function lifecycleNotice(session: Pick<Session, 'active' | 'lifecycle'>): string | null {
   return sessionLifecycle(session) === 'unverified' ? 'agent는 Herdr에서 계속 실행 중이지만 이 대화와의 연결을 확인할 수 없습니다. 연결이 확인될 때까지 입력과 Terminal을 사용할 수 없습니다.' : null
 }
-export function composerHint(session: Pick<Session, 'active' | 'lifecycle' | 'terminal' | 'status' | 'chat'>): string {
+export function composerHint(session: Pick<Session, 'active' | 'lifecycle' | 'terminal' | 'status' | 'chat'> & Partial<Pick<Session, 'agent'>>): string {
   const lifecycle = sessionLifecycle(session)
   if (lifecycle === 'ended') return '종료된 세션에는 입력할 수 없습니다.'
   if (lifecycle === 'unverified') return 'agent 연결을 확인할 수 없어 입력할 수 없습니다.'
   if (lifecycle === 'superseded') return '같은 agent의 대화로 전환하는 중입니다.'
+  if (lifecycle === 'unbound' && session.agent === 'codex') return 'Codex 입력은 아직 지원하지 않습니다. PC의 Herdr에서 입력하세요.'
   if (lifecycle === 'unbound') return '이 세션은 원격 입력을 지원하지 않습니다. PC의 Herdr에서 입력하세요.'
   const place = session.terminal ? 'Terminal' : 'PC의 Herdr'
   if (!session.chat) return `이 세션은 ${place}에서 입력하세요.`
@@ -114,6 +122,23 @@ export async function terminalFrame(session: Session, signal?: AbortSignal): Pro
   return readJSON(await fetch(`/api/sessions/${encodeURIComponent(session.id)}/terminal`, {
     headers: { 'X-Runtime-Binding': session.runtime_binding ?? '' }, cache: 'no-store', signal,
   }))
+}
+// Changed Files (ADR-016): the Bridge reads the item's project with git and
+// compares it with HEAD. Counts are absent when unknown (binary content, a
+// symlink, or a listing cut short).
+export type ChangeStatus = 'modified' | 'added' | 'deleted' | 'renamed'
+export type ChangedFile = { path: string; old_path?: string; status: ChangeStatus; untracked?: boolean; binary?: boolean; additions: number | null; deletions: number | null }
+export type Changes = { repository: boolean; branch?: string; initial?: boolean; files: ChangedFile[]; total: number; truncated: boolean }
+// content 'none' is an entry the Bridge does not read, such as an untracked symlink.
+export type FileDiff = ChangedFile & { content: 'text' | 'binary' | 'none'; diff: string; truncated: boolean }
+
+export async function getChanges(id: string, signal?: AbortSignal): Promise<Changes> {
+  return readJSON(await fetch(`/api/sessions/${encodeURIComponent(id)}/changes`, { cache: 'no-store', signal }))
+}
+// path must be one the listing returned; the Bridge rejects any other string.
+export async function getFileDiff(id: string, path: string, signal?: AbortSignal): Promise<FileDiff> {
+  const query = new URLSearchParams({ path })
+  return readJSON(await fetch(`/api/sessions/${encodeURIComponent(id)}/changes/diff?${query}`, { cache: 'no-store', signal }))
 }
 export function eventURL(id: string, cursor: Cursor): string {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
