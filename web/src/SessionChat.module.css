@@ -100,3 +100,6 @@
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+.tools { align-self: stretch; min-width: 0; }
+.tools[data-turn] { margin-top: var(--space-4); }

@@ -2,7 +2,7 @@
 // contract of internal/httpapi, so the real client code runs unchanged against
 // anonymous sample data. Production builds never include this module.
 import type { Cursor, Event, Message, Session } from '../api'
-import { fixtureLiveMessage, fixtureReply, fixtureTerminalFrame, type Scenario } from './scenarios'
+import { fixtureLiveMessage, fixtureReply, fixtureTerminalFrame, lastText, type Scenario } from './scenarios'
 
 type Room = { session: Session; messages: Message[]; epoch: string; log: Event[]; sockets: Set<FakeSocket> }
 
@@ -16,7 +16,7 @@ let active: Scenario | undefined
 function sequence(room: Room): number { return room.log.at(-1)?.cursor.sequence ?? 0 }
 function cursor(room: Room): Cursor { return { epoch: room.epoch, sequence: sequence(room) } }
 function preview(room: Room): Session {
-  const last = room.messages.at(-1)
+  const last = lastText(room.messages)
   if (!last) return room.session
   const text = last.text.replace(/\s+/g, ' ').trim()
   return { ...room.session, last_activity: last.timestamp, last_message: { role: last.role, text: text.length > 160 ? `${text.slice(0, 159)}…` : text } }
@@ -47,7 +47,7 @@ async function answer(scenario: Scenario, method: string, url: URL, body: string
   if (scenario.listFails) throw new TypeError('fixture: Bridge unreachable')
   if (method === 'GET' && url.pathname === '/api/sessions') {
     const sessions = [...rooms.values()].filter(room => room.session.active).map(preview)
-    return json({ sessions, herdr: { conditional_input: scenario.conditionalInput }, start: scenario.start.capability })
+    return json({ sessions, herdr: { conditional_input: scenario.conditionalInput }, start: scenario.start.capability, bridge: scenario.bridge })
   }
   if (method === 'GET' && url.pathname === '/api/start-candidates') return json({ candidates: scenario.start.candidates, start: scenario.start.capability })
   if (method === 'POST' && url.pathname === '/api/sessions') {
@@ -55,13 +55,22 @@ async function answer(scenario: Scenario, method: string, url: URL, body: string
     await wait(scenario.start.latency)
     return json(scenario.start.result, scenario.start.result.status === 'rejected' ? 409 : 202)
   }
-  const match = url.pathname.match(/^\/api\/sessions\/([^/]+)(\/terminal|\/commands)?$/)
+  const match = url.pathname.match(/^\/api\/sessions\/([^/]+)(\/terminal|\/commands|\/changes|\/changes\/diff)?$/)
   const room = match ? rooms.get(decodeURIComponent(match[1])) : undefined
   if (!match || !room) return json({ error: 'SESSION_NOT_FOUND' }, 404)
   if (method === 'GET' && !match[2]) return json({ session: preview(room), snapshot: { cursor: cursor(room), data: room.messages } })
   if (method === 'GET' && match[2] === '/terminal') {
     if (!room.session.terminal) return json({ error: 'SESSION_CHANGED' }, 409)
     return json({ text: fixtureTerminalFrame.text, pane_id: room.session.pane_id, cols: fixtureTerminalFrame.cols, rows: fixtureTerminalFrame.rows })
+  }
+  if (method === 'GET' && (match[2] === '/changes' || match[2] === '/changes/diff')) {
+    const changes = scenario.changes[room.session.id] ?? { changes: { repository: true, branch: 'main', files: [], total: 0, truncated: false }, diffs: {} }
+    if ('error' in changes) return json({ error: changes.error }, changes.status)
+    if (match[2] === '/changes') return json(changes.changes)
+    if (!changes.changes.repository) return json({ error: 'NOT_A_REPOSITORY' }, 404)
+    // Like the Bridge, only a path from the listing has a diff.
+    const diff = changes.diffs[url.searchParams.get('path') ?? '']
+    return diff ? json(diff) : json({ error: 'FILE_NOT_CHANGED' }, 404)
   }
   if (method === 'POST' && match[2] === '/commands') {
     const command = JSON.parse(body) as { command_type: string; payload: { text: string } }
@@ -141,6 +150,17 @@ export function installFixtureBackend(scenario: Scenario): () => void {
     from.session = { ...from.session, active: false, lifecycle: 'superseded', successor_id: supersede.to.session.id }
     rooms.set(supersede.to.session.id, { session: supersede.to.session, messages: [...supersede.to.messages], epoch: `fixture-${scenario.name}`, log: [], sockets: new Set() })
   }, supersede.after)
+  const script = scenario.script
+  const steps = (script?.steps ?? []).map(step => setTimeout(() => {
+    const room = rooms.get(script!.session)
+    if (!room) return
+    const index = room.messages.findIndex(item => item.id === step.message.id)
+    if (step.type === 'message.updated' && index >= 0) room.messages[index] = step.message
+    else if (step.type !== 'message.updated' && index < 0) room.messages.push(step.message)
+    else return
+    publish(room, step.type, step.message)
+    if (step.status) setStatus(room, step.status)
+  }, step.after))
   let live: ReturnType<typeof setInterval> | undefined
   if (scenario.liveEvery > 0) {
     let index = 0
@@ -154,6 +174,7 @@ export function installFixtureBackend(scenario: Scenario): () => void {
   return () => {
     if (live) clearInterval(live)
     if (handover) clearTimeout(handover)
+    steps.forEach(clearTimeout)
     Object.defineProperty(globalThis, 'fetch', { value: realFetch, configurable: true, writable: true })
     Object.defineProperty(globalThis, 'WebSocket', { value: realSocket, configurable: true, writable: true })
   }
