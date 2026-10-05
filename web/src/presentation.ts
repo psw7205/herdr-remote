@@ -14,10 +14,12 @@ const byStatus: Record<Session['status'], StatusPresentation> = {
 
 // Lifecycle wins where this client cannot act on the agent; a superseded pane
 // item keeps its agent status while the view moves to the successor.
-export function statusPresentation(session: Pick<Session, 'status'> & Partial<Pick<Session, 'lifecycle' | 'active'>>): StatusPresentation {
+// An unbound item with Chat (a read-only codex: session) still shows what
+// the agent is doing; only its input is closed.
+export function statusPresentation(session: Pick<Session, 'status'> & Partial<Pick<Session, 'lifecycle' | 'active' | 'chat'>>): StatusPresentation {
   switch (sessionLifecycle({ active: session.active ?? false, lifecycle: session.lifecycle })) {
     case 'unverified': return { tone: 'offline', label: '연결 확인 중' }
-    case 'unbound': return { tone: 'offline', label: '원격 입력 불가' }
+    case 'unbound': return session.chat ? byStatus[session.status] ?? byStatus.error : { tone: 'offline', label: '원격 입력 불가' }
     case 'ended': return { tone: 'offline', label: '종료됨' }
     default: return byStatus[session.status] ?? byStatus.error
   }
@@ -56,11 +58,13 @@ export function plainPreview(text: string): string {
 
 export function rowNote(session: Pick<Session, 'chat' | 'terminal'> & Partial<Pick<Session, 'lifecycle' | 'active'>>): string | null {
   const lifecycle = sessionLifecycle({ active: session.active ?? false, lifecycle: session.lifecycle })
+  if (lifecycle === 'unbound' && session.chat) return '읽기 전용'
   return lifecycle === 'active' && !session.chat && session.terminal ? 'Terminal에서 확인' : null
 }
 
+const agentNames: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
 export function agentName(agent: string): string {
-  return agent === 'claude' ? 'Claude Code' : agent
+  return agentNames[agent] ?? agent
 }
 export function projectName(project: string): string {
   return project.split('/').filter(Boolean).at(-1) ?? project

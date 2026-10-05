@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/psw7205/herdr-remote/internal/claude"
+	"github.com/psw7205/herdr-remote/internal/codex"
 	"github.com/psw7205/herdr-remote/internal/herdr"
 	"github.com/psw7205/herdr-remote/internal/stream"
 	"github.com/psw7205/herdr-remote/internal/transcript"
@@ -22,11 +23,29 @@ type Gateway interface {
 	TerminalSnapshot(context.Context, string) (herdr.TerminalSnapshot, error)
 	PaneSize(context.Context, string) (herdr.PaneSize, error)
 }
+
+// Message is one Chat item. Role "tool" items carry Tool and an empty Text;
+// user and assistant messages never carry Tool.
 type Message struct {
-	ID        string `json:"id"`
-	Role      string `json:"role"`
-	Text      string `json:"text"`
-	Timestamp string `json:"timestamp"`
+	ID        string       `json:"id"`
+	Role      string       `json:"role"`
+	Text      string       `json:"text"`
+	Timestamp string       `json:"timestamp"`
+	Tool      ToolActivity `json:"tool,omitzero"`
+}
+
+// ToolActivity is one tool call: State is running, completed, error or
+// unknown. Input (pretty JSON) and Result are capped display text; the
+// Truncated flags say whether a cap cut them.
+type ToolActivity struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Summary         string `json:"summary"`
+	State           string `json:"state"`
+	Input           string `json:"input"`
+	InputTruncated  bool   `json:"input_truncated"`
+	Result          string `json:"result"`
+	ResultTruncated bool   `json:"result_truncated"`
 }
 type Meta struct {
 	ID       string `json:"id"`
@@ -41,7 +60,8 @@ type Meta struct {
 	Active   bool   `json:"active"`
 	// Lifecycle is derived from ID, Active, Binding and SuccessorID; see lifecycle.
 	Lifecycle string `json:"lifecycle"`
-	// SuccessorID names the claude:<native> item that replaced this pane: item.
+	// SuccessorID names the claude:<native> or codex:<native> item that
+	// replaced this pane: item.
 	SuccessorID string `json:"successor_id,omitempty"`
 	// LastActivity and LastMessage describe the newest visible Chat message;
 	// both are omitted without a valid Chat history.
@@ -66,13 +86,44 @@ func previewText(text string) string {
 	return string(runes[:previewRunes-1]) + "…"
 }
 
+// projection turns decoded records into the visible Chat history.
+type projection interface {
+	Add(transcript.Record) error
+	Messages() []transcript.Record
+}
+
+// adapter reads one agent's native transcript. The item ID prefix names the
+// native session it reads; no adapter writes to the agent.
+type adapter struct {
+	prefix        string
+	source        string
+	resolve       func(root, id string) (string, error)
+	decode        func(line []byte, sessionID string) (transcript.Record, error)
+	newProjection func() projection
+}
+
+var (
+	claudeAdapter = &adapter{prefix: "claude:", source: "claude.transcript", resolve: claude.Resolve, decode: claude.Decode, newProjection: func() projection { return claude.NewProjection() }}
+	codexAdapter  = &adapter{prefix: "codex:", source: "codex.transcript", resolve: codex.Resolve, decode: codex.Decode, newProjection: func() projection { return codex.NewProjection() }}
+)
+
+func adapterFor(id string) *adapter {
+	if strings.HasPrefix(id, codexAdapter.prefix) {
+		return codexAdapter
+	}
+	return claudeAdapter
+}
+
 type Item struct {
-	meta       Meta
-	stream     *stream.Session
-	path       string
-	nativeID   string
+	meta     Meta
+	stream   *stream.Session
+	path     string
+	nativeID string
+	// format is set when the item is created and never changes, so the
+	// watcher reads it without Registry.mu. Nil means Claude.
+	format     *adapter
 	mu         sync.Mutex
-	projection *claude.Projection
+	projection projection
 	last       []Message
 	lastError  string
 	loading    bool
@@ -84,11 +135,20 @@ type Item struct {
 	// ended orders inactive items for eviction; guarded by Registry.mu.
 	ended uint64
 }
+
+func (item *Item) adapter() *adapter {
+	if item.format == nil {
+		return claudeAdapter
+	}
+	return item.format
+}
+
 type Registry struct {
 	mu         sync.RWMutex
 	ctx        context.Context
 	gateway    Gateway
 	claudeRoot string
+	codexRoot  string
 	items      map[string]*Item
 	// conditional is the agent.binding capability seen by the last successful Refresh.
 	conditional string
@@ -100,8 +160,28 @@ type Registry struct {
 // item whose fresh epoch makes clients resync from the snapshot.
 const maxInactive = 32
 
-func NewRegistry(ctx context.Context, gateway Gateway, claudeRoot string) *Registry {
-	return &Registry{ctx: ctx, gateway: gateway, claudeRoot: claudeRoot, items: make(map[string]*Item), conditional: herdr.ConditionalInputUnknown}
+type Option func(*Registry)
+
+// WithCodexRoot sets the Codex home whose sessions/ holds rollouts. Without
+// it, Codex panes are listed but their Chat is unavailable.
+func WithCodexRoot(root string) Option { return func(r *Registry) { r.codexRoot = root } }
+
+func NewRegistry(ctx context.Context, gateway Gateway, claudeRoot string, options ...Option) *Registry {
+	r := &Registry{ctx: ctx, gateway: gateway, claudeRoot: claudeRoot, items: make(map[string]*Item), conditional: herdr.ConditionalInputUnknown}
+	for _, option := range options {
+		option(r)
+	}
+	return r
+}
+
+func (r *Registry) resolve(a *adapter, native string) (string, error) {
+	if a != codexAdapter {
+		return a.resolve(r.claudeRoot, native)
+	}
+	if r.codexRoot == "" {
+		return "", errors.New("Codex root not configured")
+	}
+	return a.resolve(r.codexRoot, native)
 }
 func (r *Registry) ConditionalInput() string {
 	r.mu.RLock()
@@ -129,12 +209,15 @@ func status(raw string) string {
 //   - unverified: a claude:<native> item (created only from a verified binding)
 //     lost its binding while Herdr still runs claude on its pane; every write
 //     fails closed until the same native session is verified again.
-//   - unbound: a pane:<pane> item, whose native session was never identified,
-//     has no verified binding (stock Herdr, or no binding yet); writes fail closed.
+//   - unbound: the item has no verified binding and never had one, so every
+//     write fails closed: a pane:<pane> item whose native session was never
+//     identified (stock Herdr, or no binding yet), or any codex:<native> item,
+//     which is read-only because Herdr issues no binding for Codex.
 //   - superseded: a pane:<pane> item whose pane gained a verified claude:<native>
-//     item in the same Refresh; SuccessorID names it. The agent keeps running.
-//   - ended: the pane left the Herdr snapshot, Herdr no longer reports claude on
-//     it, or the pane provably hosts another native session.
+//     item, or a codex:<native> item from Herdr's agent_session report, in the
+//     same Refresh; SuccessorID names it. The agent keeps running.
+//   - ended: the pane left the Herdr snapshot, Herdr no longer reports that
+//     agent on it, or the pane provably hosts another native session.
 const (
 	LifecycleActive     = "active"
 	LifecycleUnverified = "unverified"
@@ -172,10 +255,19 @@ type observation struct {
 // reportedNativeID is the native session that Herdr's own agent hook reported
 // for the pane (the predicate doctor uses), or "" when nothing was reported.
 func reportedNativeID(a herdr.Agent) string {
-	if s := a.Session; s != nil && s.Agent == "claude" && s.Kind == "id" {
+	if s := a.Session; s != nil && s.Agent == a.Agent && s.Kind == "id" {
 		return s.Value
 	}
 	return ""
+}
+
+// codexObservation is a Codex pane. Its only identity is Herdr's agent_session
+// report: Herdr issues no runtime binding for Codex, so the item is read-only.
+type codexObservation struct {
+	agent    herdr.Agent
+	native   string
+	path     string
+	resolved bool
 }
 
 func (r *Registry) Refresh(ctx context.Context) error {
@@ -185,8 +277,21 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	}
 	// Gateway and filesystem calls stay outside r.mu.
 	observed := make([]observation, 0, len(snapshot.Agents))
+	var codexObserved []codexObservation
+	codexClaims := make(map[string]int)
 	conditional := herdr.ConditionalInputUnknown
 	for _, a := range snapshot.Agents {
+		// Codex panes never reach agent.binding: Herdr verifies no Codex
+		// binding, and an error for one must not move the server-wide
+		// conditional input capability that Claude writes depend on.
+		if a.Agent == "codex" && a.PaneID != "" {
+			o := codexObservation{agent: a, native: reportedNativeID(a)}
+			if o.native != "" {
+				codexClaims[o.native]++
+			}
+			codexObserved = append(codexObserved, o)
+			continue
+		}
 		if a.Agent != "claude" || a.PaneID == "" {
 			continue
 		}
@@ -222,27 +327,46 @@ func (r *Registry) Refresh(ctx context.Context) error {
 			o.binding, o.verified, o.path, o.resolved = herdr.Binding{}, false, "", false
 		}
 	}
+	// Two Codex panes reporting one native session (e.g. `codex resume X`
+	// beside a running X) claim nothing, like two Claude panes verified as one.
+	for i := range codexObserved {
+		o := &codexObserved[i]
+		panes[o.agent.PaneID]++
+		if o.native == "" || codexClaims[o.native] > 1 {
+			continue
+		}
+		if path, e := r.resolve(codexAdapter, o.native); e == nil {
+			o.path, o.resolved = path, true
+		}
+	}
 	// Claude Code moves a session's transcript to another project directory
 	// when the session changes its working directory (e.g. into a worktree).
 	// Every active native item is resolved again by its native ID so that a
 	// moved transcript is followed; an unresolvable ID keeps the old path.
+	// Keys are item IDs, so the two agents' native IDs never meet.
 	resolved := make(map[string]string)
 	for _, o := range observed {
 		if o.resolved {
-			resolved[o.binding.NativeSessionID] = o.path
+			resolved[claudeAdapter.prefix+o.binding.NativeSessionID] = o.path
+		}
+	}
+	for _, o := range codexObserved {
+		if o.resolved {
+			resolved[codexAdapter.prefix+o.native] = o.path
 		}
 	}
 	r.mu.RLock()
-	var pending []string
-	for _, item := range r.items {
-		if _, ok := resolved[item.nativeID]; item.meta.Active && item.path != "" && !ok {
-			pending = append(pending, item.nativeID)
+	var pending []*Item
+	for id, item := range r.items {
+		if _, ok := resolved[id]; item.meta.Active && item.path != "" && !ok {
+			pending = append(pending, item)
 		}
 	}
 	r.mu.RUnlock()
-	for _, native := range pending {
-		if path, e := claude.Resolve(r.claudeRoot, native); e == nil {
-			resolved[native] = path
+	for _, item := range pending {
+		// format and nativeID never change after the item is created.
+		if path, e := r.resolve(item.adapter(), item.nativeID); e == nil {
+			resolved[item.adapter().prefix+item.nativeID] = path
 		}
 	}
 	r.mu.Lock()
@@ -296,13 +420,34 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		}
 		found[meta.ID] = meta
 	}
+	// A Codex item is the native session Herdr's agent_session reported for
+	// the pane. It never carries a binding or Terminal, so it is read-only.
+	claimedCodex := make(map[int]bool)
+	for i, o := range codexObserved {
+		if o.native == "" || codexClaims[o.native] > 1 {
+			continue
+		}
+		a := o.agent
+		id := codexAdapter.prefix + o.native
+		meta := Meta{ID: id, Agent: a.Agent, PaneID: a.PaneID, Project: a.CWD, Title: a.Title, Status: status(a.Status), Active: true}
+		if item, ok := r.items[id]; ok {
+			meta.Chat = item.path != ""
+		} else if o.resolved {
+			meta.Chat = true
+			paths[id] = o.path
+		} else {
+			continue
+		}
+		claimedCodex[i] = true
+		found[id] = meta
+	}
 	for _, o := range observed {
 		if o.verified {
 			continue
 		}
 		a := o.agent
 		meta := Meta{ID: "pane:" + a.PaneID, Agent: a.Agent, PaneID: a.PaneID, Project: a.CWD, Title: a.Title, Status: status(a.Status), Active: true}
-		if item := byPane[a.PaneID]; item != nil && !ambiguous[a.PaneID] {
+		if item := byPane[a.PaneID]; item != nil && !ambiguous[a.PaneID] && item.adapter() == claudeAdapter {
 			_, taken := found[item.meta.ID]
 			reported := reportedNativeID(a)
 			if !taken && (reported == "" || reported == item.nativeID) && (o.boundNative == "" || o.boundNative == item.nativeID) {
@@ -313,13 +458,33 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		}
 		found[meta.ID] = meta
 	}
+	// A Codex pane without a claim keeps the codex: item already on it while
+	// Herdr reports no session there or still reports that one; otherwise it
+	// lists as a status-only pane: item.
+	for i, o := range codexObserved {
+		if claimedCodex[i] {
+			continue
+		}
+		a := o.agent
+		meta := Meta{ID: "pane:" + a.PaneID, Agent: a.Agent, PaneID: a.PaneID, Project: a.CWD, Title: a.Title, Status: status(a.Status), Active: true}
+		if item := byPane[a.PaneID]; item != nil && !ambiguous[a.PaneID] && item.adapter() == codexAdapter {
+			if _, taken := found[item.meta.ID]; !taken && (o.native == "" || o.native == item.nativeID) {
+				meta.ID = item.meta.ID
+				meta.Chat = item.path != ""
+				meta.Project = item.meta.Project
+			}
+		}
+		found[meta.ID] = meta
+	}
 	// A pane: item is superseded, not ended, when its pane gained a verified
-	// claude: item that was not already active on that pane: same pane_id,
-	// newly verified there. A pane the snapshot listed twice, or shared by two
-	// active items, may yield several candidates, so it supersedes nothing.
+	// claude: item, or a reported codex: item, that was not already active on
+	// that pane: same pane_id, newly identified there. A pane the snapshot
+	// listed twice, or shared by two active items, may yield several
+	// candidates, so it supersedes nothing.
 	successors := make(map[string]string)
 	for id, meta := range found {
-		if meta.Binding == "" || !strings.HasPrefix(id, "claude:") || ambiguous[meta.PaneID] || panes[meta.PaneID] > 1 {
+		identified := meta.Binding != "" && strings.HasPrefix(id, claudeAdapter.prefix) || strings.HasPrefix(id, codexAdapter.prefix)
+		if !identified || ambiguous[meta.PaneID] || panes[meta.PaneID] > 1 {
 			continue
 		}
 		if prev, ok := r.items[id]; ok && prev.meta.Active && prev.meta.PaneID == meta.PaneID {
@@ -353,7 +518,7 @@ func (r *Registry) Refresh(ctx context.Context) error {
 				item.stream.Append("agent.status", map[string]any{"status": meta.Status, "lifecycle": lifecycle(meta)})
 			}
 			item.meta = meta
-			if path, ok := resolved[item.nativeID]; ok && item.path != "" && path != item.path {
+			if path, ok := resolved[id]; ok && item.path != "" && path != item.path {
 				slog.Info("transcript moved", "session", id)
 				item.stopWatch()
 				item.path = path
@@ -365,8 +530,9 @@ func (r *Registry) Refresh(ctx context.Context) error {
 			}
 			continue
 		}
-		item := &Item{meta: meta, path: paths[id], stream: stream.New(id), projection: claude.NewProjection()}
-		if native, ok := strings.CutPrefix(id, "claude:"); ok {
+		format := adapterFor(id)
+		item := &Item{meta: meta, path: paths[id], stream: stream.New(id), format: format, projection: format.newProjection()}
+		if native, ok := strings.CutPrefix(id, format.prefix); ok {
 			item.nativeID = native
 		}
 		r.items[id] = item
@@ -420,7 +586,7 @@ func (item *Item) stopWatch() {
 func (item *Item) release() {
 	item.mu.Lock()
 	defer item.mu.Unlock()
-	item.projection = claude.NewProjection()
+	item.projection = item.adapter().newProjection()
 	item.last = nil
 }
 func (item *Item) watch(ctx context.Context, path string) {
@@ -455,8 +621,9 @@ func (item *Item) apply(batch transcript.Batch) error {
 	return item.applyLocked(batch)
 }
 func (item *Item) applyLocked(batch transcript.Batch) error {
+	format := item.adapter()
 	if batch.Reset {
-		item.projection = claude.NewProjection()
+		item.projection = format.newProjection()
 		item.last = nil
 		item.loading = true
 		item.invalid = false
@@ -465,7 +632,7 @@ func (item *Item) applyLocked(batch transcript.Batch) error {
 		return errors.New("transcript identity requires resync")
 	}
 	for _, line := range batch.Lines {
-		record, err := claude.Decode(line, item.nativeID)
+		record, err := format.decode(line, item.nativeID)
 		if err != nil {
 			item.invalid = true
 			return err
@@ -481,7 +648,7 @@ func (item *Item) applyLocked(batch transcript.Batch) error {
 	nodes := item.projection.Messages()
 	current := make([]Message, 0, len(nodes))
 	for _, node := range nodes {
-		current = append(current, Message{ID: node.ID, Role: node.Role, Text: node.Text, Timestamp: node.Timestamp})
+		current = append(current, Message{ID: node.ID, Role: node.Role, Text: node.Text, Timestamp: node.Timestamp, Tool: ToolActivity(node.Tool)})
 	}
 	if item.loading {
 		if err := item.stream.Reset(current); err != nil {
@@ -492,19 +659,40 @@ func (item *Item) applyLocked(batch transcript.Batch) error {
 		item.lastError = ""
 		return nil
 	}
-	if slices.Equal(item.last, current) {
-		return nil
-	}
-	if len(current) < len(item.last) || !slices.Equal(current[:min(len(current), len(item.last))], item.last) {
+	changes, ok := messageChanges(item.last, current, format.source)
+	if !ok {
 		item.last = current
 		return item.stream.Reset(current)
 	}
-	changes := make([]stream.Change, 0, len(current)-len(item.last))
-	for _, m := range current[len(item.last):] {
-		changes = append(changes, stream.Change{Type: "message." + m.Role, Payload: m, Source: "claude.transcript"})
+	if len(changes) == 0 {
+		return nil
 	}
 	item.last = current
 	return item.stream.Commit(current, changes)
+}
+
+// messageChanges publishes appended messages, and a tool item whose state or
+// result changed in place as message.updated with the whole item. Any other
+// difference (a branch switch, a changed text message) needs a new snapshot.
+func messageChanges(last, current []Message, source string) ([]stream.Change, bool) {
+	if len(current) < len(last) {
+		return nil, false
+	}
+	var changes []stream.Change
+	for i, prior := range last {
+		next := current[i]
+		if next == prior {
+			continue
+		}
+		if next.ID != prior.ID || next.Role != "tool" || prior.Role != "tool" {
+			return nil, false
+		}
+		changes = append(changes, stream.Change{Type: "message.updated", Payload: next, Source: source})
+	}
+	for _, m := range current[len(last):] {
+		changes = append(changes, stream.Change{Type: "message." + m.Role, Payload: m, Source: source})
+	}
+	return changes, true
 }
 func (r *Registry) List() []Meta {
 	r.mu.RLock()
@@ -534,11 +722,14 @@ func effectiveMeta(item *Item) Meta {
 	if item.invalid {
 		meta.Chat = false
 	}
-	// item.last survives invalidation, so the preview follows meta.Chat.
-	if n := len(item.last); meta.Chat && n > 0 {
-		last := item.last[n-1]
-		meta.LastActivity = last.Timestamp
-		meta.LastMessage = &MessagePreview{Role: last.Role, Text: previewText(last.Text)}
+	// item.last survives invalidation, so the preview follows meta.Chat. Tool
+	// items have no text to preview.
+	for i := len(item.last) - 1; meta.Chat && i >= 0; i-- {
+		if last := item.last[i]; last.Role != "tool" {
+			meta.LastActivity = last.Timestamp
+			meta.LastMessage = &MessagePreview{Role: last.Role, Text: previewText(last.Text)}
+			break
+		}
 	}
 	item.mu.Unlock()
 	return meta
@@ -553,6 +744,18 @@ func (r *Registry) Get(id string) (stream.Snapshot, Meta, error) {
 	meta := effectiveMeta(item)
 	r.mu.RUnlock()
 	return item.stream.Snapshot(), meta, nil
+}
+
+// Project is the directory Herdr reported for the item. Any item still in
+// the registry has one, including ended ones; reading it writes nothing.
+func (r *Registry) Project(id string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	if !ok {
+		return "", errors.New("session not found")
+	}
+	return item.meta.Project, nil
 }
 func (r *Registry) Stream(id string) (*stream.Session, error) {
 	r.mu.RLock()

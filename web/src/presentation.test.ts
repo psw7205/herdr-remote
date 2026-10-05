@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Session } from './api'
-import { groupSessions, plainPreview, rowNote, statusPresentation } from './presentation'
+import { agentName, groupSessions, plainPreview, rowNote, statusPresentation } from './presentation'
 
 const base: Session = { id: 'claude:a', agent: 'claude', pane_id: 'w1:p1', project: '/work/a', title: 'A', status: 'idle', runtime_binding: 'b', chat: true, terminal: true, active: true, lifecycle: 'active' }
 const at = (minutes: number) => new Date(Date.parse('2026-09-25T12:00:00Z') - minutes * 60_000).toISOString()
@@ -37,6 +37,9 @@ describe('row copy', () => {
     expect(rowNote(base)).toBeNull()
     expect(rowNote({ ...base, chat: false, terminal: false, lifecycle: 'unbound' })).toBeNull()
   })
+  it('notes a read-only Chat session', () => {
+    expect(rowNote({ ...base, terminal: false, lifecycle: 'unbound' })).toBe('읽기 전용')
+  })
 })
 
 describe('status presentation', () => {
@@ -52,7 +55,17 @@ describe('status presentation', () => {
     expect(statusPresentation({ status: 'idle', lifecycle: 'unbound' })).toEqual({ tone: 'offline', label: '원격 입력 불가' })
     expect(statusPresentation({ status: 'completed', active: false })).toEqual({ tone: 'offline', label: '종료됨' })
   })
+  it('keeps the agent status of a read-only Chat session', () => {
+    expect(statusPresentation({ status: 'working', lifecycle: 'unbound', chat: true })).toEqual({ tone: 'working', label: '작업 중' })
+  })
   it('keeps the agent status while a pane item hands over to its successor', () => {
     expect(statusPresentation({ status: 'working', lifecycle: 'superseded' })).toEqual({ tone: 'working', label: '작업 중' })
+  })
+})
+describe('agentName', () => {
+  it('names known agents and keeps others as reported', () => {
+    expect(agentName('claude')).toBe('Claude Code')
+    expect(agentName('codex')).toBe('Codex')
+    expect(agentName('pi')).toBe('pi')
   })
 })
