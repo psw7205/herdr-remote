@@ -48,6 +48,14 @@ type fakeSessions struct {
 	count       atomic.Int32
 	conditional string
 	boundErr    error
+	project     string
+}
+
+func (f *fakeSessions) Project(id string) (string, error) {
+	if id != "claude:native" {
+		return "", errors.New("session not found")
+	}
+	return f.project, nil
 }
 
 func (f *fakeSessions) ConditionalInput() string { return f.conditional }

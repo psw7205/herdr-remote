@@ -1,7 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { getSession, listSessions, sendCommand, terminalFrame, type Event } from '../api'
+import { getChanges, getFileDiff, getSession, listSessions, sendCommand, terminalFrame, type Event } from '../api'
 import { installFixtureBackend } from './backend'
 import { scenario } from './scenarios'
+import { COLLAPSE_AFTER } from '../ToolActivity'
 
 let restore: (() => void) | undefined
 afterEach(() => { restore?.(); restore = undefined; vi.useRealTimers() })
@@ -53,7 +54,43 @@ it('answers uncertain delivery and Terminal frames per scenario', async () => {
   expect(frame.cols).toBeGreaterThan(0)
 })
 
+it('serves Changed Files and only diffs a listed path', async () => {
+  restore = installFixtureBackend({ ...scenario('default'), latency: 0 })
+  const changes = await getChanges('claude:fixture-working')
+  expect(changes.repository).toBe(true)
+  expect(new Set(changes.files.map(item => item.status))).toEqual(new Set(['modified', 'added', 'deleted', 'renamed']))
+  for (const item of changes.files) expect((await getFileDiff('claude:fixture-working', item.path)).path).toBe(item.path)
+  await expect(getFileDiff('claude:fixture-working', './src/charts/LineChart.tsx')).rejects.toThrow('FILE_NOT_CHANGED')
+  expect((await getChanges('pane:w3:p2')).repository).toBe(false)
+  expect((await getChanges('claude:fixture-done')).files).toEqual([])
+  await expect(getChanges('claude:fixture-unknown')).rejects.toThrow('GIT_TIMEOUT')
+})
+
+it('marks the large listing and diff as truncated', async () => {
+  restore = installFixtureBackend({ ...scenario('changes-large'), latency: 0 })
+  const changes = await getChanges('claude:fixture-working')
+  expect(changes.truncated).toBe(true)
+  expect(changes.total).toBeGreaterThan(changes.files.length)
+  expect((await getFileDiff('claude:fixture-working', changes.files[0].path)).truncated).toBe(true)
+})
+
 it('fails the list like an unreachable Bridge', async () => {
   restore = installFixtureBackend(scenario('herdr-down'))
   await expect(listSessions()).rejects.toThrow()
+})
+
+it('updates a running tool in place on the same cursor and replays it', async () => {
+  vi.useFakeTimers()
+  restore = installFixtureBackend({ ...scenario('tools'), latency: 0 })
+  const working = (await listSessions()).sessions.find(item => item.status === 'working')!
+  expect(working.last_message?.role).toBe('assistant')
+  const { snapshot } = await getSession(working.id)
+  const running = snapshot.data.find(item => item.role === 'tool' && item.tool?.state === 'running')!
+  expect(snapshot.data.filter(item => item.role === 'tool').length).toBeGreaterThan(COLLAPSE_AFTER)
+  await vi.advanceTimersByTimeAsync(10_000)
+  const { events } = open(`ws://fixture.invalid/api/sessions/${encodeURIComponent(working.id)}/events?epoch=${snapshot.cursor.epoch}&sequence=${snapshot.cursor.sequence}`)
+  await vi.advanceTimersByTimeAsync(100)
+  expect(events.map(event => event.type)).toEqual(['message.updated', 'message.tool', 'message.updated', 'message.assistant', 'agent.status'])
+  expect(events[0].payload).toMatchObject({ id: running.id, tool: { state: 'completed' } })
+  expect((await getSession(working.id)).snapshot.data.find(item => item.id === running.id)?.tool?.state).toBe('completed')
 })

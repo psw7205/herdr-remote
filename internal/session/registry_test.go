@@ -1251,3 +1251,24 @@ func TestEndedItemsReleaseHistoryAndAreBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectStaysReadableAfterTheItemEnds(t *testing.T) {
+	r, f, _ := boundRegistry(t)
+	id := "claude:" + nativeA
+	if dir, err := r.Project(id); err != nil || dir != "repo" {
+		t.Fatalf("active project = %q, %v", dir, err)
+	}
+	f.agents = nil
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, meta, _ := r.Get(id); meta.Lifecycle != LifecycleEnded {
+		t.Fatalf("not ended: %+v", meta)
+	}
+	if dir, err := r.Project(id); err != nil || dir != "repo" {
+		t.Fatalf("ended project = %q, %v", dir, err)
+	}
+	if _, err := r.Project("claude:unknown"); err == nil {
+		t.Fatal("unknown item has a project")
+	}
+}
