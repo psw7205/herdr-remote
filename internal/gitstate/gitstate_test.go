@@ -446,6 +446,56 @@ func TestRepoConfigRunsNothing(t *testing.T) {
 	}
 }
 
+// TestOversizedFilterConfigFailsClosed pads the config so the filter listing
+// passes its cap before the armed driver, which the cut would otherwise leave
+// out of the overrides.
+func TestOversizedFilterConfigFailsClosed(t *testing.T) {
+	isolate(t)
+	r := reader(t)
+	dir := newRepo(t)
+	marks := t.TempDir()
+	filter := filepath.Join(marks, "filter.sh")
+	ran := filepath.Join(marks, "ran")
+	if err := os.WriteFile(filter, []byte(fmt.Sprintf("#!/bin/sh\necho ran >> %q\ncat\n", ran)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, ".gitattributes", "*.txt filter=evil\n")
+	write(t, dir, "same.txt", "same\n")
+	commitAll(t, dir)
+
+	entry := "\tclean = x\n"
+	padding := strings.Repeat(entry, maxFilterConfigBytes/len("filter.a.clean\x00")+1)
+	config, err := os.OpenFile(filepath.Join(dir, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fmt.Fprintf(config, "[filter \"a\"]\n%s[filter \"evil\"]\n\tclean = %q\n\trequired = true\n", padding, filter)
+	if closeErr := config.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(5 * time.Second)
+	if err := os.Chtimes(filepath.Join(dir, "same.txt"), later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.Changes(context.Background(), dir); err == nil {
+		t.Fatal("Changes read a repo whose filter config passed the cap")
+	}
+	if _, err := r.Diff(context.Background(), dir, "same.txt"); err == nil {
+		t.Fatal("Diff read a repo whose filter config passed the cap")
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("Reader ran the filter left out of the overrides")
+	}
+	git(t, dir, "status")
+	if _, err := os.Stat(ran); err != nil {
+		t.Fatal("positive control: plain git status did not run the filter")
+	}
+}
+
 func TestParseStatusDropsAPartialRecord(t *testing.T) {
 	full := "# branch.oid abc\x00# branch.head main\x00" +
 		"1 .M N... 100644 100644 100644 h1 h2 a b.txt\x00" +

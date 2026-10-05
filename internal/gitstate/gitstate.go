@@ -27,6 +27,9 @@ const (
 	// maxListBytes caps the stdout of status and numstat. A listing past it
 	// keeps the complete records it has and is marked truncated.
 	maxListBytes = 8 << 20
+	// maxFilterConfigBytes caps the filter driver names read from config. Past
+	// it the read fails closed: a driver left out of the list would stay armed.
+	maxFilterConfigBytes = 1 << 20
 	// maxCountBytes is the largest untracked file whose lines are counted, and
 	// countBudget bounds what one listing reads for all of them.
 	maxCountBytes = 4 << 20
@@ -320,10 +323,13 @@ func (r *Reader) toplevel(ctx context.Context, dir string) (string, error) {
 // for those commands. Reading config itself runs nothing.
 func (r *Reader) hardenedEnv(ctx context.Context, top string) ([]string, error) {
 	git := runner{bin: r.git, dir: top, env: baseEnv(nil)}
-	out, _, err := git.run(ctx, 1<<20, "config", "--name-only", "-z", "--get-regexp", `^filter\.`)
+	out, cut, err := git.run(ctx, maxFilterConfigBytes, "config", "--name-only", "-z", "--get-regexp", `^filter\.`)
 	var failed *gitError
 	if err != nil && !(errors.As(err, &failed) && failed.code == 1) {
 		return nil, err
+	}
+	if cut {
+		return nil, fmt.Errorf("filter config exceeds %d bytes", maxFilterConfigBytes)
 	}
 	var drivers []string
 	seen := map[string]bool{}
