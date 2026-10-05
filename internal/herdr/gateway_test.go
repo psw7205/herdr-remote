@@ -352,9 +352,15 @@ func TestBoundInputUsesSeparateMethodWithoutRetry(t *testing.T) {
 // variant list is truncated; detection must not depend on it.
 const unknownMethodResponse = `{"id":"","error":{"code":"invalid_request","message":"invalid request: unknown variant ` + "`%s`, expected one of `ping`, `session.snapshot`, `pane.read`" + ` at line 1 column 71"}}`
 
+// Herdr 0.9.2 and later echo the request ID in the same rejection.
+var echoedUnknownMethodResponse = strings.Replace(unknownMethodResponse, `"id":""`, `"id":"{{id}}"`, 1)
+
+// rejectAs answers the request with response, substituting {{id}} with the
+// request ID.
 func rejectAs(t *testing.T, method, response string) string {
 	return socketServer(t, func(c net.Conn) {
 		var req struct {
+			ID     string `json:"id"`
 			Method string `json:"method"`
 		}
 		if err := json.NewDecoder(c).Decode(&req); err != nil {
@@ -364,19 +370,35 @@ func rejectAs(t *testing.T, method, response string) string {
 		if req.Method != method {
 			t.Errorf("method = %s, want %s", req.Method, method)
 		}
-		c.Write([]byte(response + "\n"))
+		c.Write([]byte(strings.ReplaceAll(response, "{{id}}", req.ID) + "\n"))
 	})
 }
 
 func TestUnknownMethodIsUnsupported(t *testing.T) {
-	path := rejectAs(t, "agent.binding", fmt.Sprintf(unknownMethodResponse, "agent.binding"))
-	_, err := NewGateway(path).Binding(context.Background(), "w1:p2")
-	if !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("got %v", err)
+	for name, response := range map[string]string{
+		"0.9.1 without id": unknownMethodResponse,
+		"0.9.2 echoed id":  echoedUnknownMethodResponse,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := rejectAs(t, "agent.binding", fmt.Sprintf(response, "agent.binding"))
+			_, err := NewGateway(path).Binding(context.Background(), "w1:p2")
+			if !errors.Is(err, ErrUnsupported) {
+				t.Fatalf("got %v", err)
+			}
+			var api *APIError
+			if errors.As(err, &api) {
+				t.Fatal("unsupported must not look like a method-level API error")
+			}
+		})
 	}
+}
+
+func TestEchoedUnknownOtherMethodStaysAPIError(t *testing.T) {
+	path := rejectAs(t, "agent.binding", fmt.Sprintf(echoedUnknownMethodResponse, "agent.other"))
+	_, err := NewGateway(path).Binding(context.Background(), "w1:p2")
 	var api *APIError
-	if errors.As(err, &api) {
-		t.Fatal("unsupported must not look like a method-level API error")
+	if errors.Is(err, ErrUnsupported) || !errors.As(err, &api) {
+		t.Fatalf("got %v", err)
 	}
 }
 

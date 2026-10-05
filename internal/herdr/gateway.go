@@ -313,9 +313,10 @@ func (g *Gateway) read(ctx context.Context, method string, params any, result an
 	if err := json.Unmarshal(line, &response); err != nil {
 		return fmt.Errorf("decode Herdr response: %w", err)
 	}
-	// Herdr rejects an unknown method while deserializing the request, before
-	// it has an ID to echo. Only that exact rejection proves the method is absent.
-	if response.ID == "" && response.Error != nil && response.Error.Code == "invalid_request" && strings.HasPrefix(response.Error.Message, "invalid request: unknown variant `"+method+"`") {
+	// Herdr rejects an unknown method while deserializing the request. 0.9.1
+	// answers without an ID; 0.9.2 and later echo the request ID. Only that
+	// exact rejection proves the method is absent.
+	if (response.ID == "" || response.ID == id) && response.Error != nil && response.Error.Code == "invalid_request" && strings.HasPrefix(response.Error.Message, "invalid request: unknown variant `"+method+"`") {
 		return fmt.Errorf("%w: %s", ErrUnsupported, method)
 	}
 	if response.ID != id {
