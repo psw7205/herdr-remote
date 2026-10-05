@@ -1,5 +1,6 @@
 import { Plus, SquareTerminal } from 'lucide-react'
-import type { ConditionalInput, Session } from './api'
+import type { BridgeBuild, ConditionalInput, Session } from './api'
+import { bridgeBuildLabel, clientBuildStale } from './build'
 import { Notice } from './Notice'
 import { formatRoute } from './route'
 import { agentName, groupSessions, plainPreview, projectName, rowNote, statusPresentation } from './presentation'
@@ -9,14 +10,17 @@ import { TopBar } from './TopBar'
 import styles from './SessionList.module.css'
 import ui from './ui.module.css'
 
-export function SessionList({ sessions, loaded, error, conditionalInput, canStart = false, onStart, onOpen }: { sessions: Session[]; loaded: boolean; error: string; conditionalInput: ConditionalInput; canStart?: boolean; onStart?: () => void; onOpen: (session: Session) => void }) {
+export function SessionList({ sessions, loaded, error, conditionalInput, bridge = null, loadedBuild = null, canStart = false, onStart, onOpen }: { sessions: Session[]; loaded: boolean; error: string; conditionalInput: ConditionalInput; bridge?: BridgeBuild | null; loadedBuild?: string | null; canStart?: boolean; onStart?: () => void; onOpen: (session: Session) => void }) {
   const groups = groupSessions(sessions)
   const now = Date.now()
+  const build = bridgeBuildLabel(bridge)
+  const stale = clientBuildStale(bridge, loadedBuild)
   return <div className={styles.screen}>
-    <TopBar title="세션" subtitle={loaded && !error ? <span>{sessions.length > 0 ? `${sessions.length}개 실행 중` : 'Herdr 연결됨'}</span> : undefined}
+    <TopBar title="세션" subtitle={loaded && !error ? <span>{sessions.length > 0 ? `${sessions.length}개 실행 중` : 'Herdr 연결됨'}{build && ` · ${build}`}</span> : undefined}
       actions={canStart && onStart ? <button type="button" className={ui.iconButton} onClick={onStart} aria-label="새 세션 시작"><Plus aria-hidden size={22} /></button> : undefined} />
-    {(error || conditionalInput === 'unsupported') && <div className={styles.notices}>
+    {(error || conditionalInput === 'unsupported' || stale) && <div className={styles.notices}>
       {error && <Notice tone="danger">{error}</Notice>}
+      {stale && <Notice tone="info" actions={[{ label: '새로고침', onClick: () => location.reload() }]}>새 화면 build가 설치되었습니다. 새로고침하면 적용됩니다.</Notice>}
       {conditionalInput === 'unsupported' && <Notice tone="warning">이 Herdr는 원격 입력을 지원하지 않아 Chat 입력과 Terminal을 쓸 수 없습니다. agent는 계속 실행 중입니다. PC에서 Herdr patch를 확인하세요.</Notice>}
     </div>}
     <main className={styles.list} aria-busy={!loaded} aria-label="세션 목록">

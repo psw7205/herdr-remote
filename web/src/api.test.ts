@@ -20,11 +20,15 @@ describe('session list', () => {
   const respond = (body: unknown) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
   it('reads the Herdr conditional input capability', async () => {
     respond({sessions:[session],herdr:{conditional_input:'unsupported'}})
-    expect(await listSessions()).toEqual({sessions:[session],conditionalInput:'unsupported',start:{kinds:[],new_workspace:false}})
+    expect(await listSessions()).toEqual({sessions:[session],conditionalInput:'unsupported',start:{kinds:[],new_workspace:false},bridge:null})
   })
   it('treats a missing capability from an older Bridge as unknown', async () => {
     respond({sessions:[session]})
-    expect(await listSessions()).toEqual({sessions:[session],conditionalInput:'unknown',start:{kinds:[],new_workspace:false}})
+    expect(await listSessions()).toEqual({sessions:[session],conditionalInput:'unknown',start:{kinds:[],new_workspace:false},bridge:null})
+  })
+  it('reads the Bridge build stamp and the client build it serves', async () => {
+    respond({sessions:[session],bridge:{revision:'65f5c6bd7eceb1cd601405dec32f04078918f161',modified:true,client_build:'0123456789abcdef'}})
+    expect((await listSessions()).bridge).toEqual({revision:'65f5c6bd7eceb1cd601405dec32f04078918f161',modified:true,clientBuild:'0123456789abcdef'})
   })
   it('never describes an unverified session as connected or ended', () => {
     const unverified: Session = { ...session, runtime_binding: undefined, terminal: false, lifecycle: 'unverified' }
@@ -60,6 +64,11 @@ describe('session list', () => {
   it('explains an unbound session by what it cannot do', () => {
     const unbound: Session = { ...session, id: 'pane:w1:p2', runtime_binding: undefined, chat: false, terminal: false, lifecycle: 'unbound' }
     expect(composerHint(unbound)).toBe('이 세션은 원격 입력을 지원하지 않습니다. PC의 Herdr에서 입력하세요.')
+  })
+  it('says Codex input is not supported yet on its read-only Chat', () => {
+    const codex: Session = { ...session, id: 'codex:native-c', agent: 'codex', runtime_binding: undefined, chat: true, terminal: false, lifecycle: 'unbound' }
+    expect(composerHint(codex)).toBe('Codex 입력은 아직 지원하지 않습니다. PC의 Herdr에서 입력하세요.')
+    expect(lifecycleNotice(codex)).toBeNull()
   })
   it('derives lifecycle from active for an older Bridge', () => {
     expect(sessionLifecycle({active:true})).toBe('active')
