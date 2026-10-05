@@ -1,6 +1,7 @@
 // Anonymous sample data for the dev-only fixture page. Nothing here comes from
 // a real transcript, pane or host; every name, path and message is invented.
-import type { ConditionalInput, Delivery, Message, Session, StartCandidate, StartCapability, StartDelivery } from '../api'
+import type { ConditionalInput, Delivery, Message, Session, StartCandidate, StartCapability, StartDelivery, ToolActivity } from '../api'
+import { fixtureChanges, type FixtureChanges } from './changes'
 
 export type FixtureSession = { session: Session; messages: Message[] }
 export type Scenario = {
@@ -11,6 +12,7 @@ export type Scenario = {
   // Milliseconds added to every HTTP answer.
   latency: number
   listFails: boolean
+  bridge: { revision: string; modified: boolean; client_build: string }
   socketFails: boolean
   // Interval of unsolicited assistant messages on the working session; 0 is off.
   liveEvery: number
@@ -18,8 +20,13 @@ export type Scenario = {
   supersede?: { from: string; to: FixtureSession; after: number }
   // New session start (ADR-037): capability, folders and the start answer.
   start: { capability: StartCapability; candidates: StartCandidate[]; result: StartDelivery; latency: number }
+  // Changed Files per session id; a session without an entry is a clean repo.
+  changes: Record<string, FixtureChanges>
+  // Timed transcript events on one session: new items and tool updates.
+  script?: { session: string; steps: ScriptStep[] }
 }
-export const scenarioNames = ['default', 'long', 'live', 'disconnected', 'delivery-unknown', 'rejected', 'empty', 'herdr-down', 'unsupported', 'slow', 'superseded', 'start-trust', 'start-unknown', 'no-root'] as const
+export type ScriptStep = { after: number; type: 'message.tool' | 'message.updated' | 'message.assistant'; message: Message; status?: Session['status'] }
+export const scenarioNames = ['default', 'long', 'live', 'disconnected', 'delivery-unknown', 'rejected', 'empty', 'herdr-down', 'unsupported', 'slow', 'superseded', 'start-trust', 'start-unknown', 'no-root', 'codex', 'changes-large', 'tools', 'stale-client'] as const
 export type ScenarioName = typeof scenarioNames[number]
 
 const minute = 60_000
@@ -27,8 +34,15 @@ const at = (ago: number) => new Date(Date.now() - ago).toISOString()
 let counter = 0
 const message = (role: Message['role'], text: string, ago: number): Message => ({ id: `fixture-${++counter}`, role, text, timestamp: at(ago) })
 
+// Like the Bridge, the preview is the newest text message; tool items have none.
+export function lastText(messages: Message[]): (Message & { role: 'user' | 'assistant' }) | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const item = messages[index]
+    if (item.role === 'user' || item.role === 'assistant') return item as Message & { role: 'user' | 'assistant' }
+  }
+}
 function withPreview(session: Session, messages: Message[]): Session {
-  const last = messages.at(-1)
+  const last = lastText(messages)
   if (!last) return session
   const text = last.text.replace(/\s+/g, ' ').trim()
   return { ...session, last_activity: last.timestamp, last_message: { role: last.role, text: text.length > 160 ? `${text.slice(0, 159)}…` : text } }
@@ -73,6 +87,31 @@ pnpm --filter dashboard test -- --run src/charts/downsample.test.ts src/charts/c
 \`\`\`
 
 자세한 근거는 [LTTB 설명](https://example.com/lttb)을 참고하세요. 캡처는 첨부하지 않았습니다. ![차트 비교](https://example.invalid/chart.png)`
+
+const tool = (name: string, summary: string, state: ToolActivity['state'], input: object, result: string, ago: number, truncated = false): Message => {
+  const id = `fixture-${++counter}`
+  return { id, role: 'tool', text: '', timestamp: at(ago), tool: { id: `toolu_${id}`, name, summary, state, input: JSON.stringify(input, null, 2), input_truncated: false, result, result_truncated: truncated } }
+}
+
+const longSource = Array.from({ length: 220 }, (_, index) => `${String(index + 1).padStart(5)}→export const value${index} = compute(${index}, options)`).join('\n')
+
+function toolConversation(): { messages: Message[]; running: Message } {
+  const messages = [
+    message('user', '결제 webhook이 가끔 두 번 처리돼. 원인 찾아서 고쳐 줘.', 30 * minute),
+    message('assistant', '먼저 webhook 처리 경로와 중복 방지 로직을 확인하겠습니다.', 29 * minute),
+    tool('Grep', 'idempotency', 'completed', { pattern: 'idempotency', path: '/workspace/sample-api/src' }, 'src/webhook/handler.ts:14\nsrc/webhook/store.ts:8', 29 * minute),
+    tool('Read', 'src/webhook/handler.ts', 'completed', { file_path: '/workspace/sample-api/src/webhook/handler.ts' }, longSource, 28 * minute, true),
+    tool('Read', 'src/webhook/store.ts', 'completed', { file_path: '/workspace/sample-api/src/webhook/store.ts' }, '    1→export async function remember(id: string) {\n    2→  await redis.set(id, 1)\n    3→}', 28 * minute),
+    tool('WebFetch', 'docs.example.com', 'unknown', { url: 'https://docs.example.com/webhooks/retries', prompt: '재시도 간격을 요약해 줘' }, '', 27 * minute),
+    tool('Bash', 'pnpm test -- webhook', 'error', { command: 'pnpm test -- webhook\npnpm lint', description: 'webhook test 실행' }, 'FAIL src/webhook/handler.test.ts\n  ✕ 같은 event를 두 번 받으면 한 번만 처리한다 (12 ms)\n\nExpected calls: 1\nReceived calls: 2', 26 * minute),
+    message('assistant', '원인을 찾았습니다. 중복 확인과 기록 사이에 `await`가 있어서, 같은 event가 동시에 오면 둘 다 확인을 통과합니다.\n\n확인과 기록을 `SET NX` 한 번으로 합치겠습니다.', 25 * minute),
+    tool('Edit', 'src/webhook/store.ts', 'completed', { file_path: '/workspace/sample-api/src/webhook/store.ts', old_string: 'await redis.set(id, 1)', new_string: "return (await redis.set(id, 1, 'NX')) === 'OK'" }, 'The file src/webhook/store.ts has been updated.', 24 * minute),
+    tool('TodoWrite', '3 todos', 'completed', { todos: [{ content: '원인 확인', status: 'completed' }, { content: 'SET NX로 변경', status: 'completed' }, { content: '테스트 실행', status: 'in_progress' }] }, 'Todos have been modified successfully.', 24 * minute),
+    message('assistant', '수정했습니다. 이제 test를 다시 실행합니다.', 2 * minute),
+  ]
+  const running = tool('Bash', 'pnpm test -- webhook', 'running', { command: 'pnpm test -- webhook', description: 'webhook test 다시 실행' }, '', minute)
+  return { messages: [...messages, running], running }
+}
 
 function dashboardConversation(): Message[] {
   return [
@@ -149,7 +188,9 @@ const created = { workspace_id: 'w9', tab_id: 'w9:t1', pane_id: 'w9:p1', agent: 
 
 export function scenario(name: ScenarioName): Scenario {
   const out: Scenario = { name, sessions: sessions(), conditionalInput: 'supported', command: { status: 'accepted' }, latency: 60, listFails: false, socketFails: false, liveEvery: 0,
-    start: { capability: { kinds: ['claude'], new_workspace: true }, candidates: startCandidates, result: { status: 'accepted', created }, latency: 2500 } }
+    bridge: { revision: '3c7a1e9f0b2d4865a7c9e1f3b5d7a9c1e3f5a7b9', modified: false, client_build: '0f1e2d3c4b5a6978' },
+    start: { capability: { kinds: ['claude'], new_workspace: true }, candidates: startCandidates, result: { status: 'accepted', created }, latency: 2500 },
+    changes: fixtureChanges(name) }
   switch (name) {
     case 'long': {
       const long = longConversation(400)
@@ -182,6 +223,28 @@ export function scenario(name: ScenarioName): Scenario {
       out.start.capability = { kinds: ['claude'], new_workspace: false }
       out.start.candidates = startCandidates.filter(item => item.open)
       break
+    case 'codex': {
+      const codex = [message('user', '테스트가 왜 실패하는지 찾아 줘.', 9 * minute), message('assistant', '원인을 찾았습니다. fixture의 날짜가 timezone에 따라 하루 밀립니다.', 7 * minute)]
+      out.sessions.push({ session: withPreview({ ...base, agent: 'codex', id: 'codex:fixture-codex', pane_id: 'w6:p1', project: '/workspace/sample-cli', title: 'flaky test 원인 찾기', status: 'idle', runtime_binding: undefined, terminal: false, lifecycle: 'unbound' }, codex), messages: codex })
+      break
+    }
+    case 'tools': {
+      const { messages, running } = toolConversation()
+      const id = out.sessions[1].session.id
+      out.sessions[1] = { session: withPreview(out.sessions[1].session, messages), messages }
+      const done: Message = { ...running, tool: { ...running.tool!, state: 'completed', result: ' Test Files  3 passed (3)\n      Tests  18 passed (18)' } }
+      const next = tool('Read', 'CHANGELOG.md', 'running', { file_path: '/workspace/sample-api/CHANGELOG.md' }, '', 0)
+      const read: Message = { ...next, tool: { ...next.tool!, state: 'completed', result: '    1→# Changelog\n    2→\n    3→## Unreleased' } }
+      out.script = { session: id, steps: [
+        { after: 3000, type: 'message.updated', message: done },
+        { after: 4000, type: 'message.tool', message: next },
+        { after: 5500, type: 'message.updated', message: read },
+        { after: 6500, type: 'message.assistant', message: message('assistant', 'test 18개가 모두 통과했습니다. 같은 event를 동시에 받아도 한 번만 처리됩니다.', 0), status: 'completed' },
+      ] }
+      break
+    }
+    case 'stale-client': out.bridge = { ...out.bridge, client_build: 'a9b8c7d6e5f40312' }; break
+    case 'changes-large':
     case 'default': break
   }
   return out

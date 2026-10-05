@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/psw7205/herdr-remote/internal/transcript"
 	"regexp"
 	"strings"
 )
@@ -33,14 +34,9 @@ var localCommandElements = func() []*regexp.Regexp {
 var pastedContentTag = regexp.MustCompile(`</?pasted_content(?:\s[^>]*)?>`)
 
 // Record retains non-message graph nodes so filtering tool output does not
-// break parent traversal. Only Text is eligible for Chat rendering.
-type Record struct {
-	ID        string
-	ParentID  string
-	Role      string
-	Text      string
-	Timestamp string
-}
+// break parent traversal. Text and tool calls are eligible for Chat rendering;
+// tool results only complete a call.
+type Record = transcript.Record
 
 func Decode(line []byte, sessionID string) (Record, error) {
 	var native struct {
@@ -51,8 +47,10 @@ func Decode(line []byte, sessionID string) (Record, error) {
 		Sidechain bool   `json:"isSidechain"`
 		Meta      bool   `json:"isMeta"`
 		Timestamp string `json:"timestamp"`
+		CWD       string `json:"cwd"`
 		Message   struct {
 			Role    string          `json:"role"`
+			ID      string          `json:"id"`
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
@@ -76,22 +74,38 @@ func Decode(line []byte, sessionID string) (Record, error) {
 		return Record{}, errors.New("invalid Claude message identity")
 	}
 	r.Role = native.Type
+	if r.Role == "assistant" {
+		r.Turn = native.Message.ID
+	}
 	var text string
 	if json.Unmarshal(native.Message.Content, &text) == nil {
 		r.Text = visibleText(r.Role, text, native.Meta)
 		return r, nil
 	}
-	var blocks []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
+	var blocks []json.RawMessage
 	if err := json.Unmarshal(native.Message.Content, &blocks); err != nil {
 		return Record{}, fmt.Errorf("unsupported Claude message content: %w", err)
 	}
 	var parts []string
-	for _, b := range blocks {
-		if b.Type == "text" {
+	for _, raw := range blocks {
+		var b struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(raw, &b); err != nil {
+			return Record{}, fmt.Errorf("unsupported Claude message content: %w", err)
+		}
+		switch {
+		case b.Type == "text":
 			parts = append(parts, b.Text)
+		case b.Type == "tool_use" && r.Role == "assistant":
+			if call, ok := decodeToolCall(raw, native.CWD); ok {
+				r.Calls = append(r.Calls, call)
+			}
+		case b.Type == "tool_result" && r.Role == "user":
+			if result, ok := decodeToolResult(raw); ok {
+				r.Results = append(r.Results, result)
+			}
 		}
 	}
 	r.Text = visibleText(r.Role, strings.Join(parts, "\n"), native.Meta)
