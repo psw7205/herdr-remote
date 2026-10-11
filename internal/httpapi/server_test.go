@@ -46,12 +46,14 @@ func TestMutationRequiresExactOriginAndHost(t *testing.T) {
 type fakeSessions struct {
 	hub         *stream.Session
 	count       atomic.Int32
+	calls       atomic.Int32
 	conditional string
 	boundErr    error
 	project     string
 }
 
 func (f *fakeSessions) Project(id string) (string, error) {
+	f.calls.Add(1)
 	if id != "claude:native" {
 		return "", errors.New("session not found")
 	}
@@ -61,13 +63,18 @@ func (f *fakeSessions) Project(id string) (string, error) {
 func (f *fakeSessions) ConditionalInput() string { return f.conditional }
 
 func (f *fakeSessions) List() []session.Meta {
+	f.calls.Add(1)
 	return []session.Meta{{ID: "claude:native", Binding: "bound", Chat: true, Active: true}}
 }
 func (f *fakeSessions) Get(string) (stream.Snapshot, session.Meta, error) {
 	return f.hub.Snapshot(), f.List()[0], nil
 }
-func (f *fakeSessions) Stream(string) (*stream.Session, error) { return f.hub, nil }
+func (f *fakeSessions) Stream(string) (*stream.Session, error) {
+	f.calls.Add(1)
+	return f.hub, nil
+}
 func (f *fakeSessions) BoundInput(_ context.Context, _, binding, _, _ string) error {
+	f.calls.Add(1)
 	if binding != "bound" {
 		return errors.New("session binding changed")
 	}
@@ -75,6 +82,7 @@ func (f *fakeSessions) BoundInput(_ context.Context, _, binding, _, _ string) er
 	return f.boundErr
 }
 func (f *fakeSessions) Terminal(context.Context, string, string) (herdr.TerminalSnapshot, error) {
+	f.calls.Add(1)
 	return herdr.TerminalSnapshot{}, nil
 }
 func newTestServer(t *testing.T) (*httptest.Server, *fakeSessions) {

@@ -196,7 +196,7 @@ TerminalView, visible일 때 1s 간격 poll
       → pane.read { source: visible, format: ansi, strip_ansi: false }
       → pane.layout의 pane rect(zoomed면 tab area) → cols/rows render hint (500ms timeout, 실패 시 생략)
       → agent.binding 다시 확인 후 frame 반환. 불일치·실패는 409 SESSION_CHANGED
-  → xterm.js: term.reset(); term.write(frame.text)
+  → xterm.js: 이전과 같은 frame이면 건너뛰고, 다르면 term.write(ESC c + frame.text) 한 번
       local grid·font size만 조정, scrollback 0
 key 입력 → command_type terminal_input (4.2 경로)
 ```
@@ -210,6 +210,8 @@ frame이나 raw output history를 보장하지 않는다
   (`web/src/terminalSizing.ts`). 폭은 xterm 기본 Unicode V6 폭표로 센다.
 - font size는 화면 폭에 맞춰 6–16px에서 고르고, 6px로도 넘치면 가로 scroll한다. xterm이 pinch를
   삼킬 수 있어 `A−`/`맞춤`/`A+` 버튼으로 맞춘 크기에 배율을 곱한다(최대 32px).
+- reset은 frame과 같은 write에 넣어 갱신 사이에 빈 Terminal이 그려지지 않게 한다(`web/src/TerminalView.tsx`).
+- key bar는 `mousedown` 기본 동작을 막아 focus를 xterm 입력에 남긴다. 그래서 key를 눌러도 soft keyboard가 닫히지 않는다.
 - `pane.read`와 `pane.layout`은 별도 호출이라 그 사이의 resize를 구분하지 못한다.
 
 ### 4.5 새 session 시작
@@ -263,6 +265,11 @@ Chat의 변경된 파일 버튼 → #session=<id>&view=changes
   쓰므로 plumbing `diff-index`를 쓴다.
 - 상한: 목록 500개, status·numstat 출력 8 MiB, 파일 diff 256 KiB, untracked 줄 수는 파일당 4 MiB·요청당
   32 MiB까지 센다. 넘으면 `truncated`이거나 줄 수가 없다.
+- filter driver 이름 목록이 1 MiB를 넘거나, 그 override를 담은 git 실행 환경이 64 KiB를 넘으면 잘라서 진행하지
+  않고 조회를 거절한다(`GIT_FAILED`). 빠진 driver의 명령이 실행될 수 있기 때문이다.
+- filter를 비우므로 Git LFS처럼 clean filter가 있는 파일은 index의 stat이 낡은 동안(commit 직후 같은 racy
+  상태, 파일 시각만 바뀐 경우) `modified`로 보이고 diff는 pointer가 실제 내용으로 바뀐 모양이다. 사용자의
+  `git status` 등이 index를 갱신하면 사라진다. Bridge는 index를 쓰지 않는다.
 - server polling, watcher, WS event, 저장은 없다. client가 화면을 열거나 새로 고칠 때만 읽는다.
 - 근거: [ADR-016](adr.md#adr-016--changed-files는-git을-read-only-source로-사용한다),
   [ADR-014](adr.md#adr-014--file-editing은-제공하지-않고-review까지만-지원한다).
@@ -330,8 +337,12 @@ continuity, supersession, `ended` 판정 규칙은
 - tailnet host, tailnet Origin, 또는 `X-Forwarded-*`·`Tailscale-User-*` header 중 하나라도 있으면
   tailnet 요청으로 본다. 이때 tailnet host·owner login이 확정돼 있고 `Tailscale-User-Login`이
   owner와 같으며 `Host`가 tailnet host여야 한다. 그래서 Serve 외 local reverse proxy는 지원하지 않는다.
+- `/api/` 아래 요청의 `Sec-Fetch-Site`가 `cross-site`·`same-site`이고 Origin이 allowlist에 없으면 routing 전에
+  403 `CROSS_SITE_REJECTED`다. Origin을 보내지 않는 no-cors GET(`<img src>` 등)이 registry·Git·Herdr 조회를
+  시작하지 못하게 한다. header가 없는 요청(curl, 구형 browser), `same-origin`·`none`, 정적 파일은 영향이 없다.
 - `GET .../changes`, `GET .../changes/diff`는 source를 돌려주므로 `Origin` header가 있으면 allowlist를
-  검사한다. 같은 origin의 GET은 browser가 Origin을 보내지 않으므로 header 없는 요청은 Host·identity 경계만 거친다.
+  검사한다. 같은 origin의 GET은 browser가 Origin을 보내지 않으므로 header 없는 요청은 Host·identity 경계와 위
+  Fetch Metadata 검사만 거친다.
   Git 경로는 registry의 item project에서만 정하고 diff `path`는 현재 status 목록과 정확히 같아야 한다.
 - `POST .../commands`와 WS는 exact Origin allowlist를 검사한다. `-origins` 기본값에 더해 host와
   login이 모두 확정되면 `https://<tailnet-host>`를 추가한다. login 없는 tailnet Origin은 제외한다.

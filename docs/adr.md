@@ -1109,6 +1109,11 @@ Accepted (2026-10-05). [P2-03](https://github.com/psw7205/herdr-remote/issues/16
 - source 수정, stage, commit, push UI는 없다(ADR-014). Bridge의 polling이나 WS event는 없고 client가
   화면을 열거나 새로 고칠 때만 읽는다.
 
+**2026-10-11 note.** filter 덮기는 driver를 하나도 빠뜨리지 않아야 성립한다. driver 이름 목록이 1 MiB에서
+잘리거나 override 환경이 exec 한도에 걸리면 뒤쪽 driver가 덮이지 않거나 원인 없는 실패가 되므로, 목록 1 MiB·환경
+64 KiB를 넘으면 조회를 거절한다. Git LFS 파일은 index stat이 낡은 동안 `modified`와 pointer→내용 diff로 보인다(git-lfs
+3.8.0에서 재현). `filter.lfs`만 실행을 허용하는 안은 외부 명령 실행을 다시 여는 것이라 택하지 않았다.
+
 ### Context
 
 Conversation transcript만으로는 agent가 실제 어떤 파일을 수정했는지 정확하게 알기 어렵다.
@@ -1556,6 +1561,13 @@ allowlist에 추가되며, login이 없는 동안 `-origins`로 넣은 tailnet H
 * `tsnet` 내장: 여전히 tailnet의 HTTPS Certificates가 필요하고, 큰 `tailscale.com` dependency와
   node state 관리가 추가되며, 줄이는 것은 `tailscale serve` 명령 하나다. Serve 설정 마찰이
   실제로 관찰되면 다시 검토한다.
+
+**2026-10-11 note — cross-site 요청.** Origin allowlist는 browser가 Origin을 보낼 때만 동작한다. 다른 site의
+`<img src>` 같은 no-cors GET은 Origin 없이 Bridge에 닿아, 응답을 읽지 못해도 registry·Git·Herdr 조회를 시작했다.
+그래서 `/api/` 요청의 Fetch Metadata `Sec-Fetch-Site`가 `cross-site`·`same-site`이고 Origin이 allowlist에 없으면
+routing 전에 거절한다. header가 없는 요청은 이전과 같이 Host·identity 경계로 판단한다. 정상 client는 같은 origin의
+상대 경로만 쓴다. `net/http.CrossOriginProtection`은 GET·HEAD를 항상 통과시켜 이 경우를 막지 못하고, 모든 GET에
+Origin을 요구하면 Origin을 보내지 않는 same-origin GET이 막혀 택하지 않았다.
 
 ---
 

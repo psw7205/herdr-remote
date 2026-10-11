@@ -115,8 +115,22 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 		}
+		if strings.HasPrefix(r.URL.Path, "/api/") && crossSite(r) && !originAllowed(r, s.origins) {
+			problem(w, 403, "CROSS_SITE_REJECTED")
+			return
+		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+// crossSite reports a browser request another site started. A no-cors GET
+// such as <img src> carries no Origin, so the per-route Origin checks would let
+// it start git and Herdr reads whose response the page cannot even read.
+// http.CrossOriginProtection always allows GET and HEAD, so it misses this.
+// A request without Sec-Fetch-Site (curl, an older browser) passes as before.
+func crossSite(r *http.Request) bool {
+	site := r.Header.Get("Sec-Fetch-Site")
+	return site == "cross-site" || site == "same-site"
 }
 
 // proxyHeaders are added by Tailscale Serve. A direct local browser request,
@@ -332,8 +346,7 @@ func (s *Server) changedFileDiff(w http.ResponseWriter, r *http.Request) {
 
 // changesProject resolves the item's directory from the registry; the client
 // never names a directory. A same-origin GET carries no Origin header, so only
-// a present Origin is checked: a cross-site page reading source is refused
-// before any git run, not just left unable to read the response.
+// a present Origin is checked.
 func (s *Server) changesProject(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if r.Header.Get("Origin") != "" && !originAllowed(r, s.origins) {
 		problem(w, 403, "ORIGIN_REJECTED")

@@ -30,6 +30,12 @@ const (
 	// maxFilterConfigBytes caps the filter driver names read from config. Past
 	// it the read fails closed: a driver left out of the list would stay armed.
 	maxFilterConfigBytes = 1 << 20
+	// maxEnvBytes caps the environment of a git run. Every filter driver adds
+	// four overrides, so thousands of drivers would fail exec with E2BIG (macOS
+	// ARG_MAX is 1 MiB for arguments and environment together) and one long
+	// name would pass Linux's 128 KiB limit on a single string. Past it the
+	// read fails closed: dropping overrides to fit would leave a driver armed.
+	maxEnvBytes = 64 << 10
 	// maxCountBytes is the largest untracked file whose lines are counted, and
 	// countBudget bounds what one listing reads for all of them.
 	maxCountBytes = 4 << 20
@@ -351,7 +357,15 @@ func (r *Reader) hardenedEnv(ctx context.Context, top string) ([]string, error) 
 		}
 		overrides = append(overrides, [2]string{"filter." + driver + ".required", "false"})
 	}
-	return baseEnv(overrides), nil
+	env := baseEnv(overrides)
+	size := 0
+	for _, entry := range env {
+		size += len(entry) + 1
+	}
+	if size > maxEnvBytes {
+		return nil, fmt.Errorf("filter driver overrides for %d drivers need %d bytes of environment, over %d", len(drivers), size, maxEnvBytes)
+	}
+	return env, nil
 }
 
 // baseEnv is the whole environment of a git run. It drops whatever GIT_DIR,

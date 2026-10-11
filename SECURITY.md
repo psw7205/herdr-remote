@@ -28,6 +28,8 @@ Bridge는 single-user, single-host tool이다.
 - 모든 요청의 `Host`를 loopback 또는 확정된 tailnet host로 제한한다.
 - Serve 경유 요청은 `Tailscale-User-Login`이 node 소유자와 같아야 한다.
 - HTTP mutation과 WebSocket은 exact Origin allowlist를 검사한다.
+- 다른 site에서 browser가 보낸 `/api/` 요청(`Sec-Fetch-Site`가 `cross-site`·`same-site`)은 Origin이 allowlist에
+  없으면 거절한다. Origin을 보내지 않는 `<img src>` 같은 GET도 Git·Herdr 조회를 시작하지 못한다.
 - 자체 password/OAuth/JWT는 없다.
 
 자세한 경계는 [README 보안 경계](README.md#보안-경계)와

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -493,6 +494,82 @@ func TestOversizedFilterConfigFailsClosed(t *testing.T) {
 	git(t, dir, "status")
 	if _, err := os.Stat(ran); err != nil {
 		t.Fatal("positive control: plain git status did not run the filter")
+	}
+}
+
+// TestFilterOverridesPastTheEnvLimitFailClosed keeps the listing well inside
+// its cap while the overrides it yields pass maxEnvBytes, once through
+// thousands of short driver names and once through a single long one.
+func TestFilterOverridesPastTheEnvLimitFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		drivers []string
+	}{
+		{"many drivers", func() []string {
+			names := make([]string, 8000)
+			for i := range names {
+				names[i] = fmt.Sprintf("d%05d", i)
+			}
+			return names
+		}()},
+		{"one long name", []string{strings.Repeat("n", 40<<10)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolate(t)
+			r := reader(t)
+			dir := newRepo(t)
+			marks := t.TempDir()
+			filter := filepath.Join(marks, "filter.sh")
+			ran := filepath.Join(marks, "ran")
+			if err := os.WriteFile(filter, []byte(fmt.Sprintf("#!/bin/sh\necho ran >> %q\ncat\n", ran)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			write(t, dir, ".gitattributes", "*.txt filter=evil\n")
+			write(t, dir, "same.txt", "same\n")
+			commitAll(t, dir)
+
+			var config strings.Builder
+			for _, driver := range tc.drivers {
+				fmt.Fprintf(&config, "[filter %q]\n\tclean = x\n", driver)
+			}
+			fmt.Fprintf(&config, "[filter \"evil\"]\n\tclean = %q\n\trequired = true\n", filter)
+			if config.Len() >= maxFilterConfigBytes {
+				t.Fatalf("config of %d bytes would trip the listing cap instead", config.Len())
+			}
+			file, err := os.OpenFile(filepath.Join(dir, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = file.WriteString(config.String())
+			if closeErr := file.Close(); err == nil {
+				err = closeErr
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			later := time.Now().Add(5 * time.Second)
+			if err := os.Chtimes(filepath.Join(dir, "same.txt"), later, later); err != nil {
+				t.Fatal(err)
+			}
+
+			refused := func(op string, err error) {
+				t.Helper()
+				if err == nil || errors.Is(err, syscall.E2BIG) || !strings.Contains(err.Error(), "filter driver overrides") {
+					t.Fatalf("%s = %v, want the override limit error", op, err)
+				}
+			}
+			_, err = r.Changes(context.Background(), dir)
+			refused("Changes", err)
+			_, err = r.Diff(context.Background(), dir, "same.txt")
+			refused("Diff", err)
+			if _, err := os.Stat(ran); err == nil {
+				t.Fatal("Reader ran a filter driver")
+			}
+			git(t, dir, "status")
+			if _, err := os.Stat(ran); err != nil {
+				t.Fatal("positive control: plain git status did not run the filter")
+			}
+		})
 	}
 }
 
