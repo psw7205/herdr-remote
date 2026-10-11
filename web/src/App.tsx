@@ -75,7 +75,7 @@ export function App() {
           }
           setTerminal(target => target?.id === from ? (successor.terminal ? successor : null) : target)
         }
-      } catch { if (alive) { setError('Herdr에 연결할 수 없습니다. 잠시 후 자동으로 다시 시도합니다.'); setLoaded(true) } }
+      } catch { if (alive) { setError('Bridge에 연결할 수 없습니다. agent는 PC에서 계속 실행 중이며 잠시 후 자동으로 다시 연결합니다.'); setLoaded(true) } }
     }
     void refresh()
     const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 3000)

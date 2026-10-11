@@ -17,6 +17,13 @@ const FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 // network switch long before the browser would, so polling resumes.
 const FRAME_TIMEOUT_MS = 6000
 
+// The reset travels in the same write as the frame (RIS, ESC c): Terminal.reset()
+// clears synchronously while write() is parsed on a later task, so a render in
+// between showed an empty Terminal on every refresh.
+export function repaint(painted: string | null, frame: string): string | null {
+  return frame === painted ? null : `\x1bc${frame}`
+}
+
 export function TerminalView({ session, onBack }: { session: Session; onBack: () => void }) {
   const container = useRef<HTMLDivElement>(null)
   const [error, setError] = useState('')
@@ -40,6 +47,7 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
     let input: { dispose(): void } | undefined
     let observer: ResizeObserver | undefined
     let recent: GridSize[] = []
+    let painted: string | null = null
     let cellRatio = DEFAULT_CELL_RATIO
     // Local xterm font size only; the Herdr PTY keeps the desktop size.
     const fit = () => {
@@ -74,8 +82,10 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
           const sized = gridSize({ cols: frame.cols, rows: frame.rows }, frameDimensions(frame.text), recent)
           const next = sized.grid
           recent = sized.recent
-          if (next.cols !== term.cols || next.rows !== term.rows) { term.resize(next.cols, next.rows); fit() }
-          term.reset(); term.write(frame.text); setError('')
+          if (next.cols !== term.cols || next.rows !== term.rows) { term.resize(next.cols, next.rows); fit(); painted = null }
+          const data = repaint(painted, frame.text)
+          if (data !== null) { term.write(data); painted = frame.text }
+          setError('')
         } catch { if (active) setError('Terminal 화면을 읽을 수 없습니다. 목록에서 세션을 다시 여세요.') }
       })
       fit()
@@ -99,7 +109,8 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
     />
     {error && <div className={styles.notice}><Notice tone="warning">{error}</Notice></div>}
     <div className={styles.shell} ref={container} />
-    <div className={styles.keys} role="group" aria-label="Terminal 특수 키">
+    {/* A tap would move focus to the button and close the soft keyboard the xterm input opened. */}
+    <div className={styles.keys} role="group" aria-label="Terminal 특수 키" onMouseDown={event => event.preventDefault()}>
       <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\x1b')}>Esc</button>
       <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\t')}>Tab</button>
       <button type="button" className={styles.key} onClick={() => emit('interrupt', '')}>Ctrl-C</button>
