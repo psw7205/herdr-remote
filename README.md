@@ -187,9 +187,9 @@ Chat command → durable receipt → Herdr binding 검증 → 기존 PTY
 | 명령 | 동작 |
 | --- | --- |
 | `mise run build` | `web/dist`와 `bin/herdr-remote-bridge`를 build |
-| `mise run install` | build 뒤 `$PREFIX/bin/herdr-remote-bridge`(기본 `~/.local`)에 설치. 직전 binary는 `.prev`로 남긴다 |
-| `mise run redeploy` | vet·test 통과 뒤 install, LaunchAgent 재시작, health 확인. 응답이 없으면 `.prev`로 되돌리고 다시 재시작한다. 응답한 Bridge가 HEAD와 `web/dist`를 실행하지 않으면 실패로 끝낸다 |
-| `mise run status` | HEAD, 설치된 binary, `web/dist`, 응답하는 Bridge의 revision과 client build를 한 줄씩 보인다. 실행 중인 Bridge가 HEAD·`web/dist`와 다르거나 응답이 없으면 1로 끝난다 |
+| `mise run install` | build 뒤 `$PREFIX/bin/herdr-remote-bridge`(기본 `~/.local`)에 설치. 직전 binary는 `.prev`로 남긴다. build한 binary의 VCS stamp가 없거나 HEAD와 다르면 `web/dist`를 바꾸거나 설치하기 전에 멈춘다 |
+| `mise run redeploy` | vet·test 통과 뒤 install, LaunchAgent 재시작, health 확인. install의 stamp 검사를 함께 한다. 응답이 없으면 `.prev`로 되돌리고 다시 재시작한다. 응답한 Bridge가 HEAD와 `web/dist`를 실행하지 않으면 실패로 끝낸다 |
+| `mise run status` | HEAD, 설치된 binary, `web/dist`, 응답하는 Bridge의 revision과 client build를 한 줄씩 보인다. 실행 중인 Bridge가 HEAD·`web/dist`와 다르거나 응답이 없으면 1로 끝난다. `running none client none`은 응답은 있지만 `bridge` 필드가 없는 경우(이전 Bridge나 다른 service)이고, 요청 자체가 실패하면 `did not answer`다 |
 | `mise run stop` | LaunchAgent를 내린다(`launchctl bootout`). 이미 내려가 있으면 안내만 한다. 내린 뒤 `redeploy`를 쓰려면 먼저 `start`한다 |
 | `mise run start` | 내려간 LaunchAgent를 `~/Library/LaunchAgents/<label>.plist`(또는 `HERDR_REMOTE_LAUNCHD_PLIST`)로 올리고 Bridge를 시작해 health를 확인한다. 이미 올라가 있으면 실행만 보장한다 |
 | `mise run restart` | `stop` 뒤 plist를 다시 올려 시작한다. `ProgramArguments`를 바꾼 뒤에는 `redeploy`의 `kickstart`로 반영되지 않으므로 이 task를 쓴다 |
@@ -214,6 +214,8 @@ release tag 없이 Git revision이 version이다. `go build`는 checkout의 `vcs
 - 설치된 client build가 열려 있는 화면과 다르면 목록 위에 새로고침 안내가 뜬다.
 - 터미널에서는 `mise run status`가 같은 값을 HEAD와 비교한다. 설치된 binary 파일과 실행 중인 process는 다를 수
   있으므로 실행 중인 값은 API 응답에서만 읽는다.
+- Go는 `.git` directory가 있는 checkout에서만 이 checkout의 stamp를 심는다. git worktree(`.git`이 파일)에서 build하면
+  stamp가 없거나 바깥 checkout의 revision이 들어가므로 `install`·`redeploy`는 build 전에 멈춘다. 배포는 main checkout에서 한다.
 
 ```sh
 mkdir -p ~/.local/state/herdr-remote

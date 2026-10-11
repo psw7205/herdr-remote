@@ -29,8 +29,11 @@ deps() {
 }
 
 compile() {
-	pnpm --dir web build
 	go build -o "bin/$name" ./cmd/bridge
+}
+
+build_web() {
+	pnpm --dir web build
 }
 
 install_bin() {
@@ -82,20 +85,24 @@ binary_build() {
 
 # The Vite build stamps its bundle hash into index.html (web/plugins/buildId.ts).
 dist_build() {
-	sed -n 's/.*<meta name="herdr-build" content="\([0-9a-f]\{16\}\)".*/\1/p' web/dist/index.html 2>/dev/null | head -n 1
+	sed -n 's/.*<meta name="herdr-build" content="\([0-9a-f]\{16\}\)".*/\1/p' web/dist/index.html 2>/dev/null | head -n 1 || true
 }
 
 # running_build -> "<revision> <modified> <client_build>" from the Bridge that
-# answers the health URL. The file at $target may already be a newer binary
-# than the process, so only the API says what runs.
+# answers the health URL, or no output when nothing answers. An answer without
+# a "bridge" object (an older Bridge, another service) yields "none false none".
+# The file at $target may already be a newer binary than the process, so only
+# the API says what runs.
 running_build() {
 	local body bridge
 	body=$(curl -fs --max-time 2 "$health_url") || return 1
-	bridge=$(grep -oE '"bridge":\{[^}]*\}' <<<"$body" | head -n 1)
+	# Without `|| true`, a grep that finds nothing ends the process substitution
+	# under set -e and pipefail before it prints.
+	bridge=$(grep -oE '"bridge":\{[^}]*\}' <<<"$body" | head -n 1) || true
 	local revision modified client
-	revision=$(grep -oE '"revision":"[0-9a-f]*"' <<<"$bridge" | cut -d'"' -f4)
-	modified=$(grep -oE '"modified":(true|false)' <<<"$bridge" | cut -d: -f2)
-	client=$(grep -oE '"client_build":"[0-9a-f]*"' <<<"$bridge" | cut -d'"' -f4)
+	revision=$(grep -oE '"revision":"[0-9a-f]*"' <<<"$bridge" | cut -d'"' -f4) || true
+	modified=$(grep -oE '"modified":(true|false)' <<<"$bridge" | cut -d: -f2) || true
+	client=$(grep -oE '"client_build":"[0-9a-f]*"' <<<"$bridge" | cut -d'"' -f4) || true
 	echo "${revision:-none} ${modified:-false} ${client:-none}"
 }
 
@@ -110,7 +117,10 @@ verify_running() {
 		echo "deploy: running Bridge is $(short "$revision"), HEAD is $(short "$1")" >&2
 		ok=1
 	fi
-	if [[ -n $2 && $client != "$2" ]]; then
+	if [[ -z $2 ]]; then
+		echo "deploy: web/dist has no client build id; run '$0 build'" >&2
+		ok=1
+	elif [[ $client != "$2" ]]; then
 		echo "deploy: running Bridge serves client $client, web/dist has $2" >&2
 		ok=1
 	fi
@@ -118,6 +128,29 @@ verify_running() {
 		echo "deploy: running Bridge was built from a modified tree"
 	fi
 	return $ok
+}
+
+# require_git_dir: Go stamps vcs.* from the nearest enclosing .git that is a
+# directory, so a git worktree (whose .git is a file) gets no stamp or, nested
+# in another checkout, that checkout's revision and status. When both HEADs
+# match, verify_compiled cannot tell the worktree's uncommitted code apart.
+require_git_dir() {
+	[[ -d .git ]] || die "$PWD has no .git directory (a git worktree or submodule), so Go would not stamp this checkout's revision; run this from the main checkout"
+}
+
+# verify_compiled <head revision>: bin/$name must carry HEAD's VCS stamp, or
+# verify_running would fail only after install_bin replaced $target and the
+# Bridge restarted onto it. It runs before build_web so a refusal leaves the
+# web/dist that the running Bridge serves untouched.
+verify_compiled() {
+	local revision modified
+	read -r revision modified < <(binary_build "bin/$name") || die "bin/$name has no Go build info"
+	if [[ $revision == none ]]; then
+		die "bin/$name has no VCS stamp (GOFLAGS=-buildvcs=false, or git not on PATH); not installing"
+	fi
+	if [[ $revision != "$1" ]]; then
+		die "bin/$name is $(short "$revision"), HEAD is $(short "$1"); not installing"
+	fi
 }
 
 status() {
@@ -235,6 +268,7 @@ restart() {
 
 redeploy() {
 	require_launchd redeploy
+	require_git_dir
 	local info
 	info=$(launchctl print "$service" 2>/dev/null) ||
 		die "LaunchAgent '$label' is not loaded; run '$0 start' (see contrib/launchd/herdr-remote.plist.example) or set HERDR_REMOTE_LAUNCHD_LABEL"
@@ -252,6 +286,8 @@ redeploy() {
 	go test -race ./...
 	pnpm --dir web test
 	compile
+	verify_compiled "$head_revision"
+	build_web
 	install_bin
 
 	launchctl kickstart -k "$service"
@@ -274,10 +310,15 @@ case ${1:-} in
 build)
 	deps
 	compile
+	build_web
 	;;
 install)
+	require_git_dir
+	read -r head_revision _ < <(head_build)
 	deps
 	compile
+	verify_compiled "$head_revision"
+	build_web
 	install_bin
 	;;
 redeploy) redeploy ;;

@@ -1,4 +1,4 @@
-// The cache suffix below is replaced at build time (web/plugins/swBuildId.ts). A new
+// The cache suffix below is replaced at build time (web/plugins/buildId.ts). A new
 // deploy yields a new worker and cache; `activate` drops the previous caches.
 const shell = 'herdr-chat-shell-__BUILD_ID__'
 const precache = ['/', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-512-maskable.png']
