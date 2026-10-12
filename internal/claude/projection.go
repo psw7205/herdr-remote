@@ -9,10 +9,16 @@ import (
 
 type Projection struct {
 	nodes map[string]Record
-	leaf  string
+	// dangling holds every parent ID a stored record references while that
+	// parent is not stored. Stored chains are acyclic, so a new record closes a
+	// cycle only when it is its own parent or a stored record already names it.
+	dangling map[string]bool
+	leaf     string
 }
 
-func NewProjection() *Projection { return &Projection{nodes: make(map[string]Record)} }
+func NewProjection() *Projection {
+	return &Projection{nodes: make(map[string]Record), dangling: make(map[string]bool)}
+}
 func (p *Projection) Add(r Record) error {
 	if r.ID == "" {
 		return nil
@@ -23,13 +29,19 @@ func (p *Projection) Add(r Record) error {
 		}
 		return nil
 	}
-	seen := map[string]bool{r.ID: true}
-	for id := r.ParentID; id != ""; id = p.nodes[id].ParentID {
-		if seen[id] {
-			return errors.New("transcript parent cycle")
+	if r.ParentID == r.ID || p.dangling[r.ID] {
+		seen := map[string]bool{r.ID: true}
+		for id := r.ParentID; id != ""; id = p.nodes[id].ParentID {
+			if seen[id] {
+				return errors.New("transcript parent cycle")
+			}
+			seen[id] = true
 		}
-		seen[id] = true
 	}
+	if _, ok := p.nodes[r.ParentID]; r.ParentID != "" && !ok {
+		p.dangling[r.ParentID] = true
+	}
+	delete(p.dangling, r.ID)
 	p.nodes[r.ID] = r
 	p.leaf = r.ID
 	return nil

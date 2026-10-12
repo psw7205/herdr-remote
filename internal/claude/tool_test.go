@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/psw7205/herdr-remote/internal/transcript"
 )
@@ -247,5 +248,16 @@ func TestSummaries(t *testing.T) {
 		if len(got) != 1 || got[0].Tool.Summary != c.want || got[0].Tool.Name != c.name {
 			t.Errorf("%s %v: got %+v, want summary %q", c.name, c.input, got, c.want)
 		}
+	}
+}
+
+func TestCappedTextDoesNotKeepTheOriginal(t *testing.T) {
+	text := strings.Repeat("a", toolDetailBytes-1) + "가" + strings.Repeat("b", 4*toolDetailBytes)
+	got, truncated := capText(text)
+	if !truncated || got != text[:toolDetailBytes-1] {
+		t.Fatalf("truncated=%v, len %d, want %d bytes ending before the split rune", truncated, len(got), toolDetailBytes-1)
+	}
+	if unsafe.StringData(got) == unsafe.StringData(text) {
+		t.Fatal("capped text shares the original's memory")
 	}
 }

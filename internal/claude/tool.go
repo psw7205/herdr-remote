@@ -171,5 +171,5 @@ func capText(text string) (string, bool) {
 	for cut > 0 && !utf8.RuneStart(text[cut]) {
 		cut--
 	}
-	return text[:cut], true
+	return strings.Clone(text[:cut]), true
 }

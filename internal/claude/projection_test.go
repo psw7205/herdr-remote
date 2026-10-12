@@ -84,3 +84,111 @@ func TestProjectionOfPerBlockRecords(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+func addAll(t *testing.T, p *Projection, records ...Record) {
+	t.Helper()
+	for _, r := range records {
+		if err := p.Add(r); err != nil {
+			t.Fatalf("add %s: %v", r.ID, err)
+		}
+	}
+}
+
+func messageIDs(p *Projection) []string {
+	var ids []string
+	for _, m := range p.Messages() {
+		ids = append(ids, m.ID)
+	}
+	return ids
+}
+
+func assertCycle(t *testing.T, err error) {
+	t.Helper()
+	if err == nil || err.Error() != "transcript parent cycle" {
+		t.Fatalf("got %v, want transcript parent cycle", err)
+	}
+}
+
+func TestInOrderChainProjectsEveryRecord(t *testing.T) {
+	p := NewProjection()
+	addAll(t, p,
+		Record{ID: "u", Role: "user", Text: "q"},
+		Record{ID: "a", ParentID: "u", Role: "assistant", Text: "a"},
+		Record{ID: "u2", ParentID: "a", Role: "user", Text: "q2"},
+		Record{ID: "a2", ParentID: "u2", Role: "assistant", Text: "a2"},
+	)
+	if got, want := messageIDs(p), []string{"u", "a", "u2", "a2"}; !slices.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestChildBeforeParentIsNotACycle(t *testing.T) {
+	p := NewProjection()
+	addAll(t, p,
+		Record{ID: "c", ParentID: "p", Role: "assistant", Text: "c"},
+		Record{ID: "c2", ParentID: "p", Role: "assistant", Text: "c2"},
+		Record{ID: "p", ParentID: "root", Role: "user", Text: "p"},
+	)
+	if got, want := messageIDs(p), []string{"p"}; !slices.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	addAll(t, p,
+		Record{ID: "d", ParentID: "c", Role: "user", Text: "d"},
+		Record{ID: "root", Role: "user", Text: "root"},
+		Record{ID: "e", ParentID: "d", Role: "assistant", Text: "e"},
+	)
+	if got, want := messageIDs(p), []string{"root", "p", "c", "d", "e"}; !slices.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestParentArrivingAfterItsChildCanCloseACycle(t *testing.T) {
+	p := NewProjection()
+	addAll(t, p, Record{ID: "c", ParentID: "p", Role: "assistant", Text: "c"})
+	assertCycle(t, p.Add(Record{ID: "p", ParentID: "c", Role: "user", Text: "p"}))
+
+	q := NewProjection()
+	addAll(t, q,
+		Record{ID: "c", ParentID: "p", Role: "assistant", Text: "c"},
+		Record{ID: "p", ParentID: "g", Role: "user", Text: "p"},
+	)
+	assertCycle(t, q.Add(Record{ID: "g", ParentID: "c", Role: "assistant", Text: "g"}))
+	if got, want := messageIDs(q), []string{"p"}; !slices.Equal(got, want) {
+		t.Fatalf("rejected record moved the leaf: got %q, want %q", got, want)
+	}
+	addAll(t, q,
+		Record{ID: "g", Role: "assistant", Text: "g"},
+		Record{ID: "d", ParentID: "c", Role: "user", Text: "d"},
+	)
+	if got, want := messageIDs(q), []string{"g", "p", "c", "d"}; !slices.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestSelfParentIsACycle(t *testing.T) {
+	p := NewProjection()
+	addAll(t, p, Record{ID: "u", Role: "user", Text: "q"})
+	assertCycle(t, p.Add(Record{ID: "a", ParentID: "a", Role: "assistant", Text: "a"}))
+	if got, want := messageIDs(p), []string{"u"}; !slices.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestRepeatedRecordIsIgnoredAndConflictIsRejected(t *testing.T) {
+	p := NewProjection()
+	addAll(t, p,
+		Record{ID: "c", ParentID: "p", Role: "assistant", Text: "c"},
+		Record{ID: "p", Role: "user", Text: "p"},
+		Record{ID: "c", ParentID: "p", Role: "assistant", Text: "c"},
+	)
+	if got, want := messageIDs(p), []string{"p"}; !slices.Equal(got, want) {
+		t.Fatalf("repeat moved the leaf: got %q, want %q", got, want)
+	}
+	err := p.Add(Record{ID: "c", ParentID: "p", Role: "assistant", Text: "changed"})
+	if err == nil || err.Error() != "conflicting transcript UUID requires resync" {
+		t.Fatalf("got %v, want conflicting UUID", err)
+	}
+	if got, want := messageIDs(p), []string{"p"}; !slices.Equal(got, want) {
+		t.Fatalf("conflict moved the leaf: got %q, want %q", got, want)
+	}
+}
