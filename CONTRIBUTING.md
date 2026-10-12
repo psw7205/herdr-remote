@@ -60,7 +60,7 @@ production mode로 build해 headless Chrome(기본은 macOS Google Chrome, `CHRO
 | Go Bridge | `mise run test`, `mise run vet` |
 | React/TypeScript/PWA | `mise exec -- pnpm --dir web test`, `mise exec -- pnpm --dir web build` |
 | protocol·두 영역 공통 변경 | 위 네 명령 모두 |
-| `scripts/`·`mise.toml` task | `mise exec -- shellcheck scripts/*.sh`, scratch `PREFIX`와 별도 LaunchAgent로 실제 task 실행 |
+| `scripts/`·`mise.toml` task | `mise exec -- shellcheck scripts/*.sh scripts/mobile-e2e/*.sh`, scratch `PREFIX`와 별도 LaunchAgent로 실제 task 실행 |
 | 문서 | `git diff --check`, relative link·실제 명령·개인 경로 유입 확인 |
 | Herdr 본체 | `herdr` repo가 요구하는 검증 및 affected runtime scenario |
 
@@ -73,7 +73,7 @@ mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
 ```
 
 GitHub Actions(`.github/workflows/ci.yml`)는 push와 pull request마다 Ubuntu runner에서 `mise.toml`의 version으로
-`mise run vet`, `mise run test`, `shellcheck scripts/*.sh`, `pnpm --dir web install --frozen-lockfile`,
+`mise run vet`, `mise run test`, `shellcheck scripts/*.sh scripts/mobile-e2e/*.sh`, `pnpm --dir web install --frozen-lockfile`,
 `pnpm --dir web test`, `pnpm --dir web build`를 실행한다. 위 표의 Go Bridge·React/TypeScript/PWA·protocol 행과
 `scripts/`의 shellcheck가 CI 범위다. `measure:layout`(Chrome), `scripts/deploy.sh` task의 실제 실행, `doctor`,
 격리 Herdr, 실기기 검증은 CI가 맡지 않으며 CI 성공으로 대체하지 않는다. workflow는 secret과 host별 값을 쓰지 않는다.
@@ -132,6 +132,28 @@ mise exec -- go run ./cmd/bridge -herdr-socket <e2e socket> -receipts-dir "$E2E/
   Claude 사용자 설정 `~/.claude.json`의 `projects`에서 임시 directory 경로 항목 삭제(신뢰 확인 수락이 남긴
   기록이다. 실행 중인 Claude도 이 파일을 쓰므로 백업 후 바꾸고 다시 확인한다) → default pane·PID 비교.
 - 결과는 `docs/records/verification.md`에 날짜 section으로 남기고 native ID·binding은 placeholder로 쓴다.
+
+## Android emulator 확인
+
+issue가 "실기기"로 미룬 touch·keyboard·잠금·연결 끊김·PWA 동작은 이 Mac의 Android emulator로 대신 확인한다.
+`scripts/mobile-e2e/`가 그 환경을 만든다. 격리 Herdr 환경(위 절)을 script로 묶은 것이라 같은 규칙이 적용된다.
+
+```sh
+scripts/mobile-e2e/herdr-e2e.sh up          # 격리 server·임시 project의 Claude·개발용 Bridge(8797). E2E_URL 출력
+scripts/mobile-e2e/android.sh up            # AVD boot, adb reverse, Chrome에 E2E_URL, DevTools forward(9222)
+node scripts/mobile-e2e/cdp.mjs center 'button[aria-label="위 화살표"]'   # device px 좌표
+scripts/mobile-e2e/android.sh hold 980 2130 1000                         # 실제 touch 입력
+node scripts/mobile-e2e/cdp.mjs eval 'document.title'                   # page 상태
+scripts/mobile-e2e/android.sh down && scripts/mobile-e2e/herdr-e2e.sh down
+```
+
+- host별 값은 env로 준다: `ANDROID_SDK_ROOT`, `HERDR_E2E_AVD`(기본 Pixel_4_API_31), `HERDR_E2E_PORT`, `HERDR_E2E_MODEL`,
+  `HERDR_E2E_DIR`. 기본 AVD는 Android 12·Chrome 120이다.
+- `herdr-e2e.sh down`은 Bridge·server·session·test transcript·`~/.claude.json`의 임시 project 항목을 지우고,
+  default server의 pane 목록과 `claude` PID를 `up` 시점과 대조해 출력한다. diff가 있으면 default server를 건드린 것이다.
+- 확인하지 못하는 것: iOS의 탭·keyboard·PWA 설치(이 Mac의 Xcode에는 Simulator.app이 없어 Safari 캡처만 가능), 실제 phone의
+  tailnet 경유 접속, 다른 tailnet 사용자 identity 거부, 실기기의 시간 값. 결과는 `docs/records/verification.md`에
+  실측·unit test·미확인을 구분해 남긴다.
 
 ## 문서와 변경 제출
 
