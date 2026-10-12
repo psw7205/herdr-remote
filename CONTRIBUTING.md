@@ -72,6 +72,12 @@ Herdr가 없는 환경에서도 synthetic fixture 기반 unit/integration 테스
 mise exec -- go run ./cmd/doctor -socket "$HERDR_SOCKET_PATH"
 ```
 
+GitHub Actions(`.github/workflows/ci.yml`)는 push와 pull request마다 Ubuntu runner에서 `mise.toml`의 version으로
+`mise run vet`, `mise run test`, `shellcheck scripts/*.sh`, `pnpm --dir web install --frozen-lockfile`,
+`pnpm --dir web test`, `pnpm --dir web build`를 실행한다. 위 표의 Go Bridge·React/TypeScript/PWA·protocol 행과
+`scripts/`의 shellcheck가 CI 범위다. `measure:layout`(Chrome), `scripts/deploy.sh` task의 실제 실행, `doctor`,
+격리 Herdr, 실기기 검증은 CI가 맡지 않으며 CI 성공으로 대체하지 않는다. workflow는 secret과 host별 값을 쓰지 않는다.
+
 ## 실제 handoff 검증
 
 실행 전후의 pane, foreground process incarnation, native session identity를 기록한다.
