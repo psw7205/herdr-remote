@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { ArrowDown, ArrowUp, CornerDownLeft, ZoomIn, ZoomOut } from 'lucide-react'
 import { sendCommand, terminalFrame, type Session } from './api'
+import { startHold, type Hold } from './holdRepeat'
 import { Notice } from './Notice'
 import { agentName } from './presentation'
 import { TopBar } from './TopBar'
@@ -16,6 +17,10 @@ const FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 // to its 5s timeout plus the 500ms layout read, yet abandons a fetch stalled by a
 // network switch long before the browser would, so polling resumes.
 const FRAME_TIMEOUT_MS = 6000
+// A new command took 15–19ms and a receipt 4KiB (docs/records/verification.md,
+// P2-06): about 8 per second leaves headroom, and a 10s hold costs about 330KiB.
+const HOLD_DELAY_MS = 400
+const HOLD_INTERVAL_MS = 120
 const FONT_KEY = 'terminal-font'
 
 function storedFont(): FontChoice {
@@ -64,14 +69,41 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
   const sizes = useRef({ applied: 0, fit: 0 })
   const refit = useRef<() => void>(() => {})
   const follow = useRef<() => void>(() => {})
-  const sender = useRef(Promise.resolve())
-  const emit = (type: 'terminal_input' | 'interrupt', text: string) => {
+  const sender = useRef<Promise<unknown>>(Promise.resolve())
+  const emit = (type: 'terminal_input' | 'interrupt', text: string): Promise<boolean> => {
     follow.current()
-    sender.current = sender.current.then(async () => {
+    const sent = sender.current.then(async () => {
       const response = await sendCommand(session, type, text, crypto.randomUUID())
-      if (response.status !== 'accepted') setError(response.status === 'delivery_unknown' ? '입력이 전달됐는지 확인하지 못했습니다. 다시 누르기 전에 화면을 확인하세요.' : '세션이 바뀌었거나 입력이 거부됐습니다.')
-    }).catch(() => setError('Terminal 연결이 끊겼습니다. agent는 계속 실행 중입니다.'))
+      if (response.status === 'accepted') return true
+      setError(response.status === 'delivery_unknown' ? '입력이 전달됐는지 확인하지 못했습니다. 다시 누르기 전에 화면을 확인하세요.' : '세션이 바뀌었거나 입력이 거부됐습니다.')
+      return false
+    }).catch(() => { setError('Terminal 연결이 끊겼습니다. agent는 계속 실행 중입니다.'); return false })
+    sender.current = sent
+    return sent
   }
+  const hold = useRef<Hold | undefined>(undefined)
+  const release = () => { hold.current?.release(); hold.current = undefined }
+  const cancel = () => { hold.current?.cancel(); hold.current = undefined }
+  const press = (event: PointerEvent<HTMLButtonElement>, text: string) => {
+    if (!event.isPrimary || event.button !== 0) return
+    cancel()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    hold.current = startHold({ send: () => emit('terminal_input', text), delay: HOLD_DELAY_MS, interval: HOLD_INTERVAL_MS })
+  }
+  const arrow = (text: string) => ({
+    onPointerDown: (event: PointerEvent<HTMLButtonElement>) => press(event, text),
+    // Keyboard activation (Enter/Space) arrives as a click with detail 0; pointer clicks are handled above.
+    onClick: (event: MouseEvent<HTMLButtonElement>) => { if (event.detail === 0) void emit('terminal_input', text) },
+    onPointerUp: release,
+    onPointerCancel: cancel,
+    onLostPointerCapture: release,
+    onContextMenu: (event: MouseEvent<HTMLButtonElement>) => event.preventDefault(),
+  })
+  useEffect(() => {
+    const onVisibility = () => { if (document.visibilityState === 'hidden') cancel() }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => { document.removeEventListener('visibilitychange', onVisibility); cancel() }
+  }, [session.id, session.runtime_binding])
   useEffect(() => { fontRef.current = font; refit.current(); storeFont(font) }, [font])
   useEffect(() => {
     const host = root.current
@@ -272,8 +304,8 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
       <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\x1b')}>Esc</button>
       <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\t')}>Tab</button>
       <button type="button" className={styles.key} onClick={() => emit('interrupt', '')}>Ctrl-C</button>
-      <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\x1b[A')} aria-label="위 화살표"><ArrowUp aria-hidden size={18} /></button>
-      <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\x1b[B')} aria-label="아래 화살표"><ArrowDown aria-hidden size={18} /></button>
+      <button type="button" className={styles.key} {...arrow('\x1b[A')} aria-label="위 화살표"><ArrowUp aria-hidden size={18} /></button>
+      <button type="button" className={styles.key} {...arrow('\x1b[B')} aria-label="아래 화살표"><ArrowDown aria-hidden size={18} /></button>
       <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\r')} aria-label="Enter"><CornerDownLeft aria-hidden size={18} /></button>
     </div>
   </div>

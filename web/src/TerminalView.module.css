@@ -66,5 +66,9 @@
   font-size: var(--text-small);
   font-weight: 500;
   font-variant-ligatures: none;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .key:active { background: var(--line-strong); }
