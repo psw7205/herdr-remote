@@ -147,6 +147,7 @@ Composer / Stop / Terminal key
       terminal_input은 terminal 가능
   → Herdr agent.bound_input { target, binding, input{type, text} }
   → 결과 mapping 후 finish: temp file → rename → fsync(dir)
+  Bridge 시작(command.Open): 1분 넘게 남은 `receipt-*` temp만 best effort로 삭제. `<command_id>.json`은 건드리지 않는다
       accepted          → 202
       rejected + code   → 409 (RUNTIME_BINDING_MISMATCH, SESSION_ENDED, AGENT_NOT_READY, HERDR_UNSUPPORTED, SESSION_CHANGED …)
       delivery_unknown  → 202 (Herdr delivery_unknown, 분류 불가 오류, receipt 읽기·완료 기록 실패)
@@ -156,6 +157,11 @@ Composer / Stop / Terminal key
   ([ADR-004](adr.md#adr-004--read-path와-write-path를-분리한다)).
 - browser는 prompt의 `command_id`를 `sessionStorage`에 보존해 reload 뒤 재시도에도 같은 ID를 쓴다.
   `delivery_unknown`은 자동 재전송하지 않는다. interrupt와 `terminal_input`은 매번 새 UUID다.
+- Composer 초안은 기기의 `localStorage`에 `draft:<session id>` key로 둔다. 최대 20개이며 넘으면 가장 오래전에
+  고친 초안부터 지운다. PWA가 종료돼도 남으며, page 수명을 넘어 기기에 남는 prompt 원문은 이 초안뿐이다.
+  대기 중인 `command_id`는 계속 `sessionStorage`에 둔다. 전달 결과를 모르는 동안(`command:<id>`가 남아 있는 동안)은
+  초안을 `localStorage`에 두지 않고 pending command의 text에서 복원한다. 그래서 기기 재시작 뒤 같은 prompt가 새
+  `command_id`로 미리 채워지지 않는다.
 - 근거: [ADR-023](adr.md#adr-023--interrupt는-prompt와-별도-command로-모델링한다),
   [ADR-033](adr.md#adr-033--command-receipt로-retry-중복-실행을-방지한다),
   [ADR-034](adr.md#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다),
@@ -173,7 +179,9 @@ client connect
   → 같은 channel로 live event
 client
   - 같은 epoch의 sequence ≤ last는 무시, gap이나 epoch 불일치면 WS를 닫고 재연결
-  - close 뒤 1.2s, 연결 실패 뒤 2s에 재연결. foreground 복귀(visibilitychange) 시 스스로 재연결
+  - close 뒤 1.2s, 연결 실패 뒤 2s에 재연결. snapshot GET은 15s timeout이며 timeout이 이어지면 120s까지 두 배씩 늘린다
+  - foreground 복귀(visibilitychange) 시 열린·연결 중인 WS를 스스로 닫고 0s에 재연결. online은 handshake 중인 WS만 닫고
+    열린 WS는 그대로 둔다. 세 event(visible·pageshow·online) 모두 대기 중인 재연결 timer를 즉시 실행하고 연결 중이면 무시한다
 ```
 
 - epoch는 `stream.New`(Bridge 시작, 새 item)와 `Reset`(transcript 재동기화, 비활성 item 복귀)에서
@@ -219,6 +227,11 @@ frame이나 raw output history를 보장하지 않는다
   상태에서는 화면 폭보다 긴 입력 줄의 끝을 입력 중에 따라가지 않는다.
 - reset은 frame과 같은 write에 넣어 갱신 사이에 빈 Terminal이 그려지지 않게 한다(`web/src/TerminalView.tsx`).
 - key bar는 `mousedown` 기본 동작을 막아 focus를 xterm 입력에 남긴다. 그래서 key를 눌러도 soft keyboard가 닫히지 않는다.
+- 위·아래 화살표는 누르는 순간 보내지 않는다. 400ms 전에 손을 떼면 그때 한 번 보내고, 계속 누르고 있으면 400ms에
+  첫 입력을 보낸 뒤 120ms 간격으로 반복한다. 반복마다 별도 `terminal_input` command와 receipt를 쓰고, 다음 반복은
+  이전 전송이 끝난 뒤에 보낸다. 손을 떼거나 결과가 `accepted`가 아니면 멈춘다. key bar를 가로로 밀어 browser가
+  pointer를 취소(`pointercancel`)하거나 화면이 hidden이 되거나 `runtime_binding`이 바뀌면 그 뒤로 보내지 않고,
+  400ms 전이면 아무것도 보내지 않는다(`web/src/holdRepeat.ts`).
 - `pane.read`와 `pane.layout`은 별도 호출이라 그 사이의 resize를 구분하지 못한다.
 
 ### 4.5 새 session 시작
@@ -387,7 +400,7 @@ network 계층 ACL은 [P0-03](https://github.com/psw7205/herdr-remote/issues/2)�
 | Bridge | Go `net/http`(method pattern routing), `coder/websocket`, `fsnotify`, `log/slog`. 단일 process([ADR-010](adr.md#adr-010--bridge는-single-process-control-plane으로-시작한다)) |
 | Client | React + TypeScript + Vite, pnpm. Terminal은 `@xterm/xterm` |
 | Toolchain | `mise.toml` |
-| Persistence | `command_id`당 JSON receipt 파일 하나(`O_EXCL` reserve, fsync, temp+rename finish). conversation DB·Redis·broker 없음 |
+| Persistence | `command_id`당 JSON receipt 파일 하나(`O_EXCL` reserve, fsync, temp+rename finish, 시작 시 오래된 temp 정리). conversation DB·Redis·broker 없음 |
 | Transport | semantic event는 WebSocket, Terminal frame은 HTTP polling으로 물리적으로 분리([ADR-028](adr.md#adr-028--terminal-stream과-semantic-event-stream을-논리적으로-분리한다)) |
 | Transcript watch | transcript 파일 `fsnotify` + 1s polling reconciliation, offset 이후 incremental read |
 
