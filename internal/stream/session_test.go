@@ -60,3 +60,25 @@ func TestSlowSubscriberDisconnectsWithoutStoppingSession(t *testing.T) {
 		t.Fatal("stream stopped")
 	}
 }
+func TestReplayAfterEvictionStartsAtOldestKeptEvent(t *testing.T) {
+	s := New("session")
+	epoch := s.Snapshot().Cursor.Epoch
+	for i := 0; i < 1100; i++ {
+		s.Append("message.user", fmt.Sprintf("%d", i))
+	}
+	r, _, stop := s.Subscribe(Cursor{Epoch: epoch, Sequence: 76})
+	stop()
+	if len(r) != 1024 {
+		t.Fatalf("replayed %d events", len(r))
+	}
+	for i, e := range r {
+		if e.Type != "message.user" || e.Cursor.Sequence != uint64(77+i) || string(e.Payload) != fmt.Sprintf(`"%d"`, 76+i) {
+			t.Fatalf("replay[%d] = %+v", i, e)
+		}
+	}
+	r, _, stop = s.Subscribe(Cursor{Epoch: epoch, Sequence: 75})
+	stop()
+	if len(r) != 1 || r[0].Type != "session.snapshot" {
+		t.Fatalf("evicted cursor replayed %d events", len(r))
+	}
+}

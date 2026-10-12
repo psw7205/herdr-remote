@@ -38,9 +38,9 @@ func TestRingStaysWithinBoundsUnderLargePayloads(t *testing.T) {
 	}
 }
 
-// ringDriver counts the Events the ring's backing array still references.
-// Trimming with ring[1:] leaves the older Events, and their payloads, in the
-// array until append moves the ring to a new one.
+// ringDriver follows the ring's backing array. Trimming with ring[1:] leaves
+// the leading slots in the array until append moves the ring to a new one;
+// Commit empties them, so they hold an Event struct but no payload.
 type ringDriver struct {
 	s        *Session
 	arrayCap int
@@ -60,12 +60,12 @@ func (d *ringDriver) append(payload json.RawMessage) {
 	}
 	d.prevCap = cap(d.s.ring)
 }
-func (d *ringDriver) retained() int { return d.arrayCap - cap(d.s.ring) + len(d.s.ring) }
-func (d *ringDriver) full() bool    { return len(d.s.ring) == 1024 }
+func (d *ringDriver) slots() int { return d.arrayCap - cap(d.s.ring) + len(d.s.ring) }
+func (d *ringDriver) full() bool { return len(d.s.ring) == 1024 }
 
 // atArrayStart and atArrayEnd bracket one backing array's life once the ring
 // is full: right after append reallocated, and just before it will.
-func (d *ringDriver) atArrayStart() bool { return d.steady && d.retained() == len(d.s.ring)+1 }
+func (d *ringDriver) atArrayStart() bool { return d.steady && d.slots() == len(d.s.ring)+1 }
 func (d *ringDriver) atArrayEnd() bool   { return d.steady && cap(d.s.ring) == len(d.s.ring) }
 func liveHeap() uint64 {
 	runtime.GC()
@@ -73,6 +73,34 @@ func liveHeap() uint64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	return m.HeapAlloc
+}
+
+func TestFullRingHeapStaysNearLimit(t *testing.T) {
+	const limit = 8<<20 + 512<<10
+	payload := payloadOf(8 << 10)
+	base := liveHeap()
+	d := &ringDriver{s: New("claude:00000000-0000-4000-8000-00000000000a")}
+	var starts, ends int
+	for d.appends < 4000 {
+		d.append(payload)
+		start, end := d.atArrayStart(), d.atArrayEnd()
+		if !d.full() || !start && !end {
+			continue
+		}
+		if heap := liveHeap() - base; heap > limit {
+			t.Fatalf("after %d appends the ring holds %d bytes of heap across %d slots, limit %d", d.appends, heap, d.slots(), limit)
+		}
+		if start {
+			starts++
+		}
+		if end {
+			ends++
+		}
+	}
+	runtime.KeepAlive(d.s)
+	if starts == 0 || ends == 0 {
+		t.Fatalf("sampled %d array starts and %d array ends", starts, ends)
+	}
 }
 
 // BenchmarkRingFootprint reports the live heap of one full ring. Each
@@ -91,7 +119,7 @@ func measureRing(b *testing.B, size int) {
 	base := liveHeap()
 	d := &ringDriver{s: New("claude:00000000-0000-4000-8000-00000000000a")}
 	var minHeap, maxHeap uint64
-	var minRetained, maxRetained, samples int
+	var minSlots, maxSlots, samples int
 	for d.appends < 6000 {
 		d.append(payload)
 		if !d.full() || !d.atArrayStart() && !d.atArrayEnd() {
@@ -99,10 +127,10 @@ func measureRing(b *testing.B, size int) {
 		}
 		heap := liveHeap() - base
 		if samples == 0 || heap < minHeap {
-			minHeap, minRetained = heap, d.retained()
+			minHeap, minSlots = heap, d.slots()
 		}
 		if heap > maxHeap {
-			maxHeap, maxRetained = heap, d.retained()
+			maxHeap, maxSlots = heap, d.slots()
 		}
 		samples++
 	}
@@ -110,9 +138,9 @@ func measureRing(b *testing.B, size int) {
 	mib := float64(1 << 20)
 	b.ReportMetric(float64(minHeap)/mib, "min-MiB")
 	b.ReportMetric(float64(maxHeap)/mib, "max-MiB")
-	b.ReportMetric(float64(minRetained), "min-events")
-	b.ReportMetric(float64(maxRetained), "max-events")
-	b.ReportMetric(float64(maxHeap)/float64(maxRetained)-float64(len(payload)), "overhead-B/event")
+	b.ReportMetric(float64(minSlots), "min-slots")
+	b.ReportMetric(float64(maxSlots), "max-slots")
+	b.ReportMetric(float64(maxHeap)/float64(len(d.s.ring))-float64(len(payload)), "overhead-B/event")
 	b.ReportMetric(float64(unsafe.Sizeof(Event{})), "Event-B")
 	b.ReportMetric(float64(samples), "samples")
 }
@@ -141,6 +169,6 @@ func BenchmarkRingFootprint36Sessions(b *testing.B) {
 		mib := float64(1 << 20)
 		b.ReportMetric(float64(low)/mib, "array-start-MiB")
 		b.ReportMetric(float64(high)/mib, "array-end-MiB")
-		b.ReportMetric(float64(drivers[0].retained()), "events/session")
+		b.ReportMetric(float64(drivers[0].slots()), "slots/session")
 	}
 }

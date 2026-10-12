@@ -85,6 +85,7 @@ func (s *Session) Commit(state any, changes []Change) error {
 		s.bytes += len(event.Payload)
 		for len(s.ring) > 1024 || s.bytes > 8<<20 {
 			s.bytes -= len(s.ring[0].Payload)
+			s.ring[0] = Event{}
 			s.ring = s.ring[1:]
 		}
 		s.broadcast(event)

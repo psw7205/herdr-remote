@@ -7,10 +7,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
+	"time"
 )
 
 // Payload fields other than Text belong to session_start (ADR-037). They are
@@ -52,6 +55,12 @@ type Store struct {
 
 var validID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
+const tempPrefix = "receipt-"
+
+// A temp younger than this may still be mid-rename in another Bridge that
+// shares the directory; a crash leftover is older than this by the next start.
+const tempMaxAge = time.Minute
+
 func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
@@ -63,7 +72,40 @@ func Open(dir string) (*Store, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, errors.New("receipt directory must be a real directory")
 	}
-	return &Store{dir: dir}, nil
+	s := &Store{dir: dir}
+	s.removeTemps()
+	return s, nil
+}
+
+// removeTemps deletes what a crash inside finish leaves behind. A temp guards
+// no receipt, since reserve wrote <command_id>.json before finish began, so a
+// leftover that cannot be removed is logged and never keeps the Bridge down.
+func (s *Store) removeTemps() {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		slog.Warn("receipt temp cleanup skipped", "error", err)
+		return
+	}
+	removed := false
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), tempPrefix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || !info.Mode().IsRegular() || time.Since(info.ModTime()) < tempMaxAge {
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.dir, e.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("receipt temp file not removed", "name", e.Name(), "error", err)
+			continue
+		}
+		removed = true
+	}
+	if removed {
+		if err := s.syncDir(); err != nil {
+			slog.Warn("receipt directory sync failed after temp cleanup", "error", err)
+		}
+	}
 }
 func digest(r Request) string {
 	b, _ := json.Marshal(r)
@@ -119,7 +161,7 @@ func (s *Store) reserve(r Request) (Result, bool, error) {
 func (s *Store) finish(r Request, result Result) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f, e := os.CreateTemp(s.dir, "receipt-")
+	f, e := os.CreateTemp(s.dir, tempPrefix)
 	if e != nil {
 		return e
 	}
