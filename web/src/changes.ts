@@ -5,8 +5,10 @@ export function statusLabel(status: ChangeStatus): string {
   return statusLabels[status] ?? '변경'
 }
 
+// The Bridge lists a directory entry, such as an untracked nested repository,
+// with a trailing slash; that slash stays with the name.
 export function splitPath(path: string): { dir: string; name: string } {
-  const index = path.lastIndexOf('/')
+  const index = path.lastIndexOf('/', path.length - 2)
   return index < 0 ? { dir: '', name: path } : { dir: path.slice(0, index + 1), name: path.slice(index + 1) }
 }
 

@@ -10,6 +10,10 @@ describe('changed file presentation', () => {
     expect(splitPath('src/charts/Line.tsx')).toEqual({ dir: 'src/charts/', name: 'Line.tsx' })
     expect(splitPath('README.md')).toEqual({ dir: '', name: 'README.md' })
   })
+  it('keeps the trailing slash of a directory entry in its name', () => {
+    expect(splitPath('nested/')).toEqual({ dir: '', name: 'nested/' })
+    expect(splitPath('a/b/nested/')).toEqual({ dir: 'a/b/', name: 'nested/' })
+  })
   it('sums only the counts the Bridge knows', () => {
     const files: ChangedFile[] = [
       { path: 'a', status: 'modified', additions: 3, deletions: 1 },

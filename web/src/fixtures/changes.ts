@@ -18,8 +18,9 @@ const cache = file('src/charts/ChartCache.ts', 'renamed', 1, 1, { old_path: 'src
 const preview = file('public/preview.png', 'modified', null, null, { binary: true })
 const link = file('config/local.json', 'added', null, null, { untracked: true })
 const notes = file('docs/rendering-notes.md', 'modified', 1, 1)
+const nested = file('nested/', 'added', null, null, { untracked: true })
 
-const dashboard = repository('perf/chart-render', [preview, cache, lineChart, downsample, legacy, notes, link], [
+const dashboard = repository('perf/chart-render', [preview, cache, lineChart, downsample, legacy, notes, link, nested], [
   text(lineChart, `diff --git a/src/charts/LineChart.tsx b/src/charts/LineChart.tsx
 index 3f1a2b0..9c4d7e1 100644
 --- a/src/charts/LineChart.tsx
@@ -88,6 +89,7 @@ index 1b2c3d4..5e6f7a8 100644
 `),
   { ...preview, content: 'binary', diff: '', truncated: false },
   { ...link, content: 'none', diff: '', truncated: false },
+  { ...nested, content: 'none', diff: '', truncated: false },
   text(notes, `diff --git a/docs/rendering-notes.md b/docs/rendering-notes.md
 index 0a1b2c3..4d5e6f7 100644
 --- a/docs/rendering-notes.md

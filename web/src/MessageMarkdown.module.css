@@ -48,6 +48,8 @@
 .prose input[type="checkbox"] { margin: 0 0.5em 0 0; vertical-align: -0.1em; accent-color: var(--accent); }
 
 .tableScroll { max-width: 100%; overflow-x: auto; margin: 0 0 0.75em; overscroll-behavior-x: contain; }
+/* Cells inherit .prose overflow-wrap: anywhere, which lets auto table layout shrink columns to the header and break words mid-word. */
+[data-scroll="x"] :is(th, td) { overflow-wrap: break-word; }
 .prose table { border-collapse: collapse; font-size: var(--text-small); font-variant-numeric: tabular-nums; }
 .prose th, .prose td { padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .prose th { font-weight: 600; color: var(--ink-soft); white-space: nowrap; border-bottom-color: var(--line-strong); }

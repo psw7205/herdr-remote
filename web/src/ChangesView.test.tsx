@@ -26,6 +26,10 @@ describe('changed file list', () => {
     expect(html).toContain('>binary<')
     expect(html).toContain('href="#session=claude%3Aa&amp;view=changes&amp;file=src%2Fnew.ts"')
   })
+  it('names a directory entry by its last segment', () => {
+    const html = list({ ...changes, total: 1, files: [{ path: 'vendor/nested/', status: 'added', untracked: true, additions: null, deletions: null }] })
+    expect(html).toMatch(/>nested\/<\/span><span[^>]*>vendor\/<\/span>/)
+  })
   it('never attributes the changes to an agent', () => {
     const html = list(changes)
     expect(html).toContain('사람이 고친 내용도 함께 보입니다')
