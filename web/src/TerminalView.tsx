@@ -21,6 +21,7 @@ const FRAME_TIMEOUT_MS = 6000
 // P2-06): about 8 per second leaves headroom, and a 10s hold costs about 330KiB.
 const HOLD_DELAY_MS = 400
 const HOLD_INTERVAL_MS = 120
+const DRAG_OFF_PX = 12
 const FONT_KEY = 'terminal-font'
 
 function storedFont(): FontChoice {
@@ -97,6 +98,13 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
     onPointerUp: release,
     onPointerCancel: cancel,
     onLostPointerCapture: release,
+    // Pointer capture delivers pointerup to the key even after the finger left
+    // it, so a drag off the key must cancel instead of counting as a tap.
+    onPointerMove: (event: PointerEvent<HTMLButtonElement>) => {
+      if (!hold.current) return
+      const r = event.currentTarget.getBoundingClientRect()
+      if (event.clientX < r.left - DRAG_OFF_PX || event.clientX > r.right + DRAG_OFF_PX || event.clientY < r.top - DRAG_OFF_PX || event.clientY > r.bottom + DRAG_OFF_PX) cancel()
+    },
     onContextMenu: (event: MouseEvent<HTMLButtonElement>) => event.preventDefault(),
   })
   useEffect(() => {

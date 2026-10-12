@@ -230,8 +230,8 @@ frame이나 raw output history를 보장하지 않는다
 - 위·아래 화살표는 누르는 순간 보내지 않는다. 400ms 전에 손을 떼면 그때 한 번 보내고, 계속 누르고 있으면 400ms에
   첫 입력을 보낸 뒤 120ms 간격으로 반복한다. 반복마다 별도 `terminal_input` command와 receipt를 쓰고, 다음 반복은
   이전 전송이 끝난 뒤에 보낸다. 손을 떼거나 결과가 `accepted`가 아니면 멈춘다. key bar를 가로로 밀어 browser가
-  pointer를 취소(`pointercancel`)하거나 화면이 hidden이 되거나 `runtime_binding`이 바뀌면 그 뒤로 보내지 않고,
-  400ms 전이면 아무것도 보내지 않는다(`web/src/holdRepeat.ts`).
+  pointer를 취소(`pointercancel`)하거나 손가락이 key 밖(12px 여유)으로 나가거나 화면이 hidden이 되거나
+  `runtime_binding`이 바뀌면 그 뒤로 보내지 않고, 400ms 전이면 아무것도 보내지 않는다(`web/src/holdRepeat.ts`).
 - `pane.read`와 `pane.layout`은 별도 호출이라 그 사이의 resize를 구분하지 못한다.
 
 ### 4.5 새 session 시작
