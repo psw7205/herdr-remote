@@ -108,8 +108,8 @@ export async function supersededBy(id: string | null, sessions: Session[], ended
   const next = successorOf(data.session)
   return next ? sessions.find(item => item.id === next) ?? null : null
 }
-export async function getSession(id: string): Promise<{ session: Session; snapshot: Snapshot }> {
-  return readJSON(await fetch(`/api/sessions/${encodeURIComponent(id)}`, { cache: 'no-store' }))
+export async function getSession(id: string, signal?: AbortSignal): Promise<{ session: Session; snapshot: Snapshot }> {
+  return readJSON(await fetch(`/api/sessions/${encodeURIComponent(id)}`, { cache: 'no-store', signal }))
 }
 export async function sendCommand(session: Session, kind: 'prompt' | 'interrupt' | 'terminal_input', text: string, commandID: string): Promise<Delivery> {
   const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/commands`, {

@@ -5,11 +5,14 @@ import { applyMessageEvent, chatEntries, textCount, toolsLive } from './chatItem
 import { chooseCommand, pendingCommandCopy, readPending, rejectedMessage, type PendingCommand } from './commandDelivery'
 import { composerHint, eventURL, getSession, lifecycleNotice, sendCommand, sessionLifecycle, type Cursor, type Event, type Message, type Session } from './api'
 import { Composer, type ComposerStatus } from './Composer'
+import { readDraft, writeDraft } from './draftStore'
 import { Notice, type NoticeAction } from './Notice'
 import { agentName, projectName, statusPresentation } from './presentation'
+import { CLOSE_RETRY_MS, createReconnector } from './reconnect'
 import { StatusBadge } from './StatusBadge'
 import { dividerLabel } from './time'
 import { ToolGroup } from './ToolActivity'
+import { TimeoutError, withTimeout } from './withTimeout'
 import { TopBar } from './TopBar'
 import { useStickToBottom } from './useStickToBottom'
 import styles from './SessionChat.module.css'
@@ -18,6 +21,12 @@ import ui from './ui.module.css'
 type DeliveryStatus = ComposerStatus & { kind?: 'accepted' | 'pending' }
 const UNCERTAIN = '같은 내용을 다시 보내면 중복 없이 확인합니다.'
 const ACCEPTED_NOTICE_MS = 8000
+// A snapshot fetch stalled by a suspend or network switch would otherwise hold
+// the reconnector in `connecting`, where wake events are no-ops; failing it
+// lets the 2s retry take over. The limit doubles after each timeout so a large
+// snapshot on a slow link still completes instead of restarting forever.
+const SNAPSHOT_TIMEOUT_MS = 15000
+const SNAPSHOT_TIMEOUT_MAX_MS = 120000
 
 // Memoized so typing in the composer or a metadata poll does not re-render
 // (and re-parse the Markdown of) a long conversation. Tool calls belong to the
@@ -48,7 +57,7 @@ export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initia
   const [messages, setMessages] = useState<Message[]>([])
   const [loaded, setLoaded] = useState(false)
   const [connection, setConnection] = useState<'syncing' | 'connected' | 'disconnected'>('syncing')
-  const [draft, setDraft] = useState(() => sessionStorage.getItem(`draft:${initial.id}`) ?? '')
+  const [draft, setDraft] = useState(() => readPending(`command:${initial.id}`)?.text ?? readDraft(initial.id))
   const [pending, setPending] = useState<PendingCommand | null>(() => readPending(`command:${initial.id}`))
   const [delivery, setDelivery] = useState<DeliveryStatus | null>(() => readPending(`command:${initial.id}`) ? { tone: 'warning', text: `이전 입력이 전달됐는지 확인하지 못했습니다. ${UNCERTAIN}`, kind: 'pending' } : null)
   const [sending, setSending] = useState(false)
@@ -65,7 +74,10 @@ export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initia
   const texts = textCount(messages)
   const { away, unseen, toBottom } = useStickToBottom(scroller, content, texts)
 
-  useEffect(() => { sessionStorage.setItem(`draft:${session.id}`, draft) }, [draft, session.id])
+  // While delivery is uncertain the draft lives only in the pending command
+  // (sessionStorage), so a device restart cannot offer the same prompt again
+  // under a new command_id after the receipt reference is gone.
+  useEffect(() => { writeDraft(session.id, pending ? '' : draft) }, [draft, session.id, pending])
   useEffect(() => {
     if (echoAfter.current === null || texts <= echoAfter.current) return
     echoAfter.current = null
@@ -75,12 +87,19 @@ export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initia
 
   useEffect(() => {
     let alive = true
-    let reconnect: ReturnType<typeof setTimeout> | undefined
     let ws: WebSocket | undefined
     // A reconnect this client started on returning to the foreground is not a lost connection.
     let resuming = false
+    let snapshotTimeout = SNAPSHOT_TIMEOUT_MS
     const load = async () => {
-      const data = await getSession(initial.id)
+      let data
+      try {
+        data = await withTimeout(signal => getSession(initial.id, signal), snapshotTimeout)
+      } catch (error) {
+        if (error instanceof TimeoutError) snapshotTimeout = Math.min(snapshotTimeout * 2, SNAPSHOT_TIMEOUT_MAX_MS)
+        throw error
+      }
+      snapshotTimeout = SNAPSHOT_TIMEOUT_MS
       if (!alive) return
       setSession(data.session)
       setMessages(Array.isArray(data.snapshot.data) ? data.snapshot.data : [])
@@ -94,7 +113,7 @@ export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initia
         if (!alive || !cursor.current) return
         ws = new WebSocket(eventURL(initial.id, cursor.current))
         socket.current = ws
-        ws.onopen = () => { if (alive) { resuming = false; setConnection('connected') } }
+        ws.onopen = () => { if (alive) { reconnect.connected(); setConnection('connected') } }
         ws.onmessage = message => {
           if (!alive) return
           try {
@@ -122,20 +141,43 @@ export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initia
         }
         ws.onclose = () => {
           if (!alive) return
-          setConnection(resuming ? 'syncing' : 'disconnected')
-          reconnect = setTimeout(connect, 1200)
+          const forced = resuming
+          resuming = false
+          setConnection(forced ? 'syncing' : 'disconnected')
+          reconnect.schedule(forced ? 0 : CLOSE_RETRY_MS)
         }
-      } catch {
-        if (!alive) return
-        setConnection('disconnected')
-        reconnect = setTimeout(connect, 2000)
+      } catch (error) {
+        if (alive) setConnection('disconnected')
+        throw error
       }
     }
-    const visible = () => { if (document.visibilityState === 'visible' && ws) { resuming = true; ws.close() } }
+    const reconnect = createReconnector(connect)
+    // A socket that was open or still shaking hands when the device slept or
+    // changed networks may be dead without the browser noticing for minutes, so
+    // the foreground return closes it and reconnects at once. A network return
+    // closes only a pending handshake; an open socket is left alone (#26).
+    const closeStale = (openToo: boolean) => {
+      const stale = ws && (ws.readyState === WebSocket.CONNECTING || (openToo && ws.readyState === WebSocket.OPEN))
+      if (stale) { resuming = true; ws?.close() } else reconnect.wake()
+    }
+    const visible = () => { if (document.visibilityState === 'visible') closeStale(true) }
+    const online = () => closeStale(false)
+    const wake = () => reconnect.wake()
     document.addEventListener('visibilitychange', visible)
-    void connect()
+    window.addEventListener('pageshow', wake)
+    window.addEventListener('online', online)
+    void reconnect.start()
     const metadata = setInterval(() => { void getSession(initial.id).then(data => { if (alive) setSession(data.session) }).catch(() => {}) }, 3000)
-    return () => { alive = false; clearTimeout(reconnect); clearInterval(metadata); document.removeEventListener('visibilitychange', visible); ws?.close(); socket.current = null }
+    return () => {
+      alive = false
+      reconnect.cancel()
+      clearInterval(metadata)
+      document.removeEventListener('visibilitychange', visible)
+      window.removeEventListener('pageshow', wake)
+      window.removeEventListener('online', online)
+      ws?.close()
+      socket.current = null
+    }
   }, [initial.id])
 
   const clearPending = () => {

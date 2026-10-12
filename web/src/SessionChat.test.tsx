@@ -6,8 +6,21 @@ import { SessionChat } from './SessionChat'
 const session: Session = { id: 'claude:a', agent: 'claude', pane_id: 'w1:p1', project: '/work/a', title: 'A', status: 'working', runtime_binding: 'b', chat: true, terminal: true, active: true, lifecycle: 'active' }
 const render = (initial: Session) => renderToStaticMarkup(<SessionChat initial={initial} onBack={() => {}} onTerminal={() => {}} />)
 
-beforeEach(() => { vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: () => {}, removeItem: () => {} }) })
+beforeEach(() => {
+  vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: () => {}, removeItem: () => {} })
+  vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {}, removeItem: () => {}, key: () => null, length: 0 })
+})
 afterEach(() => vi.unstubAllGlobals())
+
+describe('draft restore', () => {
+  it('restores the draft from the pending command, never from the device draft, while delivery is uncertain', () => {
+    vi.stubGlobal('sessionStorage', { getItem: (key: string) => key === 'command:claude:a' ? JSON.stringify({ id: '00000000-0000-4000-8000-000000000001', binding: 'b', text: 'pending prompt' }) : null, setItem: () => {}, removeItem: () => {} })
+    vi.stubGlobal('localStorage', { length: 1, key: () => 'draft:claude:a', getItem: (key: string) => key === 'draft:claude:a' ? JSON.stringify({ text: 'device draft', updated: 1 }) : null, setItem: () => {}, removeItem: () => {} })
+    const html = render({ ...session, status: 'idle' })
+    expect(html).toContain('pending prompt')
+    expect(html).not.toContain('device draft')
+  })
+})
 
 describe('composer controls', () => {
   it('offers Stop as its own action while the agent works, never in the Send slot', () => {
