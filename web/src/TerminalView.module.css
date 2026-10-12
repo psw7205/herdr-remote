@@ -7,6 +7,9 @@
   overflow: hidden;
   background: var(--terminal-bg);
   color: var(--ink);
+  /* A pinch anywhere on the screen sets the Terminal font size (TerminalView)
+     instead of zooming the page. */
+  touch-action: pan-x pan-y;
 }
 .label { font-weight: 500; color: var(--ink-soft); }
 
@@ -34,7 +37,6 @@
   overflow: auto;
   padding: 8px max(8px, env(safe-area-inset-right)) 8px max(8px, env(safe-area-inset-left));
   overscroll-behavior: contain;
-  touch-action: pan-x pan-y pinch-zoom;
 }
 
 .keys {

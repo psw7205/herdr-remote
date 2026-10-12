@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cellWidth, displayWidth, fitFontSize, frameDimensions, gridSize, keyboardViewport, MAX_FONT_SIZE, MIN_FONT_SIZE, stepZoom, type GridSize } from './terminalSizing'
+import { cellWidth, displayWidth, fitFontSize, fontSizeFor, frameDimensions, gridSize, keyboardViewport, MAX_FONT_SIZE, MIN_FIT_FONT_SIZE, MIN_FONT_SIZE, parseFontChoice, pinchFont, revealScroll, stepFont, type GridSize } from './terminalSizing'
 
 describe('frameDimensions', () => {
   it('counts rows and widest line without ANSI escapes', () => {
@@ -107,18 +107,18 @@ describe('fitFontSize', () => {
     expect(size * 0.6 * 60).toBeLessThanOrEqual(374)
   })
 
-  it('stops at the minimum so wide panes scroll horizontally', () => {
-    expect(fitFontSize({ availableWidth: 374, cols: 161, cellRatio: 0.6 })).toBe(MIN_FONT_SIZE)
+  it('fits a wide desktop pane as an overview below the readable minimum', () => {
+    const size = fitFontSize({ availableWidth: 374, cols: 161, cellRatio: 0.6 })
+    expect(size).toBe(3.75)
+    expect(size * 0.6 * 161).toBeLessThanOrEqual(374)
   })
 
-  it('caps the fitted size for narrow panes and applies zoom', () => {
+  it('stops at the fit minimum so a very wide pane scrolls horizontally', () => {
+    expect(fitFontSize({ availableWidth: 374, cols: 400, cellRatio: 0.6 })).toBe(MIN_FIT_FONT_SIZE)
+  })
+
+  it('caps the fitted size for narrow panes', () => {
     expect(fitFontSize({ availableWidth: 1000, cols: 40, cellRatio: 0.6 })).toBe(16)
-    expect(fitFontSize({ availableWidth: 374, cols: 60, cellRatio: 0.6, zoom: 2 })).toBe(20.75)
-    expect(fitFontSize({ availableWidth: 374, cols: 60, cellRatio: 0.6, zoom: 0.5 })).toBe(MIN_FONT_SIZE)
-  })
-
-  it('clamps a zoomed size at the maximum', () => {
-    expect(fitFontSize({ availableWidth: 1000, cols: 40, cellRatio: 0.6, zoom: 3 })).toBe(MAX_FONT_SIZE)
   })
 
   it('uses the default ratio for an unmeasured renderer', () => {
@@ -126,11 +126,82 @@ describe('fitFontSize', () => {
   })
 })
 
-describe('stepZoom', () => {
-  it('moves between zoom steps and stays in range', () => {
-    expect(stepZoom(1, 1)).toBe(1.25)
-    expect(stepZoom(1, -1)).toBe(0.75)
-    expect(stepZoom(0.5, -1)).toBe(0.5)
-    expect(stepZoom(3, 1)).toBe(3)
+describe('fontSizeFor', () => {
+  it('follows the fit size or keeps a chosen size within range', () => {
+    expect(fontSizeFor('fit', 4.5)).toBe(4.5)
+    expect(fontSizeFor(11, 4.5)).toBe(11)
+    expect(fontSizeFor(2, 4.5)).toBe(MIN_FONT_SIZE)
+    expect(fontSizeFor(99, 4.5)).toBe(MAX_FONT_SIZE)
+  })
+})
+
+describe('stepFont', () => {
+  it('steps up from fit to the next readable size', () => {
+    expect(stepFont(4.5, 4.5, 1)).toBe(6)
+    expect(stepFont(12, 12, 1)).toBe(14)
+  })
+
+  it('steps between sizes, including from a pinched size', () => {
+    expect(stepFont(10, 4.5, 1)).toBe(11)
+    expect(stepFont(10.5, 4.5, 1)).toBe(11)
+    expect(stepFont(10.5, 4.5, -1)).toBe(10)
+    expect(stepFont(32, 4.5, 1)).toBe(MAX_FONT_SIZE)
+  })
+
+  it('lands on fit instead of going smaller than fit', () => {
+    expect(stepFont(6, 4.5, -1)).toBe('fit')
+    expect(stepFont(14, 12, -1)).toBe('fit')
+  })
+})
+
+describe('pinchFont', () => {
+  it('scales the starting size by the finger distance', () => {
+    expect(pinchFont(6, 100, 200, 4.5)).toBe(12)
+    expect(pinchFont(12, 200, 150, 4.5)).toBe(9)
+    expect(pinchFont(10, 100, 133, 4.5)).toBe(13.5)
+  })
+
+  it('returns to fit when pinched below it and caps at the maximum', () => {
+    expect(pinchFont(6, 200, 100, 4.5)).toBe('fit')
+    expect(pinchFont(20, 100, 400, 4.5)).toBe(MAX_FONT_SIZE)
+  })
+
+  it('keeps the start for a degenerate gesture', () => {
+    expect(pinchFont(10, 0, 100, 4.5)).toBe(10)
+    expect(pinchFont(4.5, 0, 100, 4.5)).toBe('fit')
+  })
+})
+
+describe('revealScroll', () => {
+  it('keeps the scroll when the cell is already in view', () => {
+    expect(revealScroll(100, 300, 150, 10)).toBe(100)
+  })
+  it('moves the least to show a cell before or after the view', () => {
+    expect(revealScroll(100, 300, 40, 10)).toBe(40)
+    expect(revealScroll(100, 300, 500, 10)).toBe(210)
+  })
+  it('shows the start of a cell larger than the view', () => {
+    expect(revealScroll(0, 20, 100, 30)).toBe(100)
+  })
+  it('keeps a margin around the cell', () => {
+    expect(revealScroll(100, 300, 380, 10, 40)).toBe(130)
+    expect(revealScroll(100, 300, 120, 10, 40)).toBe(80)
+    expect(revealScroll(100, 300, 200, 10, 40)).toBe(100)
+  })
+  it('shrinks the margin to fit the view and never scrolls before zero', () => {
+    expect(revealScroll(0, 30, 100, 10, 40)).toBe(90)
+    expect(revealScroll(50, 300, 10, 10, 40)).toBe(0)
+  })
+})
+
+describe('parseFontChoice', () => {
+  it('reads a stored size and falls back to fit', () => {
+    expect(parseFontChoice('11')).toBe(11)
+    expect(parseFontChoice('10.5')).toBe(10.5)
+    expect(parseFontChoice(null)).toBe('fit')
+    expect(parseFontChoice('')).toBe('fit')
+    expect(parseFontChoice('fit')).toBe('fit')
+    expect(parseFontChoice('3')).toBe('fit')
+    expect(parseFontChoice('99')).toBe('fit')
   })
 })

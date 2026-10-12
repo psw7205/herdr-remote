@@ -196,7 +196,7 @@ TerminalView, visible일 때 1s 간격 poll
       → pane.read { source: visible, format: ansi, strip_ansi: false }
       → pane.layout의 pane rect(zoomed면 tab area) → cols/rows render hint (500ms timeout, 실패 시 생략)
       → agent.binding 다시 확인 후 frame 반환. 불일치·실패는 409 SESSION_CHANGED
-  → xterm.js: 이전과 같은 frame이면 건너뛰고, 다르면 term.write(ESC c + frame.text) 한 번
+  → xterm.js: 이전과 같은 frame이면 건너뛰고, 다르면 term.write(ESC c + frame.text + CR + cursor 숨김) 한 번
       local grid·font size만 조정, scrollback 0
 key 입력 → command_type terminal_input (4.2 경로)
 ```
@@ -208,8 +208,15 @@ frame이나 raw output history를 보장하지 않는다
 - `cols`·`rows`는 pane rect라 border·scrollbar cell을 포함한 상한이다. xterm의 local grid는 이 값과
   frame의 줄 수·가장 긴 visible line 폭 중 큰 값이고, Bridge 값이 없으면 최근 5개 poll의 최댓값이다
   (`web/src/terminalSizing.ts`). 폭은 xterm 기본 Unicode V6 폭표로 센다.
-- font size는 화면 폭에 맞춰 6–16px에서 고르고, 6px로도 넘치면 가로 scroll한다. xterm이 pinch를
-  삼킬 수 있어 `A−`/`맞춤`/`A+` 버튼으로 맞춘 크기에 배율을 곱한다(최대 32px).
+- 기본은 `맞춤`이다. pane 전체 폭이 보이도록 font size를 3–16px에서 고르는 개요이고, 3px로도 넘치면 가로
+  scroll한다. 읽을 때는 `A−`/`A+`(6–32px 단계)나 Terminal 화면 위 두 손가락 pinch로 font size를 고른다. Terminal
+  화면은 page 확대를 막고(`touch-action: pan-x pan-y`) pinch는 font size만 바꾸므로 header와 key bar가 제자리에
+  있다. 손가락 사이 지점은 pinch 전후 같은 자리에 남는다. 고른 크기는 기기의 `localStorage`에 남고 `맞춤`을
+  누르면 지운다(`web/src/terminalSizing.ts`).
+- Herdr frame에는 cursor 위치가 없어 xterm cursor가 frame 글자 끝, agent에서는 상태 줄 끝에 놓인다. 그래서 cursor는
+  숨기고 frame 마지막 줄의 처음에 둔다. 입력은 이 자리를 따라간다. 글자를 치거나 key bar를 누르거나 keyboard가
+  열려 화면이 줄면 이 자리가 보이도록 scroll한다. keyboard를 닫아 화면이 커질 때는 scroll하지 않는다. 확대한
+  상태에서는 화면 폭보다 긴 입력 줄의 끝을 입력 중에 따라가지 않는다.
 - reset은 frame과 같은 write에 넣어 갱신 사이에 빈 Terminal이 그려지지 않게 한다(`web/src/TerminalView.tsx`).
 - key bar는 `mousedown` 기본 동작을 막아 focus를 xterm 입력에 남긴다. 그래서 key를 눌러도 soft keyboard가 닫히지 않는다.
 - `pane.read`와 `pane.layout`은 별도 호출이라 그 사이의 resize를 구분하지 못한다.

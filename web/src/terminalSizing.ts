@@ -165,33 +165,68 @@ export function keyboardViewport(viewport: { height: number; offsetTop: number; 
   return { height: viewport.height, top: viewport.offsetTop }
 }
 
-export const MIN_FONT_SIZE = 6
+// Fit shows the whole pane width as an overview, so it may go below a readable
+// size; reading happens at a size the user picks (buttons or pinch).
+export const MIN_FIT_FONT_SIZE = 3
 export const MAX_FIT_FONT_SIZE = 16
+export const MIN_FONT_SIZE = 6
 export const MAX_FONT_SIZE = 32
 export const DEFAULT_CELL_RATIO = 0.6
+export const FONT_STEPS = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32] as const
+
+// 'fit' follows the pane width; a number is a font size the user chose.
+export type FontChoice = 'fit' | number
 
 export type FitInput = {
   availableWidth: number
   cols: number
   // Rendered cell width divided by font size, measured from xterm when possible.
   cellRatio: number
-  // User zoom multiplier; 1 means fit to width.
-  zoom?: number
 }
 
-// Font size that fits `cols` cells into `availableWidth`. Below MIN_FONT_SIZE
-// the terminal keeps the minimum and the container scrolls horizontally.
-export function fitFontSize({ availableWidth, cols, cellRatio, zoom = 1 }: FitInput): number {
+// Font size that fits `cols` cells into `availableWidth`. Below
+// MIN_FIT_FONT_SIZE the terminal keeps the minimum and the container scrolls.
+export function fitFontSize({ availableWidth, cols, cellRatio }: FitInput): number {
   const ratio = cellRatio > 0 ? cellRatio : DEFAULT_CELL_RATIO
   const fit = availableWidth > 0 && cols > 0 ? availableWidth / (cols * ratio) : MAX_FIT_FONT_SIZE
-  const fitted = clamp(fit, MIN_FONT_SIZE, MAX_FIT_FONT_SIZE)
-  return clamp(Math.floor(fitted * zoom * 4) / 4, MIN_FONT_SIZE, MAX_FONT_SIZE)
+  return clamp(Math.floor(fit * 4) / 4, MIN_FIT_FONT_SIZE, MAX_FIT_FONT_SIZE)
 }
 
-export const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3] as const
+export function fontSizeFor(choice: FontChoice, fit: number): number {
+  return choice === 'fit' ? fit : clamp(choice, MIN_FONT_SIZE, MAX_FONT_SIZE)
+}
 
-export function stepZoom(zoom: number, direction: 1 | -1): number {
-  const index = ZOOM_STEPS.findIndex(step => step >= zoom)
-  const current = index < 0 ? ZOOM_STEPS.length - 1 : index
-  return ZOOM_STEPS[clamp(current + direction, 0, ZOOM_STEPS.length - 1)]
+// A smaller size than fit only adds empty space, so stepping or pinching
+// below it lands on fit.
+function toChoice(size: number, fit: number): FontChoice {
+  return size <= fit ? 'fit' : clamp(size, MIN_FONT_SIZE, MAX_FONT_SIZE)
+}
+
+export function stepFont(current: number, fit: number, direction: 1 | -1): FontChoice {
+  const next = direction > 0
+    ? FONT_STEPS.find(step => step > current) ?? MAX_FONT_SIZE
+    : [...FONT_STEPS].reverse().find(step => step < current) ?? fit
+  return toChoice(next, fit)
+}
+
+// Font size after a two-finger pinch that started at `startFont` with the
+// fingers `startDistance` apart, rounded to half a pixel.
+export function pinchFont(startFont: number, startDistance: number, distance: number, fit: number): FontChoice {
+  if (startDistance <= 0 || distance <= 0) return toChoice(startFont, fit)
+  return toChoice(Math.round(startFont * (distance / startDistance) * 2) / 2, fit)
+}
+
+// Scroll offset that brings [start, start + size) and `margin` around it into a
+// view of `view` length with the least movement, like scrollIntoView's
+// 'nearest'. The margin shrinks when the view cannot hold it.
+export function revealScroll(scroll: number, view: number, start: number, size: number, margin = 0): number {
+  const pad = clamp(margin, 0, Math.max(0, (view - size) / 2))
+  if (start - pad < scroll) return Math.max(0, start - pad)
+  if (start + size + pad > scroll + view) return Math.max(0, Math.min(start - pad, start + size + pad - view))
+  return scroll
+}
+
+export function parseFontChoice(stored: string | null): FontChoice {
+  const size = Number(stored)
+  return stored !== null && stored !== '' && Number.isFinite(size) && size >= MIN_FONT_SIZE && size <= MAX_FONT_SIZE ? size : 'fit'
 }
