@@ -40,15 +40,18 @@ Herdr server나 사용자 agent를 종료해서 port 문제를 해결하지 않�
 Herdr와 Bridge 없이 UI 상태를 확인할 때는 Vite만 띄우고 `http://127.0.0.1:5173/fixture.html`에
 접속한다. `?scenario=`로 `long`, `live`, `disconnected`, `delivery-unknown`, `rejected`, `empty`,
 `herdr-down`, `unsupported`, `slow`, `superseded`, `start-trust`, `start-unknown`, `no-root`, `codex`, `changes-large`,
-`tools`, `stale-client`를 고를 수 있다. `stale-client`는 설치된 client build가 열린 화면과 달라 새로고침 안내가 뜨는
+`tools`, `stale-client`, `wide-table`을 고를 수 있다. `stale-client`는 설치된 client build가 열린 화면과 달라 새로고침 안내가 뜨는
 상태다. `tools`는 작업 중 session에 tool group(접힘, 오류, 결과 없음, 잘린 결과)을 보이고, 실행 중인
 tool이 몇 초 뒤 `message.updated`로 끝나는 흐름을 재생한다. 변경된 파일 화면은 모든 scenario에서 session마다 다른 상태(수정·추가·삭제·이름 변경·binary,
 변경 없음, Git repository 아님, 조회 오류)를 보이고, `changes-large`는 파일 수와 diff 크기 상한에 걸린
-화면을 보인다. `/`로 시작하는 입력은 transcript에서 숨는 slash command처럼 echo 없이 수락된다. 이 page는
+화면을 보인다. `wide-table`은 열 12개짜리 넓은 표와 긴 code block을 보인다. `/`로 시작하는 입력은 transcript에서 숨는 slash command처럼 echo 없이 수락된다. 이 page는
 fetch와 WebSocket만 가짜 Bridge로 바꾸고 실제 client code를 그대로 실행한다. 데이터는 `web/src/fixtures/`의 익명 sample뿐이며 production
 build에는 포함되지 않는다. 실제 session으로 화면을 확인할 때는 screenshot을 추적 파일에 남기지 않는다.
 dev server의 CSS는 build처럼 낮춰지지 않는다(`light-dark()` 등). 색이나 theme을 바꾸면 build한
 화면에서도 확인한다.
+`mise exec -- pnpm --dir web --silent measure:layout`은 `web/dist`와 별도로 fixture page를 임시 directory에
+production mode로 build해 headless Chrome(기본은 macOS Google Chrome, `CHROME_BIN`으로 변경)으로 폭 360·390·412의 `wide-table` 표·code block 가로 scroll과 page 넘침을
+측정하고 JSON을 stdout에 낸다. 실패하면 exit 1이다. `--silent`가 없으면 pnpm의 실행 banner가 stdout의 JSON 앞에 붙는다.
 
 ## 변경별 검증
 

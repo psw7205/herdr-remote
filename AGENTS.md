@@ -43,7 +43,7 @@
 | `internal/tailnet/` | Tailscale CLI 조회, owner·host 자동 감지. `tailscale.com` dependency 없음 |
 | `internal/gitstate/` | session project의 Git 변경을 `git` CLI로 read-only 조회. repo config의 명령 실행 차단 |
 | `web/src/`, `web/public/` | thin client, Markdown, Terminal, PWA |
-| `scripts/`, `contrib/` | 로컬 build·install·redeploy, process manager 예시. host별 값은 Git 밖 |
+| `scripts/`, `contrib/`, `web/scripts/` | 로컬 build·install·redeploy, process manager 예시, headless Chrome layout 측정. host별 값은 Git 밖 |
 
 Agent-specific parser나 Herdr socket logic을 browser로 옮기지 않는다. Go에서는 `net/http`,
 `coder/websocket`, `fsnotify`, `log/slog`를 사용하고 frontend는 React/TypeScript/Vite를 유지한다.

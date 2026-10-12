@@ -26,7 +26,7 @@ export type Scenario = {
   script?: { session: string; steps: ScriptStep[] }
 }
 export type ScriptStep = { after: number; type: 'message.tool' | 'message.updated' | 'message.assistant'; message: Message; status?: Session['status'] }
-export const scenarioNames = ['default', 'long', 'live', 'disconnected', 'delivery-unknown', 'rejected', 'empty', 'herdr-down', 'unsupported', 'slow', 'superseded', 'start-trust', 'start-unknown', 'no-root', 'codex', 'changes-large', 'tools', 'stale-client'] as const
+export const scenarioNames = ['default', 'long', 'live', 'disconnected', 'delivery-unknown', 'rejected', 'empty', 'herdr-down', 'unsupported', 'slow', 'superseded', 'start-trust', 'start-unknown', 'no-root', 'codex', 'changes-large', 'tools', 'stale-client', 'wide-table'] as const
 export type ScenarioName = typeof scenarioNames[number]
 
 const minute = 60_000
@@ -87,6 +87,30 @@ pnpm --filter dashboard test -- --run src/charts/downsample.test.ts src/charts/c
 \`\`\`
 
 자세한 근거는 [LTTB 설명](https://example.com/lttb)을 참고하세요. 캡처는 첨부하지 않았습니다. ![차트 비교](https://example.invalid/chart.png)`
+
+export const wideTableAnswer = `## Service 점검 결과
+
+여섯 개 service의 배포 상태를 한 표로 모았습니다. 열이 많아서 표만 가로로 밀어 보면 됩니다.
+
+| Service | Owner team | Region | 현재 상태 | p95 latency | Error rate | Deploy strategy | Rollback 절차 | Upstream dependency | Alert channel | 다음 조치 | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| checkout-api | Payments platform team | ap-northeast-2 primary | 정상, 지난 배포 이후 오류 없음 | 182ms, 목표 250ms 이하 | 0.04% over the last 24 hours | Canary 10% then 50% then 100% with automatic pause | 이전 image tag로 되돌리고 migration은 그대로 유지 | inventory-service, fraud-scoring, ledger-writer | payments-oncall channel and the pager rotation | retry budget을 30%에서 20%로 줄이는 변경 검토 | Webhook signature check now runs behind the idempotency guard |
+| search-indexer | Discovery infrastructure | us-west-2 with a warm standby | 지연 증가, queue가 평소의 세 배 | 1,240ms during the nightly reindex | 0.3% mostly from upstream timeouts | Blue-green with a manual traffic switch | standby cluster로 DNS를 돌린 뒤 indexer를 멈춤 | catalog-export, object storage bucket | discovery-alerts channel only during business hours | batch 크기를 줄이고 backpressure 적용 | Reindex window overlaps with the analytics export job |
+| notification-gateway | Messaging core | eu-central-1 and ap-northeast-2 | 일부 지역에서 push 전송 지연 | 410ms for push, 95ms for email | 1.2% on one push provider | Rolling update, two pods at a time | provider 설정을 이전 version으로 되돌림 | push provider A, push provider B, template-store | messaging-oncall channel with an escalation after 15 minutes | 실패한 provider를 자동으로 우회하도록 변경 | Provider B rate limit was lowered without notice last week |
+| report-builder | Analytics enablement | us-east-1 single region | 정상, 다만 월말 batch 대기 중 | 3.8s for large PDF exports | 0.01% across all report types | Manual deploy after the monthly close | feature flag를 끄고 cache를 비움 | warehouse read replica, font-service | analytics-alerts channel and a weekly digest | 월말 전에 worker 수를 두 배로 늘림 | Large exports still render on a single worker thread |
+| auth-session | Identity platform | global edge with regional stores | 정상, token 회전 작업 진행 중 | 64ms at the edge, 140ms at origin | 0.02% mostly expired refresh tokens | Canary per region, starting with the smallest | 이전 signing key를 다시 활성화 | user-directory, key-management-service | identity-oncall channel and the security mailbox | 남은 두 region의 key 회전을 이번 주에 끝냄 | Old refresh tokens stay valid for seven more days |
+| file-upload | Storage experience | ap-northeast-2 with cross-region copy | 대용량 파일에서 간헐적 실패 | 2.1s for files over 100MB | 0.8% on multipart uploads | Rolling update behind a connection drain | upload worker image를 되돌리고 미완료 part 정리 | object storage, virus-scan-service, quota-service | storage-alerts channel with a daily summary | multipart part 크기를 8MB에서 16MB로 조정 | Virus scan queue backs up when many large files arrive together |
+
+비교용으로 retry 설정도 붙입니다. 긴 줄은 code block 안에서만 가로로 밀립니다.
+
+\`\`\`ts
+export const retryPolicy = { maxAttempts: 5, baseDelayMs: 200, maxDelayMs: 8_000, jitter: 'full', retryOn: ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'HTTP_502', 'HTTP_503', 'HTTP_504'] } as const
+export async function withRetry<T>(operation: (attempt: number, signal: AbortSignal) => Promise<T>, policy = retryPolicy, signal = new AbortController().signal): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try { return await operation(attempt, signal) } catch (error) { if (attempt >= policy.maxAttempts || !isRetryable(error, policy.retryOn)) throw error; await sleep(backoff(attempt, policy), signal) }
+  }
+}
+\`\`\``
 
 const tool = (name: string, summary: string, state: ToolActivity['state'], input: object, result: string, ago: number, truncated = false): Message => {
   const id = `fixture-${++counter}`
@@ -241,6 +265,11 @@ export function scenario(name: ScenarioName): Scenario {
         { after: 5500, type: 'message.updated', message: read },
         { after: 6500, type: 'message.assistant', message: message('assistant', 'test 18개가 모두 통과했습니다. 같은 event를 동시에 받아도 한 번만 처리됩니다.', 0), status: 'completed' },
       ] }
+      break
+    }
+    case 'wide-table': {
+      const wide = [message('user', '각 service 배포 상태를 표 하나로 정리해 줘.', 6 * minute), message('assistant', wideTableAnswer, 5 * minute)]
+      out.sessions[1] = { session: withPreview(out.sessions[1].session, wide), messages: wide }
       break
     }
     case 'stale-client': out.bridge = { ...out.bridge, client_build: 'a9b8c7d6e5f40312' }; break
