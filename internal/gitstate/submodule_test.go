@@ -6,11 +6,196 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func checkSubmoduleBoundary(t *testing.T, r *Reader, dir, path, wantStatus, wantCounts, wantPatch string, repos ...string) {
+	t.Helper()
+	ctx := context.Background()
+	status := git(t, dir, "--no-optional-locks", "status", "--porcelain=v2", "--ignore-submodules=dirty")
+	if wantStatus == "" {
+		if status != "" {
+			t.Fatalf("Git status = %q, want no changes", status)
+		}
+	} else if !strings.Contains(status, " "+path+"\n") {
+		t.Fatalf("Git status = %q, want %s", status, path)
+	}
+	args := []string{"--no-optional-locks", "diff-index", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=dirty"}
+	patch := git(t, dir, append(args, "-p", "HEAD", "--", path)...)
+	if wantPatch == "" && patch != "" || !strings.Contains(patch, wantPatch) {
+		t.Fatalf("Git patch = %q, want %q", patch, wantPatch)
+	}
+	numstat := git(t, dir, append(args, "--numstat", "HEAD", "--", path)...)
+	if wantCounts == "+1-1" && numstat != "1\t1\t"+path+"\n" {
+		t.Fatalf("Git numstat = %q", numstat)
+	}
+	if wantStatus == "" && numstat != "" {
+		t.Fatalf("Git numstat = %q, want no changes", numstat)
+	}
+
+	marks := t.TempDir()
+	type indexStamp struct {
+		path string
+		data []byte
+		mod  time.Time
+	}
+	var indexes []indexStamp
+	for i, repo := range append([]string{dir}, repos...) {
+		gitDir := strings.TrimSpace(git(t, repo, "rev-parse", "--absolute-git-dir"))
+		index := filepath.Join(gitDir, "index")
+		data, err := os.ReadFile(index)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(index)
+		if err != nil {
+			t.Fatal(err)
+		}
+		indexes = append(indexes, indexStamp{index, data, info.ModTime()})
+		script := filepath.Join(marks, fmt.Sprintf("guard-%d.sh", i))
+		marker := filepath.Join(marks, fmt.Sprintf("ran-%d", i))
+		if err := os.WriteFile(script, []byte(fmt.Sprintf("#!/bin/sh\necho ran >> %q\ncat\n", marker)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		git(t, repo, "config", "core.fsmonitor", script)
+		git(t, repo, "config", "diff.external", script)
+		git(t, repo, "config", "diff.guard.command", script)
+		git(t, repo, "config", "filter.guard.clean", script)
+		git(t, repo, "config", "filter.guard.required", "true")
+		write(t, gitDir, "info/attributes", "* filter=guard diff=guard\n")
+		write(t, gitDir, "hooks/post-index-change", fmt.Sprintf("#!/bin/sh\necho ran >> %q\n", marker))
+		if err := os.Chmod(filepath.Join(gitDir, "hooks/post-index-change"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"top.txt", "lib.txt"} {
+			file := filepath.Join(repo, name)
+			if _, err := os.Stat(file); err == nil {
+				later := time.Now().Add(5 * time.Second)
+				if err := os.Chtimes(file, later, later); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	changes, err := r.Changes(ctx, dir)
+	if wantStatus == "" {
+		if err != nil || !changes.Repository || changes.Total != 0 || len(changes.Files) != 0 {
+			t.Fatalf("changes = %+v, %v", changes, err)
+		}
+		if _, err := r.Diff(ctx, dir, path); !errors.Is(err, ErrNotChanged) {
+			t.Fatalf("diff = %v", err)
+		}
+	} else {
+		f := onlyFile(t, changes, err)
+		if f.Path != path || f.Status != wantStatus || counts(f) != wantCounts || f.Untracked || f.Binary {
+			t.Fatalf("file = %+v %s", f, counts(f))
+		}
+		diff, err := r.Diff(ctx, dir, path)
+		if err != nil || diff.Content != ContentText || diff.Text != patch || counts(diff.File) != wantCounts || diff.Truncated {
+			t.Fatalf("diff = %+v, %v; Git patch = %q", diff, err, patch)
+		}
+	}
+	for i, before := range indexes {
+		after, err := os.ReadFile(before.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(before.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(before.data, after) || !before.mod.Equal(info.ModTime()) {
+			t.Errorf("Reader rewrote index %d", i)
+		}
+		marker := filepath.Join(marks, fmt.Sprintf("ran-%d", i))
+		if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("Reader ran repo %d config: %v", i, err)
+		}
+	}
+	for i, repo := range append([]string{dir}, repos...) {
+		git(t, repo, "status", "--porcelain=v2")
+		marker := filepath.Join(marks, fmt.Sprintf("ran-%d", i))
+		if _, err := os.Stat(marker); err != nil {
+			t.Fatal("positive control: plain Git did not run repo config", err)
+		}
+	}
+}
+
+func TestUninitializedSubmodulePreservesStagedGitlink(t *testing.T) {
+	for _, staged := range []bool{false, true} {
+		t.Run(fmt.Sprintf("staged=%v", staged), func(t *testing.T) {
+			isolate(t)
+			r := reader(t)
+			up, first, second := upstream(t, nil)
+			dir, sub := superproject(t, up)
+			git(t, sub, "checkout", "-q", first)
+			commitAll(t, dir)
+			if staged {
+				git(t, sub, "checkout", "-q", second)
+				git(t, dir, "add", "sub")
+			}
+			git(t, dir, "submodule", "deinit", "-f", "--", "sub")
+			if _, err := os.Stat(filepath.Join(sub, ".git")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("submodule still initialized: %v", err)
+			}
+			status, counts, patch := "", "none", ""
+			if staged {
+				status, counts, patch = StatusModified, "+1-1", "-Subproject commit "+first+"\n+Subproject commit "+second+"\n"
+			}
+			checkSubmoduleBoundary(t, r, dir, "sub", status, counts, patch)
+		})
+	}
+}
+
+func TestNestedSubmoduleChangesStayAtTheirGitlinkBoundary(t *testing.T) {
+	for _, outer := range []bool{true, false} {
+		t.Run(fmt.Sprintf("outer=%v", outer), func(t *testing.T) {
+			isolate(t)
+			r := reader(t)
+			up, first, second := upstream(t, nil)
+			middle, inner := superproject(t, up)
+			git(t, inner, "checkout", "-q", first)
+			commitAll(t, middle)
+			dir, sub := superproject(t, middle)
+			commitAll(t, dir)
+			git(t, sub, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+			inner = filepath.Join(sub, "sub")
+			git(t, inner, "checkout", "-q", second)
+			if status := git(t, dir, "status", "--porcelain=v2"); !strings.Contains(status, " S.M. ") {
+				t.Fatalf("nested positive control = %q", status)
+			}
+			if outer {
+				checkSubmoduleBoundary(t, r, dir, "sub", "", "none", "", sub, inner)
+			} else {
+				checkSubmoduleBoundary(t, r, sub, "sub", StatusModified, "+1-1", "-Subproject commit "+first+"\n+Subproject commit "+second+"\n", inner)
+			}
+		})
+	}
+}
+
+func TestConflictedGitlinkUsesHeadToWorkTreeDiff(t *testing.T) {
+	isolate(t)
+	r := reader(t)
+	up, first, second := upstream(t, nil)
+	dir, sub := superproject(t, up)
+	git(t, sub, "checkout", "-q", first)
+	commitAll(t, dir)
+	git(t, sub, "checkout", "-q", second)
+	input := fmt.Sprintf("0 %040d\tsub\n160000 %s 1\tsub\n160000 %s 2\tsub\n160000 %s 3\tsub\n", 0, first, first, second)
+	cmd := exec.Command("git", "update-index", "--index-info")
+	cmd.Dir, cmd.Stdin = dir, strings.NewReader(input)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("conflict setup: %v %s", err, out)
+	}
+	if got := git(t, dir, "ls-files", "--unmerged"); strings.Count(got, "\tsub\n") != 3 {
+		t.Fatalf("unmerged = %q", got)
+	}
+	checkSubmoduleBoundary(t, r, dir, "sub", StatusModified, "+1-1", "-Subproject commit "+first+"\n+Subproject commit "+second+"\n", sub)
+}
 
 func head(t *testing.T, dir string) string {
 	t.Helper()
