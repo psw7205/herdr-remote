@@ -131,11 +131,12 @@ mise exec -- go run ./cmd/bridge -herdr-socket <e2e socket> -receipts-dir "$E2E/
   Claude transcript root(Bridge `-claude-dir` 기본값) 아래 임시 directory 이름의 test transcript 삭제 →
   Claude 사용자 설정 `~/.claude.json`의 `projects`에서 임시 directory 경로 항목 삭제(신뢰 확인 수락이 남긴
   기록이다. 실행 중인 Claude도 이 파일을 쓰므로 백업 후 바꾸고 다시 확인한다) → default pane·PID 비교.
-- 결과는 `docs/records/verification.md`에 날짜 section으로 남기고 native ID·binding은 placeholder로 쓴다.
+- 조사·실측 상세는 Git에서 제외한 로컬 `docs/records/`에 날짜 section으로 보관한다. native ID·binding은
+  placeholder로 쓰고, 공개 commit·issue에는 식별 정보 없는 결과 요약과 code·test 근거만 남긴다.
 
 ## Android emulator 확인
 
-issue가 "실기기"로 미룬 touch·keyboard·잠금·연결 끊김·PWA 동작은 이 Mac의 Android emulator로 대신 확인한다.
+issue가 "실기기"로 미룬 touch·keyboard·잠금·연결 끊김·PWA 동작은 Android emulator로 먼저 확인한다.
 `scripts/mobile-e2e/`가 그 환경을 만든다. 격리 Herdr 환경(위 절)을 script로 묶은 것이라 같은 규칙이 적용된다.
 
 ```sh
@@ -151,9 +152,9 @@ scripts/mobile-e2e/android.sh down && scripts/mobile-e2e/herdr-e2e.sh down
   `HERDR_E2E_DIR`. 기본 AVD는 Android 12·Chrome 120이다.
 - `herdr-e2e.sh down`은 Bridge·server·session·test transcript·`~/.claude.json`의 임시 project 항목을 지우고,
   default server의 pane 목록과 `claude` PID를 `up` 시점과 대조해 출력한다. diff가 있으면 default server를 건드린 것이다.
-- 확인하지 못하는 것: iOS의 탭·keyboard·PWA 설치(이 Mac의 Xcode에는 Simulator.app이 없어 Safari 캡처만 가능), 실제 phone의
-  tailnet 경유 접속, 다른 tailnet 사용자 identity 거부, 실기기의 시간 값. 결과는 `docs/records/verification.md`에
-  실측·unit test·미확인을 구분해 남긴다.
+- Android emulator만으로 확인하지 못하는 것: iOS의 탭·keyboard·PWA 설치, 실제 phone의
+  tailnet 경유 접속, 다른 tailnet 사용자 identity 거부, 실기기의 시간 값. 상세는 로컬 `docs/records/`에
+  실측·unit test·미확인을 구분해 보관하고 commit·push하지 않는다.
 
 ## 문서와 변경 제출
 

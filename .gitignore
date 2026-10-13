@@ -19,3 +19,6 @@ mise.local.toml
 .env
 .env.*
 .DS_Store
+
+# Local investigation and runtime verification notes
+/docs/records/

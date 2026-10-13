@@ -1112,9 +1112,9 @@ Client connection loss가 agent process loss처럼 보이면 안 된다.
 아래 표는 핵심 MVP와 후속 optional capability를 구분한다.
 첫 구현은 Claude 하나의 discovery → transcript Chat → 동일 PTY prompt → transcript 응답이며,
 interrupt/reconnect/동일 Terminal fallback을 포함한다. Herdr integration gate를 통과하기 전에는
-write-enabled UI를 구현 완료로 간주하지 않는다. 세부 gate와 미지원 사항은
-[`records/integration-findings.md`](records/integration-findings.md), 실제 검증 결과는
-[`records/verification.md`](records/verification.md)에 기록한다.
+write-enabled UI를 구현 완료로 간주하지 않는다. 검증 절차는
+[CONTRIBUTING](../CONTRIBUTING.md#실제-handoff-검증), 미지원 사항과 결과 요약은
+[GitHub Issues](https://github.com/psw7205/herdr-remote/issues)를 따른다.
 
 | Area                         | MVP   |
 | ---------------------------- | ----- |

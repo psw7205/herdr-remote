@@ -8,7 +8,7 @@
 - 요구와 architecture 결정은 `docs/prd.md`, `docs/adr.md`를 기준으로 한다. PRD는 결정 snapshot이며 현재 구조는
   `docs/architecture.md`가 설명한다. 구현 사실은 code와 runtime에서 검증한다.
 - 문서 배치와 갱신 규칙은 `docs/README.md`를 따른다.
-- Herdr 연동을 바꾸기 전 `docs/records/integration-findings.md`를 읽는다. 과거 조사 결과를 현재 설치 버전의 지원 여부로 단정하지 않는다.
+- Herdr 연동을 바꾸기 전 현재 설치 버전의 공개 schema, 소유 source와 runtime을 확인한다. 로컬 `docs/records/`가 있으면 보조 자료로 읽되 과거 조사 결과를 현재 지원 여부로 단정하지 않는다.
 - `git status --short`와 현재 branch를 확인한다. 기존 사용자 변경을 보존하고 요청 범위만 수정한다.
 - 검토·분석 요청은 read-only다. 구현 요청에는 성공 기준과 관련 검증을 먼저 정한다.
 
@@ -70,7 +70,8 @@ identity·Origin 경계처럼 조용히 실패하거나 되돌릴 수 없는 변
 
 Architecture 책임, persistence, identity, security, protocol 의미가 바뀌면 ADR을 추가하거나
 Status를 바꾸고 `docs/architecture.md`를 현재 상태로 고친다. PRD는 제품 범위가 바뀔 때만 고친다. 남은 작업은 GitHub issue로 관리한다. 기존 항목은 제목의 ID(`P1-02` 등)를 유지하고, 의존 관계는 본문에
-`#N`으로 적는다. 완료는 commit이나 PR의 `Closes #N`으로 닫고 실측 근거는 `docs/records/`에 쓴다.
+`#N`으로 적는다. 완료는 commit이나 PR의 `Closes #N`으로 닫는다. 조사·실측 상세는 Git에서 제외한
+로컬 `docs/records/`에 보관하고, 공개 commit·issue에는 식별 정보 없는 결과 요약과 code·test 근거만 쓴다.
 issue 생성·수정·닫기는 외부 게시이므로 사용자의 해당 요청에 따라 한다.
 
 Tracked 문서에는 개인 절대 경로를 쓰지 않는다. 현재 repo의 파일은 repo-relative 경로로,

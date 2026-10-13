@@ -236,7 +236,8 @@ HERDR_REMOTE_HEALTH_URL = "http://127.0.0.1:8788/api/sessions"
 
 Herdr live handoff는 테스트에서 agent PID·native session을 보존했지만 terminal ID를
 재발급했고 desktop client가 끊긴 동안 geometry를 기본 120×40으로 변경했다. 이 동작은
-mobile Terminal의 resize와 별개다. 검증한 범위와 남은 조건은 [검증 기록](docs/records/verification.md)을 따른다.
+mobile Terminal의 resize와 별개다. 검증 절차는 [CONTRIBUTING](CONTRIBUTING.md#실제-handoff-검증),
+남은 조건은 [handoff issue](https://github.com/psw7205/herdr-remote/issues/10)를 따른다.
 
 ### 진단 출력 공유
 
@@ -254,10 +255,11 @@ prompt와 transcript 본문은 log에 쓰지 않는다.
 | [PRD](docs/prd.md) | 제품 요구와 범위 |
 | [ADR](docs/adr.md) | architecture 결정 |
 | [Architecture](docs/architecture.md) | 결정을 조합한 runtime 구조, data flow, invariant |
-| [검증 기록](docs/records/verification.md) | 날짜별 실제 검증 결과 |
-| [Integration 조사](docs/records/integration-findings.md) | Herdr/Claude/Codex 코드·runtime 근거 |
 | [Herdr patch runbook](docs/herdr-patch.md) | 조건부 입력 patch의 확인·설치·rollback·upgrade |
 | [Issues](https://github.com/psw7205/herdr-remote/issues) | 남은 작업과 완료 기준. label `P0`~`P2`는 우선순위, `in-use`·`blocked`·`optional`은 상태 |
+
+로컬 조사·실측 상세는 Git에서 제외한 `docs/records/`에 보관한다. 공개 문서에는 현재 동작과
+재사용할 결론을, commit·issue에는 식별 정보 없는 검증 요약을 남긴다.
 
 ## License
 

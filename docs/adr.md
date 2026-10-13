@@ -5,6 +5,10 @@
 각 ADR의 상태는 해당 ADR의 `Status`를 따른다. 결정을 조합한 전체 구조는 [architecture.md](architecture.md)에 있다.
 `runtime_binding`, epoch, fail closed 같은 용어는 [용어](architecture.md#용어)를 따른다.
 
+**2026-10-13 문서 관리 note.** 아래 ADR에서 언급한 조사·실측 상세는 로컬 기록으로 보관한다.
+원문의 결정과 관찰은 유지하되 공개 기록 링크를 제거했다. 현재 구현과 검증 근거는
+[architecture](architecture.md), [CONTRIBUTING](../CONTRIBUTING.md), 관련 issue와 code·test를 따른다.
+
 | ID | 제목 | Status |
 | --- | --- | --- |
 | [ADR-001](#adr-001--herdr를-runtime-owner로-유지한다) | ADR-001 — Herdr를 Runtime Owner로 유지한다 | Accepted |
@@ -1914,7 +1918,7 @@ background / foreground recovery.
 ### Status
 
 Accepted. Completed (2026-09-24): 첫 vertical slice의 handoff flow를 실측했다
-([검증 기록](records/verification.md#첫-vertical-slice-검증-2026-09-24)). 실기기 reconnect는 [P0-02](https://github.com/psw7205/herdr-remote/issues/1)에서 추적한다.
+(검증 기록). 실기기 reconnect는 [P0-02](https://github.com/psw7205/herdr-remote/issues/1)에서 추적한다.
 
 ### Decision
 
@@ -2138,7 +2142,7 @@ lifecycle owner가 둘이 되거나 같은 conversation에 process가 둘 붙는
 
 Herdr 공개 API는 `workspace.create`, `tab.create`, `agent.start`로 Herdr가 소유하는 pane에서
 agent를 시작할 수 있다. 실행 중 agent의 cwd를 바꾸는 API는 없다. 조사 기록은
-[2026-09-28 새 session 생성 API 조사](records/integration-findings.md#2026-09-28--새-session-생성-api-조사)에 있다.
+2026-09-28 새 session 생성 API 조사에 있다.
 
 ### Decision
 
@@ -2217,7 +2221,7 @@ Accepted (2026-10-05). [P1-02](https://github.com/psw7205/herdr-remote/issues/5)
 ### Context
 
 Codex CLI rollout의 구조와 Herdr Codex hook의 `agent_session` 보고는
-[2026-09-24 격리 Herdr Codex CLI 조사](records/integration-findings.md#2026-09-24--격리-herdr-codex-cli-조사)에서
+2026-09-24 격리 Herdr Codex CLI 조사에서
 확인했다. 조건부 입력 patch의 `agent.binding`은 Claude process의 PID별 native metadata로 binding을
 만든다. Codex hook이 보고한 session ID가 현재 foreground process incarnation과 결합돼 있는지는
 검증하지 않았으므로, Codex에는 ADR-034의 write 조건을 만족하는 binding이 없다. Transcript 읽기는
@@ -2289,7 +2293,7 @@ Accepted (2026-10-05). [P2-01](https://github.com/psw7205/herdr-remote/issues/14
 ### Context
 
 Chat은 text record만 보여 agent가 tool을 실행하는 동안 무엇을 하는지 mobile에서 알 수 없었다.
-[2026-10-05 실측](records/integration-findings.md#2026-10-05--claude-transcript-live-기록-단위와-tool-식별자)에서
+2026-10-05 실측에서
 Claude Code는 `tool_use` block을 실행 시작 때, 짝이 되는 user record의 `tool_result`(같은 `tool_use_id`)를
 실행이 끝날 때 쓴다. 병렬 tool은 같은 `message.id` 안에서 `tool_use`(A) → `tool_result`(A) → `tool_use`(B)
 순으로 섞이고 parent chain은 한 줄이다. result가 끝내 없는 `tool_use`도 있다.

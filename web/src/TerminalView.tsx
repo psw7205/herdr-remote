@@ -17,8 +17,6 @@ const FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 // to its 5s timeout plus the 500ms layout read, yet abandons a fetch stalled by a
 // network switch long before the browser would, so polling resumes.
 const FRAME_TIMEOUT_MS = 6000
-// A new command took 15–19ms and a receipt 4KiB (docs/records/verification.md,
-// P2-06): about 8 per second leaves headroom, and a 10s hold costs about 330KiB.
 const HOLD_DELAY_MS = 400
 const HOLD_INTERVAL_MS = 120
 const DRAG_OFF_PX = 12

@@ -10,7 +10,8 @@ projection하며, 입력은 Herdr가 현재 `runtime_binding`을 검증하는 `a
 전달한다. Codex session은 Herdr가 보고한 native session의 rollout을 read-only Chat으로만 보인다.
 Bridge는 agent를 직접 실행하거나 resume하지 않고 conversation을 저장하지 않는다. 새 session은
 사용자 요청이 있을 때 Herdr 공개 API로만 요청한다. session 폴더의 Git 변경은 `git` CLI로 읽기만 한다. 결정의 근거는
-각 ADR을, 검증 범위는 [검증 기록](records/verification.md)을, 남은 작업은 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)를 따른다.
+각 ADR을, 검증 절차는 [CONTRIBUTING](../CONTRIBUTING.md#변경별-검증)을,
+남은 작업과 검증 요약은 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)를 따른다.
 
 ### 용어
 
@@ -391,7 +392,8 @@ network 계층 ACL은 [P0-03](https://github.com/psw7205/herdr-remote/issues/2)�
 | I13 | Terminal은 Herdr PTY 크기를 바꾸지 않는다 | `internal/herdr`는 read-only `pane.read`·`pane.layout`만 호출 |
 | I14 | Changed Files는 Git repository를 바꾸지 않고 repo config의 명령을 실행하지 않는다 | `internal/gitstate`의 고정 인자·환경, `--no-optional-locks`·`diff-index`, filter·fsmonitor·hook·외부 diff 차단. `TestRepoConfigRunsNothing`이 marker와 index 불변으로 확인 |
 
-실제 검증 범위와 미검증 scenario는 [검증 기록](records/verification.md)을 따른다.
+실제 검증 범위와 미검증 scenario는 관련 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)의
+결과 요약과 code·test 근거를 따른다. 조사·실측 상세는 공개 문서의 필수 근거가 아니다.
 
 ## 9. 기술 선택
 
@@ -415,7 +417,7 @@ resource 상한은 [P1-13](https://github.com/psw7205/herdr-remote/issues/12)에
 | Structured permission/question | Terminal fallback만 있다 | [P2-02](https://github.com/psw7205/herdr-remote/issues/15) |
 | Attachment | route와 host file 처리 없음 | [P2-04](https://github.com/psw7205/herdr-remote/issues/17) |
 | Notification | Web Push 없음 | [P2-05](https://github.com/psw7205/herdr-remote/issues/18) |
-| Streaming delta | 완성된 JSONL text record만 전송하고, 그 사이는 `agent.status`의 `working`으로 표시한다. Claude transcript는 API message가 끝난 뒤 content block마다 완성된 record를 써서 delta source가 없다([실측](records/integration-findings.md#2026-10-05--claude-transcript-live-기록-단위와-tool-식별자)). Codex는 미측정 | [P1-07](https://github.com/psw7205/herdr-remote/issues/9) |
+| Streaming delta | 완성된 JSONL text record만 전송하고, 그 사이는 `agent.status`의 `working`으로 표시한다. Claude transcript는 API message가 끝난 뒤 content block마다 완성된 record를 써서 delta source가 없다([표현 범위 결정](https://github.com/psw7205/herdr-remote/issues/9)). Codex는 미측정 | [P1-07](https://github.com/psw7205/herdr-remote/issues/9) |
 | 새 session의 다른 kind·worktree | `claude`만 허용. worktree 생성 없음 | [P1-01](https://github.com/psw7205/herdr-remote/issues/4), [P1-02](https://github.com/psw7205/herdr-remote/issues/5), [P2-09](https://github.com/psw7205/herdr-remote/issues/22) |
 
 ## Decision Priority
