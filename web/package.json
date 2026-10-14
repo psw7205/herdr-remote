@@ -9,7 +9,8 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "measure:layout": "node scripts/measure-layout.mjs"
+    "measure:layout": "node scripts/measure-layout.mjs",
+    "check:mobile": "node scripts/check-mobile.mjs"
   },
   "dependencies": {
     "@xterm/xterm": "6.0.0",

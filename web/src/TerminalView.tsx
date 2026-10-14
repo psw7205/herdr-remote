@@ -8,6 +8,7 @@ import { TopBar } from './TopBar'
 import styles from './TerminalView.module.css'
 import ui from './ui.module.css'
 import { singleFlight } from './singleFlight'
+import { attachImeInput } from './terminalInput'
 import { withTimeout } from './withTimeout'
 import { DEFAULT_CELL_RATIO, fitFontSize, fontSizeFor, frameDimensions, gridSize, MAX_FONT_SIZE, parseFontChoice, pinchFont, revealScroll, stepFont, type FontChoice, type GridSize } from './terminalSizing'
 import '@xterm/xterm/css/xterm.css'
@@ -68,9 +69,12 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
   const sizes = useRef({ applied: 0, fit: 0 })
   const refit = useRef<() => void>(() => {})
   const follow = useRef<() => void>(() => {})
+  const ime = useRef<{ reset(): void; dispose(): void } | null>(null)
+  // A finger on the screen is reading or pinching; input must not pull the view away from it.
+  const touching = useRef(false)
   const sender = useRef<Promise<unknown>>(Promise.resolve())
   const emit = (type: 'terminal_input' | 'interrupt', text: string): Promise<boolean> => {
-    follow.current()
+    if (!touching.current) follow.current()
     const sent = sender.current.then(async () => {
       const response = await sendCommand(session, type, text, crypto.randomUUID())
       if (response.status === 'accepted') return true
@@ -238,6 +242,10 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
         shell.scrollTop = (start.scrollTop + start.midY) * after.height / start.cell.height - start.midY
       }))
     }
+    const onTouch = (event: TouchEvent) => { touching.current = event.touches.length > 0 }
+    host.addEventListener('touchstart', onTouch, { passive: true })
+    host.addEventListener('touchend', onTouch, { passive: true })
+    host.addEventListener('touchcancel', onTouch, { passive: true })
     host.addEventListener('touchstart', onTouchStart, { passive: true })
     host.addEventListener('touchmove', onTouchMove, { passive: true })
     host.addEventListener('touchend', onTouchEnd, { passive: true })
@@ -248,6 +256,7 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
       term = new Terminal({ cols: 120, rows: 40, convertEol: true, scrollback: 0, fontSize: 12, fontFamily: FONT_FAMILY, theme: { background: '#0a0c10', foreground: '#cdd1d6' } })
       term.open(container.current)
       input = term.onData(text => emit('terminal_input', text))
+      ime.current = attachImeInput(term, text => { void emit('terminal_input', text) })
       let height = container.current.clientHeight
       // Growing cannot hide the cursor, and closing the keyboard keeps the input
       // focused, so only a shrink follows it; a reader stays put.
@@ -282,7 +291,11 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
       timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 1000)
     })
     return () => {
-      active = false; unmount.abort(); refit.current = () => {}; follow.current = () => {}; if (timer) clearInterval(timer); observer?.disconnect(); input?.dispose(); term?.dispose()
+      active = false; unmount.abort(); refit.current = () => {}; follow.current = () => {}; if (timer) clearInterval(timer); observer?.disconnect(); input?.dispose(); ime.current?.dispose(); ime.current = null; term?.dispose()
+      touching.current = false
+      host.removeEventListener('touchstart', onTouch)
+      host.removeEventListener('touchend', onTouch)
+      host.removeEventListener('touchcancel', onTouch)
       host.removeEventListener('touchstart', onTouchStart)
       host.removeEventListener('touchmove', onTouchMove)
       host.removeEventListener('touchend', onTouchEnd)
@@ -309,10 +322,10 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
     <div className={styles.keys} role="group" aria-label="Terminal 특수 키" onMouseDown={event => event.preventDefault()}>
       <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\x1b')}>Esc</button>
       <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\t')}>Tab</button>
-      <button type="button" className={styles.key} onClick={() => emit('interrupt', '')}>Ctrl-C</button>
+      <button type="button" className={styles.key} onClick={() => { ime.current?.reset(); void emit('interrupt', '') }}>Ctrl-C</button>
       <button type="button" className={styles.key} {...arrow('\x1b[A')} aria-label="위 화살표"><ArrowUp aria-hidden size={18} /></button>
       <button type="button" className={styles.key} {...arrow('\x1b[B')} aria-label="아래 화살표"><ArrowDown aria-hidden size={18} /></button>
-      <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\r')} aria-label="Enter"><CornerDownLeft aria-hidden size={18} /></button>
+      <button type="button" className={styles.key} onClick={() => { ime.current?.reset(); void emit('terminal_input', '\r') }} aria-label="Enter"><CornerDownLeft aria-hidden size={18} /></button>
     </div>
   </div>
 }

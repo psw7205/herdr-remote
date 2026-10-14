@@ -224,8 +224,15 @@ frame이나 raw output history를 보장하지 않는다
   누르면 지운다(`web/src/terminalSizing.ts`).
 - Herdr frame에는 cursor 위치가 없어 xterm cursor가 frame 글자 끝, agent에서는 상태 줄 끝에 놓인다. 그래서 cursor는
   숨기고 frame 마지막 줄의 처음에 둔다. 입력은 이 자리를 따라간다. 글자를 치거나 key bar를 누르거나 keyboard가
-  열려 화면이 줄면 이 자리가 보이도록 scroll한다. keyboard를 닫아 화면이 커질 때는 scroll하지 않는다. 확대한
-  상태에서는 화면 폭보다 긴 입력 줄의 끝을 입력 중에 따라가지 않는다.
+  열려 화면이 줄면 이 자리가 보이도록 scroll한다. keyboard를 닫아 화면이 커질 때는 scroll하지 않고, 손가락이
+  Terminal에 닿아 있는 동안도 scroll하지 않는다. 확대한 상태에서는 화면 폭보다 긴 입력 줄의 끝을 입력 중에
+  따라가지 않는다.
+- soft keyboard와 IME 입력은 xterm의 composition helper 대신 앱이 보낸다(`web/src/terminalInput.ts`). xterm은
+  keyCode 229 keydown 전후의 숨은 textarea를 문자열로 비교해 IME가 앞 글자를 같은 길이로 고치면 textarea 전체를
+  다시 보내고 229가 두 번 오면 같은 diff를 두 번 보낸다(xterm.js #3600·#6078). 앱은 composition·input event를
+  Terminal 요소의 capture 단계에서 가로채 마지막으로 보낸 값과의 edit(DEL n개 + 이후 글자)만 보내고, 조합 중인
+  글자는 cursor 자리에 미리 보이며, key bar Enter·Ctrl-C와 xterm의 Enter·Ctrl-C·blur·paste에서 기준값을 비운다.
+  실제 key(글자, Backspace, Enter, 화살표)는 전처럼 xterm이 보낸다.
 - reset은 frame과 같은 write에 넣어 갱신 사이에 빈 Terminal이 그려지지 않게 한다(`web/src/TerminalView.tsx`).
 - key bar는 `mousedown` 기본 동작을 막아 focus를 xterm 입력에 남긴다. 그래서 key를 눌러도 soft keyboard가 닫히지 않는다.
 - 위·아래 화살표는 누르는 순간 보내지 않는다. 400ms 전에 손을 떼면 그때 한 번 보내고, 계속 누르고 있으면 400ms에

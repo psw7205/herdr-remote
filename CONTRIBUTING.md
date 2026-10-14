@@ -52,6 +52,10 @@ dev server의 CSS는 build처럼 낮춰지지 않는다(`light-dark()` 등). 색
 `mise exec -- pnpm --dir web --silent measure:layout`은 `web/dist`와 별도로 fixture page를 임시 directory에
 production mode로 build해 headless Chrome(기본은 macOS Google Chrome, `CHROME_BIN`으로 변경)으로 폭 360·390·412의 `wide-table` 표·code block 가로 scroll과 page 넘침을
 측정하고 JSON을 stdout에 낸다. 실패하면 exit 1이다. `--silent`가 없으면 pnpm의 실행 banner가 stdout의 JSON 앞에 붙는다.
+`mise exec -- pnpm --dir web --silent check:mobile`은 같은 방식으로 Terminal의 IME 입력(keyCode 229, 같은 길이 수정, 한글
+조합과 재조합)이 `/commands`에 한 번씩만 가는지, 손가락이 닿은 동안 입력이 Terminal을 scroll하지 않는지, Chat을 내용이
+늘어나는 중에 위로 끌어도 맨 아래로 되돌아가지 않는지를 확인한다. 실제 Gboard·iOS IME의 event 순서는 합성 event라
+대신하지 못하므로 emulator나 실기기로 따로 본다.
 
 ## 변경별 검증
 
