@@ -39,9 +39,9 @@ Herdr server나 사용자 agent를 종료해서 port 문제를 해결하지 않�
 
 Herdr와 Bridge 없이 UI 상태를 확인할 때는 Vite만 띄우고 `http://127.0.0.1:5173/fixture.html`에
 접속한다. `?scenario=`로 `long`, `live`, `disconnected`, `delivery-unknown`, `rejected`, `empty`,
-`herdr-down`, `unsupported`, `slow`, `superseded`, `start-trust`, `start-unknown`, `no-root`, `codex`, `changes-large`,
+`herdr-down`, `unbound`, `slow`, `superseded`, `start-trust`, `start-unknown`, `no-root`, `codex`, `changes-large`,
 `tools`, `stale-client`, `wide-table`을 고를 수 있다. `stale-client`는 설치된 client build가 열린 화면과 달라 새로고침 안내가 뜨는
-상태다. `tools`는 작업 중 session에 tool group(접힘, 오류, 결과 없음, 잘린 결과)을 보이고, 실행 중인
+상태다. `unbound`는 검증된 binding이 없어 입력과 Terminal이 막힌 session 목록이다. `tools`는 작업 중 session에 tool group(접힘, 오류, 결과 없음, 잘린 결과)을 보이고, 실행 중인
 tool이 몇 초 뒤 `message.updated`로 끝나는 흐름을 재생한다. 변경된 파일 화면은 모든 scenario에서 session마다 다른 상태(수정·추가·삭제·이름 변경·binary,
 변경 없음, Git repository 아님, 조회 오류)를 보이고, `changes-large`는 파일 수와 diff 크기 상한에 걸린
 화면을 보인다. `wide-table`은 열 12개짜리 넓은 표와 긴 code block을 보인다. `/`로 시작하는 입력은 transcript에서 숨는 slash command처럼 echo 없이 수락된다. 이 page는
@@ -66,7 +66,6 @@ production mode로 build해 headless Chrome(기본은 macOS Google Chrome, `CHRO
 | protocol·두 영역 공통 변경 | 위 네 명령 모두 |
 | `scripts/`·`mise.toml` task | `mise exec -- shellcheck scripts/*.sh scripts/mobile-e2e/*.sh`, scratch `PREFIX`와 별도 LaunchAgent로 실제 task 실행 |
 | 문서 | `git diff --check`, relative link·실제 명령·개인 경로 유입 확인 |
-| Herdr 본체 | `herdr` repo가 요구하는 검증 및 affected runtime scenario |
 
 `mise run test`는 `go test -race ./...`, `mise run vet`는 `go vet ./...`다.
 Herdr가 없는 환경에서도 synthetic fixture 기반 unit/integration 테스트를 실행할 수 있다.
@@ -98,7 +97,7 @@ GitHub Actions(`.github/workflows/ci.yml`)는 push와 pull request마다 Ubuntu 
 
 ## 격리 Herdr 환경
 
-binding·dispatch·lifecycle을 바꾸거나 Herdr patch·binary를 전환할 때는 기존 사용자 server를
+binding·dispatch·lifecycle을 바꾸거나 Herdr binary를 바꿀 때는 기존 사용자 server를
 건드리지 않고 이름 있는 격리 server에서 실제 agent로 확인한다. 화면에 드러나는 UI 동작은
 사용하면서 확인한다([검증 수준 원칙](AGENTS.md#검증과-완료)).
 
@@ -130,7 +129,7 @@ mise exec -- go run ./cmd/bridge -herdr-socket <e2e socket> -receipts-dir "$E2E/
 - native session은 첫 prompt 뒤 생긴다. Bridge `prompt`는 `claude:<native-id>` item에만 전달된다.
 - Bridge로 시작한 session은 agent 인자가 없어 사용자 기본 model로 뜬다. 그 안에서 `/model`을 쓰면
   사용자 설정의 기본 model이 바뀌므로, 바꿨다면 정리할 때 원래 값으로 되돌린다.
-- stock 전환은 설치 binary를 바꾸지 않고 `"$E2E/h" server live-handoff --import-exe <binary>`로 한다.
+- 다른 Herdr binary(새 release 등) 확인은 설치 binary를 바꾸지 않고 `"$E2E/h" server live-handoff --import-exe <binary>`로 한다.
 - 정리 순서: Bridge 종료 → `"$E2E/h" server stop` → `herdr session delete e2e` →
   Claude transcript root(Bridge `-claude-dir` 기본값) 아래 임시 directory 이름의 test transcript 삭제 →
   Claude 사용자 설정 `~/.claude.json`의 `projects`에서 임시 directory 경로 항목 삭제(신뢰 확인 수락이 남긴
@@ -176,11 +175,9 @@ multi-user, public internet 노출, 자체 agent runner, conversation DB 같은
 [PRD non-goal](docs/prd.md#5-non-goals)과 [Explicitly Deferred](docs/prd.md#32-explicitly-deferred)는 받지 않는다.
 
 - 보안 취약점은 issue로 올리지 않고 [SECURITY.md](SECURITY.md)의 비공개 경로로 신고한다.
-- bug report에는 재현 절차, 이 repo의 commit, Herdr patch commit, Claude Code version을 적는다.
+- bug report에는 재현 절차, 이 repo의 commit, Herdr version, Claude Code version을 적는다.
   `doctor` 출력은 [진단 출력 공유](README.md#진단-출력-공유)처럼 식별 정보를 placeholder로 바꾼다.
 - transcript 원문, 실제 prompt, binding token, screenshot의 실제 session 내용을 issue·PR·fixture에
   넣지 않는다. fixture는 실제 구조를 확인한 익명 sample로 만든다.
 - PR은 한 가지 변경에 집중하고, 위 [변경별 검증](#변경별-검증)을 통과시키고, 관련 issue를 `#N`으로 적는다.
   [AGENTS.md](AGENTS.md)의 제품 불변식을 바꾸는 변경은 먼저 issue로 논의한다.
-- Herdr 조건부 입력 patch의 변경은 이 repo가 아니라 fork `psw7205/herdr`의 `mobile-binding` branch를
-  대상으로 한다([Herdr patch runbook](docs/herdr-patch.md#8-fork-관리)).

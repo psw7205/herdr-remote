@@ -4,7 +4,7 @@ import type { BridgeBuild, Session } from './api'
 import { SessionList } from './SessionList'
 
 const session: Session = { id: 'claude:a', agent: 'claude', pane_id: 'w1:p1', project: '/work/sample-api', title: '결제 API 보강', status: 'needs_attention', runtime_binding: 'b', chat: true, terminal: true, active: true, lifecycle: 'active', last_activity: new Date().toISOString(), last_message: { role: 'user', text: '**실패** case를 추가해 줘' } }
-const render = (props: Partial<Parameters<typeof SessionList>[0]>) => renderToStaticMarkup(<SessionList sessions={[]} loaded error="" conditionalInput="supported" onOpen={() => {}} {...props} />)
+const render = (props: Partial<Parameters<typeof SessionList>[0]>) => renderToStaticMarkup(<SessionList sessions={[]} loaded error="" onOpen={() => {}} {...props} />)
 
 describe('session list', () => {
   it('shows a row with status, project and a plain preview under its group', () => {
@@ -39,10 +39,5 @@ describe('session list', () => {
     expect(render({ sessions: [session], bridge, loadedBuild: 'fedcba9876543210' })).toContain('새로고침')
     expect(render({ sessions: [session], bridge, loadedBuild: '0123456789abcdef' })).not.toContain('새로고침')
     expect(render({ sessions: [session], bridge, loadedBuild: null })).not.toContain('새로고침')
-  })
-  it('says why input is unavailable without internal API names', () => {
-    const html = render({ sessions: [session], conditionalInput: 'unsupported' })
-    expect(html).toContain('원격 입력')
-    expect(html).not.toContain('conditional input')
   })
 })

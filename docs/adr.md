@@ -44,12 +44,13 @@
 | [ADR-031](#adr-031--mvp-구현-순서는-vertical-slice를-따른다) | ADR-031 — MVP 구현 순서는 Vertical Slice를 따른다 | Completed |
 | [ADR-032](#adr-032--mvp-완료-기준은-architecture가-아니라-실제-handoff-flow다) | ADR-032 — MVP 완료 기준은 Architecture가 아니라 실제 Handoff Flow다 | Completed |
 | [ADR-033](#adr-033--command-receipt로-retry-중복-실행을-방지한다) | ADR-033 — Command receipt로 retry 중복 실행을 방지한다 | Accepted |
-| [ADR-034](#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다) | ADR-034 — Herdr가 runtime binding을 검증한 command만 전달한다 | Accepted |
+| [ADR-034](#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다) | ADR-034 — Herdr가 runtime binding을 검증한 command만 전달한다 | Superseded by ADR-040 |
 | [ADR-035](#adr-035--mobile-terminal은-기존-pty의-passive-mirror다) | ADR-035 — Mobile Terminal은 기존 PTY의 passive mirror다 | Accepted |
-| [ADR-036](#adr-036--herdr-patch는-소유-fork에서-유지한다) | ADR-036 — Herdr patch는 소유 fork에서 유지한다 | Accepted |
+| [ADR-036](#adr-036--herdr-patch는-소유-fork에서-유지한다) | ADR-036 — Herdr patch는 소유 fork에서 유지한다 | Superseded by ADR-040 |
 | [ADR-037](#adr-037--새-session-생성은-herdr에-요청한다) | ADR-037 — 새 session 생성은 Herdr에 요청한다 | Accepted |
 | [ADR-038](#adr-038--codex-chat은-herdr가-보고한-native-session으로-read-only-표시한다) | ADR-038 — Codex Chat은 Herdr가 보고한 native session으로 read-only 표시한다 | Accepted |
 | [ADR-039](#adr-039--tool-호출은-chat-item으로-투영하고-결과는-message-갱신으로-보낸다) | ADR-039 — Tool 호출은 Chat item으로 투영하고 결과는 message 갱신으로 보낸다 | Accepted |
+| [ADR-040](#adr-040--입력-검증을-bridge로-옮기고-stock-herdr-api로-전송한다) | ADR-040 — 입력 검증을 Bridge로 옮기고 stock Herdr API로 전송한다 | Accepted |
 
 ---
 
@@ -2006,11 +2007,17 @@ receipt는 conversation 본문을 저장하는 DB가 아니며 command digest와
 
 ### Status
 
-Accepted (stock Herdr `0.9.1`에는 미포함, 소유 fork `psw7205/herdr`의 `mobile-binding` patch에서
-구현. [ADR-036](#adr-036--herdr-patch는-소유-fork에서-유지한다))
+Superseded by [ADR-040](#adr-040--입력-검증을-bridge로-옮기고-stock-herdr-api로-전송한다) (2026-10-15). 이전 Status: Accepted (stock Herdr `0.9.1`에는 미포함,
+소유 fork `psw7205/herdr`의 `mobile-binding` patch에서 구현. [ADR-036](#adr-036--herdr-patch는-소유-fork에서-유지한다))
 
 2026-10-05 note: `unbound`는 binding이 없는 `codex:<native-id>` item에도 쓴다. Codex의 identity와
 lifecycle은 [ADR-038](#adr-038--codex-chat은-herdr가-보고한-native-session으로-read-only-표시한다)을 따른다.
+
+2026-10-15 note: binding 발급·검증과 입력 전송은 ADR-040이 대체한다. 아래 Decision 중 Herdr가 binding을
+발급하고 queue에서 다시 검증한다는 부분, Bridge의 get-then-write로 대체하지 않는다는 원칙(ADR-040은 text 전과
+Enter 전 재확인과 남는 window를 받아들인다), `herdr.conditional_input` 판정과 `docs/herdr-patch.md`는 더 이상
+유효하지 않다. "Binding·capability 손실은 lifecycle 종료가 아니다" 아래의 lifecycle 규칙과 알려진 한계는
+유효하며, 그 안의 "성공한 `agent.binding` 결과"는 Bridge가 계산한 binding으로 읽는다.
 
 ### Decision
 
@@ -2099,7 +2106,11 @@ font size와 horizontal scroll로만 맞추며 PTY 크기를 바꾸지 않는다
 
 ### Status
 
-Accepted (2026-09-28)
+Superseded by [ADR-040](#adr-040--입력-검증을-bridge로-옮기고-stock-herdr-api로-전송한다) (2026-10-15). 이전 Status: Accepted (2026-09-28)
+
+2026-10-15 note: fork patch는 더 이상 유지하지 않는다. 마지막 patch head에는 재현용 tag `mobile-binding-v0.9.3`을
+붙이고 `mobile-binding` branch는 갱신하지 않는다. 본문이 가리키는 runbook(`herdr-patch.md`)은 삭제했으며 Git
+history에 남아 있다. upstream이 외부 feature PR을 받지 않는다는 Context는 여전히 사실이다.
 
 ### Context
 
@@ -2352,3 +2363,97 @@ transcript가 invalid가 되지 않는다.
 - result 도착마다 `Reset`: tool마다 새 epoch와 전체 snapshot을 보내 mobile 재전송이 커지고 replay가 의미를 잃는다.
 - 상세를 별도 HTTP endpoint로 지연 조회: snapshot은 작아지지만 Bridge가 transcript를 다시 찾거나 별도 cache를
   가져야 하고 route·Origin 검사가 늘어난다. 상한으로 크기를 먼저 제한한다.
+
+---
+
+## ADR-040 — 입력 검증을 Bridge로 옮기고 stock Herdr API로 전송한다
+
+### Status
+
+Accepted (2026-10-15). [P1-18](https://github.com/psw7205/herdr-remote/issues/29).
+[ADR-034](#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다)의 binding 발급·검증 위치와 [ADR-036](#adr-036--herdr-patch는-소유-fork에서-유지한다)을 대체한다.
+
+### Context
+
+ADR-034는 Herdr가 `runtime_binding`을 발급하고 PTY queue가 입력을 쓰기 직전에도 다시 검증하도록 했고,
+ADR-036은 그 method(`agent.binding`, `agent.bound_input`)를 소유 fork의 `mobile-binding` patch로 유지했다.
+운영하면서 다음이 확인됐다.
+
+- stock Herdr 0.9.5에도 두 method가 없다. upstream이 외부 feature PR을 받지 않는다는 ADR-036의 전제도
+  그대로다.
+- 설치된 Herdr가 `herdr update`로 두 번 stock으로 바뀌었고, 그때마다 Bridge는 fail closed해 read-only가 됐다.
+- patch를 v0.9.5 위에 얹는 read-only merge simulation이 source 파일 5개에서 충돌했다.
+- Herdr release가 며칠 간격으로 나와 release마다 rebase·build·설치를 반복해야 한다.
+
+patch가 binding을 만들 때 대조한 값은 Herdr 밖에서도 읽을 수 있다. stock Herdr의 `pane.process_info`는
+pane의 foreground process를, `agent.get`은 agent 종류와 `terminal_id`를 알려 준다. process 시작 시각은 OS가,
+native session ID는 Claude Code가 process마다 쓰는 session metadata 파일이 알려 준다.
+
+### Decision
+
+**Binding 발급.** Bridge의 `internal/binding`이 `runtime_binding`을 만든다. token은 `terminal_id`, foreground
+process PID, 그 process의 OS 시작 시각(초, 마이크로초), Claude native session ID에 대한 sha256이다. 재료는
+Herdr `pane.process_info`와 `agent.get`, OS process 시작 시각(macOS `sysctl`), Claude root(Bridge
+`-claude-dir`)의 `sessions/<pid>.json`이다. 이 파일은 다음을 모두 만족할 때만 쓴다.
+
+- `pid`가 foreground PID와 같고 `procStart`가 OS가 보고한 시작 시각과 같다.
+- `kind`가 `interactive`이고 `sessionId`와 `cwd`가 비어 있지 않다.
+- 파일 수정 시각이 process 시작보다 이르지 않고 크기가 상한 이하다.
+
+파일과 OS를 읽은 뒤 같은 검사를 다시 해 읽는 사이 process가 바뀌었으면 binding을 만들지 않는다. 이 조건은
+patch가 Herdr 안에서 적용하던 규칙과 같다. 하나라도 어긋나거나 읽지 못하면 binding이 없다. process 시작
+시각은 macOS에서만 읽으므로 다른 OS에서는 binding이 없다. Herdr integration hook이 보고하는
+`agent_session`은 binding 재료가 아니다.
+
+**전송.** client 계약(`runtime_binding` field, `X-Runtime-Binding` header)과 ADR-033 receipt 의미는 바뀌지
+않는다. Bridge는 쓰기마다 binding을 처음부터 다시 계산해 client가 보낸 값과 비교하고, 쓰기에는 stock Herdr
+method만 쓴다.
+
+| Command | 순서 |
+| --- | --- |
+| `prompt` | 재확인 → `pane.send_input`으로 text(Herdr가 bracketed paste로 감싼다) → 약 300ms 대기 → 재확인 → `pane.send_keys`로 Enter |
+| `interrupt` | 재확인 → `pane.send_keys`로 ctrl+c |
+| `terminal_input` | 재확인 → `pane.send_text` |
+
+**결과.** byte를 하나도 보내기 전의 거부는 `rejected`다(`RUNTIME_BINDING_MISMATCH`, `SESSION_ENDED`,
+`INVALID_PROMPT`, `INVALID_INPUT`, `AGENT_NOT_READY`). prompt text를 보낸 뒤 Enter 전에 쓰기가 실패하거나
+binding이 바뀌면 `delivery_unknown`이다. 이때 Enter는 보내지 않고 text는 Terminal 입력 줄에 보이는 채로
+남는다. 쓰기 요청을 보낸 뒤의 timeout이나 판정할 수 없는 응답도 `delivery_unknown`이다. 어느 경우도
+자동으로 다시 보내지 않는다.
+
+**진단.** server 단위 조건부 입력 판정을 없앤다. `GET /api/sessions`의 `herdr` object와 `doctor`의
+`conditional_input`이 사라진다. `doctor`는 binding 재료를 읽을 수 있는지(`write_enabled`)와 agent별
+`verified_binding`을 보고하고, 검증된 agent가 없으면 blocker를 남긴다.
+
+**유지되는 결정.** [ADR-034](#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다)의 lifecycle 규칙(binding·capability 손실,
+continuity, `ended`, supersession, 알려진 한계)은 그대로 유효하다. 그 규칙의 "성공한 `agent.binding` 결과"는
+Bridge가 계산한 binding으로 읽는다. Terminal은 `pane.read` passive mirror(ADR-035), 새 session 생성은
+ADR-037, Codex는 binding 없는 read-only Chat(ADR-038) 그대로다.
+
+기각한 대안:
+
+- release마다 patch rebase: v0.9.5에서 이미 5개 파일이 충돌했다. release 간격이 짧아 rebase·build·설치를
+  계속 따라가야 하고, 한 번 놓치면 `herdr update` 하나로 조용히 read-only가 된다.
+- stock `agent.prompt`만 사용: binding을 받지 않고 text와 Enter를 한 호출로 보내므로 Bridge는 호출 전에 한
+  번만 확인할 수 있고 text와 Enter 사이에 다시 확인할 수 없다.
+- Herdr hook의 `agent_session`으로 native identity 확인: hook이 보고한 session ID는 foreground process
+  incarnation에 묶여 있지 않다(ADR-038). hook이 없거나 보고가 늦으면 같은 pane의 claude→claude 교체를
+  구분하지 못한다(ADR-034 알려진 한계). PID metadata는 `procStart`로 process incarnation에 묶인다.
+
+### Consequences
+
+* stock Herdr 0.9.x(protocol 22)를 그대로 쓴다. fork·patch·Rust toolchain이 필요 없고 `herdr update`가
+  write를 끄지 않는다.
+* **남는 race window.** patch는 Herdr의 PTY queue 안에서 쓰기 직전에 binding을 검증해 이 window를 닫았다.
+  Bridge는 window를 마지막 재확인과 그 뒤 쓰기 요청(prompt에서는 Enter) 사이의 지연, 그리고 Herdr 자신의
+  queue까지로 좁힐 뿐이다. 그 사이 pane의 foreground process가 바뀌면 입력이 새 process로 갈 수 있다.
+  single-user tool에서 pane의 foreground process를 바꿀 수 있는 주체는 사용자 자신과 스스로 종료하는
+  agent뿐이다.
+* fail closed는 그대로다. 검증된 binding이 없으면 쓰지 않는다.
+* text를 보낸 뒤 실패한 prompt는 Enter 없이 입력 줄에 남는다. 사용자가 Terminal에서 보고 Enter하거나 지운다.
+* prompt마다 약 300ms가 더 걸린다.
+* macOS에서만 binding을 만든다. 다른 OS에서는 binding이 필요한 기능이 모두 fail closed한다.
+* Claude Code가 `sessions/<pid>.json`의 위치나 형식을 바꾸면 binding이 사라져 fail closed한다. Claude Code를
+  갱신한 뒤에는 `doctor`의 `verified_binding`으로 확인한다.
+* architecture invariant I11(write 검증 주체)과 I13(Terminal 경로의 read-only 호출)의 문구가 바뀐다.
+* Herdr patch runbook(`docs/herdr-patch.md`)을 삭제한다. 이전 절차는 Git history에 있다.

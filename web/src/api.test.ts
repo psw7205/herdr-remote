@@ -18,13 +18,9 @@ describe('client command delivery', () => {
 })
 describe('session list', () => {
   const respond = (body: unknown) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
-  it('reads the Herdr conditional input capability', async () => {
-    respond({sessions:[session],herdr:{conditional_input:'unsupported'}})
-    expect(await listSessions()).toEqual({sessions:[session],conditionalInput:'unsupported',start:{kinds:[],new_workspace:false},bridge:null})
-  })
-  it('treats a missing capability from an older Bridge as unknown', async () => {
+  it('defaults the start capability and build when a Bridge omits them', async () => {
     respond({sessions:[session]})
-    expect(await listSessions()).toEqual({sessions:[session],conditionalInput:'unknown',start:{kinds:[],new_workspace:false},bridge:null})
+    expect(await listSessions()).toEqual({sessions:[session],start:{kinds:[],new_workspace:false},bridge:null})
   })
   it('reads the Bridge build stamp and the client build it serves', async () => {
     respond({sessions:[session],bridge:{revision:'65f5c6bd7eceb1cd601405dec32f04078918f161',modified:true,client_build:'0123456789abcdef'}})

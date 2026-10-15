@@ -1,13 +1,13 @@
 # Herdr Mobile Chat — Architecture
 
-**Related:** [PRD](prd.md), [ADR](adr.md), [Issues](https://github.com/psw7205/herdr-remote/issues), [Herdr patch runbook](herdr-patch.md)
+**Related:** [PRD](prd.md), [ADR](adr.md), [Issues](https://github.com/psw7205/herdr-remote/issues)
 
 ## 1. 개요
 
 ADR의 결정을 조합해 현재 구현된 runtime 구조, data flow, invariant를 정리한다. Bridge는
 Herdr에서 이미 실행 중인 Claude Code session을 발견하고, native transcript를 읽어 Chat으로
-projection하며, 입력은 Herdr가 현재 `runtime_binding`을 검증하는 `agent.bound_input`으로만
-전달한다. Codex session은 Herdr가 보고한 native session의 rollout을 read-only Chat으로만 보인다.
+projection하며, 입력은 Bridge가 쓰기 직전에 다시 계산한 `runtime_binding`이 맞을 때만 stock Herdr
+pane 입력으로 전달한다([ADR-040](adr.md#adr-040--입력-검증을-bridge로-옮기고-stock-herdr-api로-전송한다)). Codex session은 Herdr가 보고한 native session의 rollout을 read-only Chat으로만 보인다.
 Bridge는 agent를 직접 실행하거나 resume하지 않고 conversation을 저장하지 않는다. 새 session은
 사용자 요청이 있을 때 Herdr 공개 API로만 요청한다. session 폴더의 Git 변경은 `git` CLI로 읽기만 한다. 결정의 근거는
 각 ADR을, 검증 절차는 [CONTRIBUTING](../CONTRIBUTING.md#변경별-검증)을,
@@ -19,11 +19,11 @@ Bridge는 agent를 직접 실행하거나 resume하지 않고 conversation을 �
 | --- | --- |
 | Bridge | `cmd/bridge`의 Go process. Herdr socket과 native transcript를 읽어 browser에 HTTP/WS로 제공한다 |
 | native transcript | agent가 직접 쓰는 대화 기록 파일. Claude Code에서는 session별 JSONL, Codex CLI에서는 session별 rollout JSONL이다. Bridge는 읽기만 한다 |
-| `runtime_binding` | Herdr `agent.binding`이 발급한 token. pane의 terminal, foreground process, native session을 묶는다. 입력은 이 값이 아직 유효할 때만 전달된다 |
-| 조건부 입력 (conditional input) | `agent.bound_input`처럼 Herdr가 binding을 다시 검증한 뒤에만 PTY에 쓰는 입력. stock Herdr에는 없고 patch가 추가한다 |
+| `runtime_binding` | Bridge(`internal/binding`)가 Herdr process 정보, OS process 시작 시각, Claude Code의 PID별 session metadata로 계산한 token. pane의 terminal, foreground process incarnation, native session을 묶는다 |
+| binding 재확인 | 쓰기와 Terminal 읽기 직전에 Bridge가 binding을 처음부터 다시 계산해 client가 보낸 값과 비교하는 것. prompt는 text 전과 Enter 전에 두 번 한다 |
 | incarnation | 같은 pane에서 실행된 특정 process의 한 번의 생애. PID만으로는 구분하지 않고 시작 시각과 native session으로 확인한다 |
-| fail closed | 검증할 수 없으면 허용하지 않는 동작. binding이나 capability가 없으면 입력과 Terminal을 막는다 |
-| Refresh | Bridge가 2초마다 Herdr에서 agent 목록과 binding을 다시 읽어 session item을 갱신하는 주기 |
+| fail closed | 검증할 수 없으면 허용하지 않는 동작. binding을 검증할 수 없으면 입력과 Terminal을 막는다 |
+| Refresh | Bridge가 2초마다 Herdr에서 agent 목록을 읽고 binding을 다시 계산해 session item을 갱신하는 주기 |
 | item | 목록의 session 단위. 검증된 Claude native session은 `claude:<native-id>`, Herdr가 보고한 Codex native session은 `codex:<native-id>`, 식별 전 pane은 `pane:<pane-id>`다 |
 | `lifecycle` / `status` | `lifecycle`은 item의 검증·종료 상태(`active`, `unverified`, `ended` 등), `status`는 agent의 작업 상태(`working`, `idle` 등)다 |
 | cursor (epoch, sequence) | client가 받은 마지막 event 위치. epoch는 Bridge restart나 transcript 재동기화 때 바뀐다 |
@@ -57,26 +57,30 @@ Bridge는 agent를 직접 실행하거나 resume하지 않고 conversation을 �
 │                     └─ projection ┘            (fsnotify + 1s poll)      │
 │                        (internal/claude, internal/codex)                 │
 │                                   │                                      │
-│                              herdr.Gateway                               │
+│                         herdr.Gateway · binding                          │
 └───────────────────────────────────┬──────────────────────┬───────────────┘
                    Herdr JSON socket │                      │ read-only file
 ┌───────────────────────────────────▼──────────────────────▼───────────────┐
-│ Herdr host                                                               │
-│  Herdr server (mobile-binding patch: agent.binding, agent.bound_input)   │
+│ Herdr host (macOS)                                                       │
+│  Herdr server (stock 0.9.x, protocol 22)                                 │
 │   └ Workspace └ Tab └ Pane └ PTY └ Claude Code·Codex ──→ native JSONL    │
+│  Claude Code process ──→ <claude-dir>/sessions/<pid>.json                │
+│  kernel sysctl ──→ process 시작 시각                                     │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-`cmd/doctor`는 같은 Herdr socket과 Tailscale CLI를 read-only로 조회하는 별도 진단 binary다.
+`cmd/doctor`는 같은 Herdr socket, binding 재료(OS process 시작 시각, Claude PID metadata), Tailscale CLI를
+read-only로 조회하는 별도 진단 binary다.
 
 ## 3. Code 구성
 
 | 경로 | 책임 |
 | --- | --- |
 | `cmd/bridge/` | flag 해석(`-claude-dir`, `-codex-dir` 포함), loopback bind 검사, receipt store·registry·HTTP server 조립, 2s Herdr refresh loop |
-| `cmd/doctor/` | Herdr capability(`conditional_input`, `verified_binding`)와 `tailnet` 설정의 read-only 진단 |
-| `internal/herdr/` | Herdr JSON socket client. `session.snapshot`, `agent.binding`, `agent.bound_input`, `pane.read`, `pane.layout`, `pane.process_info`(doctor 전용), 새 session용 `workspace.create`·`tab.create`·`agent.start`·`agent.get`. 미지원 method는 `ErrUnsupported` |
-| `internal/session/` | agent discovery, binding 검증, item identity·lifecycle, agent별 transcript adapter 선택, transcript watcher 수명, bound input·Terminal 전 binding 재확인, 새 session 후보와 시작(`start.go`) |
+| `cmd/doctor/` | Herdr version·protocol, write 가능 여부(`write_enabled`), Terminal mirror 가능 여부, agent별 `verified_binding`, `tailnet` 설정의 read-only 진단 |
+| `internal/herdr/` | Herdr JSON socket client. stock 공개 method만 쓴다. `session.snapshot`, binding 재료 `pane.process_info`·`agent.get`, 입력용 `pane.send_*`(text, Enter, ctrl+c), `pane.read`, `pane.layout`, 새 session용 `workspace.create`·`tab.create`·`agent.start`. 미지원 method는 `ErrUnsupported` |
+| `internal/binding/` | `runtime_binding` 계산과 입력 전송 순서(재확인 → text → 재확인 → Enter). Herdr `pane.process_info`·`agent.get`, OS process 시작 시각(macOS `sysctl`), `<claude-dir>/sessions/<pid>.json`을 대조해 sha256 token을 만든다. 검사 규칙은 [ADR-040](adr.md#adr-040--입력-검증을-bridge로-옮기고-stock-herdr-api로-전송한다). macOS 밖에서는 binding이 없다 |
+| `internal/session/` | agent discovery, `internal/binding`으로 binding 계산, item identity·lifecycle, agent별 transcript adapter 선택, transcript watcher 수명, 입력·Terminal 전 사전 검사(binding 일치, status, chat·terminal 가능 여부), 새 session 후보와 시작(`start.go`) |
 | `internal/claude/` | native transcript 경로 resolve, JSONL record decode, parent chain projection |
 | `internal/codex/` | Codex rollout 경로 resolve와 `session_meta` 확인, record decode, 선형 projection |
 | `internal/transcript/` | agent 공통 `Record`, offset 기반 incremental read(`Tailer`), `fsnotify` + polling reconciliation(`Watch`) |
@@ -96,8 +100,10 @@ Bridge는 agent를 직접 실행하거나 resume하지 않고 conversation을 �
 ```text
 Bridge 2s tick → Registry.Refresh
   → Herdr session.snapshot (agent 목록)
-  → agent == claude인 pane마다 agent.binding
-      검증 조건: agent claude, terminal_id 일치, token·process_id·native_session_id 존재
+  → agent == claude인 pane마다 binding 계산 (internal/binding)
+      pane.process_info(foreground PID) + agent.get(agent claude, terminal_id)
+      + OS process 시작 시각 + <claude-dir>/sessions/<pid>.json 검사(ADR-040)
+      → sha256(terminal_id, PID, 시작 시각, native session ID)
   → claude.Resolve: <claude-dir>/projects/*/<native-id>.jsonl 이 정확히 하나일 때만 Chat 허용
   → item.startWatch → transcript.Watch
       transcript 파일 하나만 fsnotify 등록 후 초기 read, 이후 event 또는 1s tick마다 offset 이후만 read
@@ -113,7 +119,7 @@ Bridge 2s tick → Registry.Refresh
 
 - 같은 native ID가 한 Refresh에서 두 pane에서 검증되면 어느 쪽도 binding과 함께
   `claude:<native-id>`를 차지하지 않는다([ADR-034](adr.md#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다)).
-- Codex pane은 `agent.binding`을 호출하지 않아 조건부 입력 판정에 섞이지 않는다. Herdr `agent_session`
+- Codex pane에는 binding을 계산하지 않는다. Herdr `agent_session`
   (agent `codex`, kind `id`)이 보고한 ID로 `codex.Resolve`가
   `<codex-dir>/sessions/*/*/*/rollout-*-<native-id>.jsonl` 하나와 첫 줄 `session_meta.payload.id`를 확인하면
   `codex:<native-id>` item을 만들고 같은 watcher·stream 경로로 읽는다. `codex.Decode`는 `response_item`
@@ -143,17 +149,26 @@ Composer / Stop / Terminal key
                초기 상태 delivery_unknown, 요청 전체의 sha256 digest 저장
       기존 receipt: digest 같음 → 저장된 결과 반환(재dispatch 없음)
                     digest 다름 → rejected COMMAND_ID_CONFLICT
-  → Registry.BoundInput 사전 검사
+  → Registry 사전 검사
       active, runtime_binding 일치, prompt는 chat 가능·status idle|completed,
       terminal_input은 terminal 가능
-  → Herdr agent.bound_input { target, binding, input{type, text} }
+  → binding 재확인 (internal/binding 재계산 == client 값). 실패 → rejected, 아무것도 쓰지 않음
+  → stock Herdr 쓰기
+      prompt          text(pane.send_input) → 약 300ms → binding 재확인 → Enter(pane.send_keys)
+                      text 뒤 쓰기 실패·binding 변경 → Enter 없이 delivery_unknown
+      interrupt       pane.send_keys ctrl+c
+      terminal_input  pane.send_text
   → 결과 mapping 후 finish: temp file → rename → fsync(dir)
   Bridge 시작(command.Open): 1분 넘게 남은 `receipt-*` temp만 best effort로 삭제. `<command_id>.json`은 건드리지 않는다
       accepted          → 202
-      rejected + code   → 409 (RUNTIME_BINDING_MISMATCH, SESSION_ENDED, AGENT_NOT_READY, HERDR_UNSUPPORTED, SESSION_CHANGED …)
-      delivery_unknown  → 202 (Herdr delivery_unknown, 분류 불가 오류, receipt 읽기·완료 기록 실패)
+      rejected + code   → 409 (쓰기 전 거부: RUNTIME_BINDING_MISMATCH, SESSION_ENDED, AGENT_NOT_READY, INVALID_PROMPT,
+                               INVALID_INPUT, SESSION_CHANGED, CHAT_UNAVAILABLE …)
+      delivery_unknown  → 202 (text 뒤 Enter 전 실패, 쓰기 요청 뒤 timeout·분류 불가 오류, receipt 읽기·완료 기록 실패)
 ```
 
+- dispatch는 HTTP 요청 연결과 분리돼 최대 30초 안에 끝난다. client가 text와 Enter 사이에 끊겨도 prompt가 반만 전달되지 않는다.
+- text를 보낸 뒤 Enter 전에 멈춘 prompt는 Terminal 입력 줄에 남는다. 사용자가 Terminal에서 Enter하거나 지운다.
+  마지막 재확인과 쓰기 요청 사이에 남는 window는 [ADR-040](adr.md#adr-040--입력-검증을-bridge로-옮기고-stock-herdr-api로-전송한다)의 Consequences를 따른다.
 - 응답은 전달 결과일 뿐이다. agent 응답은 transcript를 거쳐 4.1 경로로만 도착한다
   ([ADR-004](adr.md#adr-004--read-path와-write-path를-분리한다)).
 - browser는 prompt의 `command_id`를 `sessionStorage`에 보존해 reload 뒤 재시도에도 같은 ID를 쓴다.
@@ -165,8 +180,7 @@ Composer / Stop / Terminal key
   `command_id`로 미리 채워지지 않는다.
 - 근거: [ADR-023](adr.md#adr-023--interrupt는-prompt와-별도-command로-모델링한다),
   [ADR-033](adr.md#adr-033--command-receipt로-retry-중복-실행을-방지한다),
-  [ADR-034](adr.md#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다),
-  [ADR-036](adr.md#adr-036--herdr-patch는-소유-fork에서-유지한다).
+  [ADR-040](adr.md#adr-040--입력-검증을-bridge로-옮기고-stock-herdr-api로-전송한다).
 
 ### 4.3 재연결 (epoch / sequence / replay / snapshot)
 
@@ -201,10 +215,10 @@ client
 TerminalView, visible일 때 1s 간격 poll
   → GET /api/sessions/{id}/terminal   header X-Runtime-Binding
   → Registry.Terminal
-      meta의 binding 일치 확인 → Herdr agent.binding 재확인
+      meta의 binding 일치 확인 → binding 재확인 (internal/binding)
       → pane.read { source: visible, format: ansi, strip_ansi: false }
       → pane.layout의 pane rect(zoomed면 tab area) → cols/rows render hint (500ms timeout, 실패 시 생략)
-      → agent.binding 다시 확인 후 frame 반환. 불일치·실패는 409 SESSION_CHANGED
+      → binding을 다시 확인한 뒤 frame 반환. 불일치·실패는 409 SESSION_CHANGED
   → xterm.js: 이전과 같은 frame이면 건너뛰고, 다르면 term.write(ESC c + frame.text + CR + cursor 숨김) 한 번
       local grid·font size만 조정, scrollback 0
 key 입력 → command_type terminal_input (4.2 경로)
@@ -306,7 +320,7 @@ Chat의 변경된 파일 버튼 → #session=<id>&view=changes
 
 | Method·Path | 형태 | 역할 |
 | --- | --- | --- |
-| `GET /api/sessions` | JSON | `ended`·`superseded`가 아닌 item의 `Meta` 목록, `herdr.conditional_input`(`supported`/`unsupported`/`unknown`), 허용 kind와 새 workspace 가능 여부를 담은 `start`, 실행 중인 code를 알리는 `bridge`(`go build`가 심은 `revision`·`modified`, `web/dist/index.html`에 stamp된 `client_build`). web은 3s poll |
+| `GET /api/sessions` | JSON | `sessions`(`ended`·`superseded`가 아닌 item의 `Meta` 목록), 허용 kind와 새 workspace 가능 여부를 담은 `start`, 실행 중인 code를 알리는 `bridge`(`go build`가 심은 `revision`·`modified`, `web/dist/index.html`에 stamp된 `client_build`). web은 3s poll |
 | `POST /api/sessions` | JSON | `session_start`. Origin 검사. 결과와 생성된 workspace·tab·pane ID |
 | `GET /api/start-candidates` | JSON | 새 session 후보 폴더와 열린 workspace의 opaque ID·표시 이름 |
 | `GET /api/sessions/{id}` | JSON | `session`(`Meta`)과 `snapshot`(`cursor`, `data`). Chat 화면은 metadata를 3s poll |
@@ -354,7 +368,8 @@ transcript 형식을 모른다([ADR-007](adr.md#adr-007--unified-event-protocol�
   successor와 그 binding으로 Chat·Terminal을 전환한다.
 
 continuity, supersession, `ended` 판정 규칙은
-[ADR-034](adr.md#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다)가, Codex는
+[ADR-034](adr.md#adr-034--herdr가-runtime-binding을-검증한-command만-전달한다)가(binding 계산 주체는
+[ADR-040](adr.md#adr-040--입력-검증을-bridge로-옮기고-stock-herdr-api로-전송한다)), Codex는
 [ADR-038](adr.md#adr-038--codex-chat은-herdr가-보고한-native-session으로-read-only-표시한다)이 기준이며 여기서 반복하지 않는다.
 
 ## 7. 보안 경계
@@ -384,8 +399,8 @@ network 계층 ACL은 [P0-03](https://github.com/psw7205/herdr-remote/issues/2)�
 
 | ID | Invariant | 강제 위치 |
 | --- | --- | --- |
-| I1 | Chat이 가능한 item 하나는 Herdr가 검증하거나(Claude binding) 보고한(Codex `agent_session`) 기존 native session 하나다 | `internal/session` `claude:`·`codex:<native-id>` identity, `internal/claude`·`internal/codex` `Resolve`의 단일 경로 조건 |
-| I2 | Mobile 입력은 agent process를 만들지 않는다. 새 session은 별도 명시 command로만 Herdr에 요청한다(ADR-037) | 입력은 `agent.bound_input`만. 생성은 `session_start`의 `workspace.create`·`tab.create`·`agent.start`만이며 resume·agent 인자 경로 없음 |
+| I1 | Chat이 가능한 item 하나는 Bridge가 binding으로 검증하거나(Claude) Herdr가 보고한(Codex `agent_session`) 기존 native session 하나다 | `internal/session` `claude:`·`codex:<native-id>` identity, `internal/claude`·`internal/codex` `Resolve`의 단일 경로 조건 |
+| I2 | Mobile 입력은 agent process를 만들지 않는다. 새 session은 별도 명시 command로만 Herdr에 요청한다(ADR-037) | 입력은 검증된 binding의 pane에 보내는 `pane.send_*`만. 생성은 `session_start`의 `workspace.create`·`tab.create`·`agent.start`만이며 resume·agent 인자 경로 없음 |
 | I3 | Transcript는 read-only다 | `internal/transcript`는 `os.Open`만 사용. Bridge의 disk write는 `internal/command` receipt뿐 |
 | I4 | browser/WS 종료는 agent, pane, session에 영향을 주지 않는다 | `internal/httpapi` WS 종료 시 구독 해제만 수행 |
 | I5 | Agent-specific parsing은 Bridge 안에만 있다 | `internal/claude`, `internal/codex` |
@@ -394,9 +409,9 @@ network 계층 ACL은 [P0-03](https://github.com/psw7205/herdr-remote/issues/2)�
 | I8 | Bridge restart 뒤 Herdr와 native transcript에서 상태를 재구성한다 | `cmd/bridge` 시작 Refresh, 새 epoch snapshot, `-receipts-dir` receipt 재사용 |
 | I9 | Bridge는 conversation의 유일한 copy가 아니다 | stream state는 memory projection. receipt는 digest와 결과만 저장 |
 | I10 | Bridge 접근은 localhost 또는 Tailscale Serve 경유만 허용한다 | `cmd/bridge` loopback bind 검사, `internal/httpapi` Host·identity·Origin gate |
-| I11 | 모든 write는 현재 `runtime_binding`을 Herdr가 검증한 경로로만 전달한다. binding이 없는 Codex item은 write가 없다 | `internal/session` `BoundInput` 사전 검사, Herdr `agent.bound_input` |
+| I11 | 모든 write는 Bridge가 쓰기 직전에 다시 계산한 `runtime_binding`이 client의 값과 같을 때만 전달한다. prompt는 text 전과 Enter 전에 확인하고 text 뒤 확인이 실패하면 Enter를 보내지 않는다. 검증된 binding이 없으면(Codex item 포함) write가 없다 | `internal/binding` 재계산과 전송 순서, `internal/session` 사전 검사 |
 | I12 | 같은 `command_id`는 한 번만 dispatch하고 `delivery_unknown`을 자동 재전송하지 않는다 | `internal/command` `Store.Execute`, `web/src` `commandDelivery` |
-| I13 | Terminal은 Herdr PTY 크기를 바꾸지 않는다 | `internal/herdr`는 read-only `pane.read`·`pane.layout`만 호출 |
+| I13 | Terminal은 Herdr PTY 크기를 바꾸지 않는다 | Terminal 경로는 read-only `pane.read`·`pane.layout`만 호출. `internal/herdr`에 resize·attach·takeover 호출 없음 |
 | I14 | Changed Files는 Git repository를 바꾸지 않고 repo config의 명령을 실행하지 않는다 | `internal/gitstate`의 고정 인자·환경, `--no-optional-locks`·`diff-index`, filter·fsmonitor·hook·외부 diff 차단. `TestRepoConfigRunsNothing`이 marker와 index 불변으로 확인 |
 
 실제 검증 범위와 미검증 scenario는 관련 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)의
@@ -407,6 +422,7 @@ network 계층 ACL은 [P0-03](https://github.com/psw7205/herdr-remote/issues/2)�
 | 영역 | 결정 |
 | --- | --- |
 | Bridge | Go `net/http`(method pattern routing), `coder/websocket`, `fsnotify`, `log/slog`. 단일 process([ADR-010](adr.md#adr-010--bridge는-single-process-control-plane으로-시작한다)) |
+| Herdr 연동 | stock Herdr 0.9.x(protocol 22)의 공개 socket method만 사용. fork·patch 없음. binding은 Bridge가 macOS `sysctl`과 Claude PID metadata로 계산([ADR-040](adr.md#adr-040--입력-검증을-bridge로-옮기고-stock-herdr-api로-전송한다)) |
 | Client | React + TypeScript + Vite, pnpm. Terminal은 `@xterm/xterm` |
 | Toolchain | `mise.toml` |
 | Persistence | `command_id`당 JSON receipt 파일 하나(`O_EXCL` reserve, fsync, temp+rename finish, 시작 시 오래된 temp 정리). conversation DB·Redis·broker 없음 |
@@ -420,7 +436,7 @@ resource 상한은 [P1-13](https://github.com/psw7205/herdr-remote/issues/12)에
 
 | 영역 | 현재 | Issue |
 | --- | --- | --- |
-| Codex 입력 | Chat은 read-only다. Herdr Codex binding이 없어 prompt·interrupt·Terminal 없음. 실제 Herdr Codex pane의 hook 보고→Chat 표시는 미실측 | [P1-01](https://github.com/psw7205/herdr-remote/issues/4), [P1-02](https://github.com/psw7205/herdr-remote/issues/5) |
+| Codex 입력 | Chat은 read-only다. Codex binding이 없어 prompt·interrupt·Terminal 없음. 실제 Herdr Codex pane의 hook 보고→Chat 표시는 미실측 | [P1-01](https://github.com/psw7205/herdr-remote/issues/4), [P1-02](https://github.com/psw7205/herdr-remote/issues/5) |
 | Structured permission/question | Terminal fallback만 있다 | [P2-02](https://github.com/psw7205/herdr-remote/issues/15) |
 | Attachment | route와 host file 처리 없음 | [P2-04](https://github.com/psw7205/herdr-remote/issues/17) |
 | Notification | Web Push 없음 | [P2-05](https://github.com/psw7205/herdr-remote/issues/18) |

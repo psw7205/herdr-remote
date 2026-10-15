@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { listSessions, noStart, supersededBy, type BridgeBuild, type ConditionalInput, type Session, type StartCapability } from './api'
+import { listSessions, noStart, supersededBy, type BridgeBuild, type Session, type StartCapability } from './api'
 import { loadedClientBuild } from './build'
 import { backAction, followAlias, formatRoute, parseRoute, resolveTerminal, startRoute, successorRoute, type Route } from './route'
 import { ChangedFiles, FileDiffView } from './ChangesView'
@@ -32,7 +32,6 @@ export function App() {
   // same id is not followed silently: for a pane: item it can be another process.
   const [terminal, setTerminal] = useState<Session | null>(null)
   const [error, setError] = useState('')
-  const [conditionalInput, setConditionalInput] = useState<ConditionalInput>('unknown')
   const [start, setStart] = useState<StartCapability>(noStart)
   const [bridge, setBridge] = useState<BridgeBuild | null>(null)
   const open = useRef<string | null>(null)
@@ -61,7 +60,7 @@ export function App() {
         const from = open.current
         const successor = await supersededBy(from, list.sessions, ended.current)
         if (!alive) return
-        setSessions(list.sessions); setConditionalInput(list.conditionalInput); setStart(list.start); setBridge(list.bridge); setError(''); setLoaded(true)
+        setSessions(list.sessions); setStart(list.start); setBridge(list.bridge); setError(''); setLoaded(true)
         if (successor) {
           // Follow a pane: item re-keyed to its identified claude: or codex:
           // session, with the successor's own binding (if any) from the list.
@@ -123,7 +122,7 @@ export function App() {
     screen = <SessionChat key={route.session} initial={chatSession} onBack={back} onTerminal={openTerminal} onChanges={openChanges} />
   } else {
     // A deep link waits on the first list load under the list's own skeleton.
-    screen = <SessionList sessions={route.session && !loaded ? [] : sessions} loaded={loaded} error={error} conditionalInput={conditionalInput} bridge={bridge} loadedBuild={loadedBuild} canStart={start.kinds.includes('claude')} onStart={() => navigate(startRoute)} onOpen={item => navigate({ session: item.id, view: 'chat' })} />
+    screen = <SessionList sessions={route.session && !loaded ? [] : sessions} loaded={loaded} error={error} bridge={bridge} loadedBuild={loadedBuild} canStart={start.kinds.includes('claude')} onStart={() => navigate(startRoute)} onOpen={item => navigate({ session: item.id, view: 'chat' })} />
   }
   return <div className="app-shell" ref={shell}>{screen}</div>
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/coder/websocket"
+	"github.com/psw7205/herdr-remote/internal/binding"
 	"github.com/psw7205/herdr-remote/internal/command"
 	"github.com/psw7205/herdr-remote/internal/herdr"
 	"github.com/psw7205/herdr-remote/internal/session"
@@ -14,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -44,12 +46,12 @@ func TestMutationRequiresExactOriginAndHost(t *testing.T) {
 }
 
 type fakeSessions struct {
-	hub         *stream.Session
-	count       atomic.Int32
-	calls       atomic.Int32
-	conditional string
-	boundErr    error
-	project     string
+	hub      *stream.Session
+	count    atomic.Int32
+	calls    atomic.Int32
+	boundErr error
+	bound    func(context.Context) error
+	project  string
 }
 
 func (f *fakeSessions) Project(id string) (string, error) {
@@ -59,8 +61,6 @@ func (f *fakeSessions) Project(id string) (string, error) {
 	}
 	return f.project, nil
 }
-
-func (f *fakeSessions) ConditionalInput() string { return f.conditional }
 
 func (f *fakeSessions) List() []session.Meta {
 	f.calls.Add(1)
@@ -73,12 +73,15 @@ func (f *fakeSessions) Stream(string) (*stream.Session, error) {
 	f.calls.Add(1)
 	return f.hub, nil
 }
-func (f *fakeSessions) BoundInput(_ context.Context, _, binding, _, _ string) error {
+func (f *fakeSessions) BoundInput(ctx context.Context, _, binding, _, _ string) error {
 	f.calls.Add(1)
 	if binding != "bound" {
 		return errors.New("session binding changed")
 	}
 	f.count.Add(1)
+	if f.bound != nil {
+		return f.bound(ctx)
+	}
 	return f.boundErr
 }
 func (f *fakeSessions) Terminal(context.Context, string, string) (herdr.TerminalSnapshot, error) {
@@ -134,7 +137,7 @@ func TestCommandRetryAndStaleBinding(t *testing.T) {
 }
 func TestUnsupportedBoundInputIsDurablyRejected(t *testing.T) {
 	server, sessions := newTestServer(t)
-	sessions.boundErr = fmt.Errorf("%w: agent.bound_input", herdr.ErrUnsupported)
+	sessions.boundErr = fmt.Errorf("%w: pane.send_input", herdr.ErrUnsupported)
 	body := `{"command_id":"00000000-0000-4000-8000-000000000002","session_id":"claude:native","runtime_binding":"bound","command_type":"prompt","payload":{"text":"hello"}}`
 	for attempt := range 2 {
 		r, e := http.NewRequest(http.MethodPost, server.URL+"/api/sessions/claude:native/commands", strings.NewReader(body))
@@ -179,31 +182,123 @@ func TestBusyAgentPromptIsNotReportedAsSessionChange(t *testing.T) {
 		t.Fatalf("status %d result %+v err %v", res.StatusCode, result, e)
 	}
 }
-func TestSessionsReportsHerdrConditionalInput(t *testing.T) {
-	server, sessions := newTestServer(t)
-	for _, want := range []string{"supported", "unsupported", "unknown"} {
-		sessions.conditional = want
-		res, e := http.Get(server.URL + "/api/sessions")
-		if e != nil {
-			t.Fatal(e)
-		}
-		var body struct {
-			Sessions []session.Meta `json:"sessions"`
-			Herdr    map[string]any `json:"herdr"`
-		}
-		e = json.NewDecoder(res.Body).Decode(&body)
-		res.Body.Close()
-		if e != nil || res.StatusCode != 200 {
-			t.Fatal(res.StatusCode, e)
-		}
-		if len(body.Sessions) != 1 || body.Sessions[0].ID != "claude:native" {
-			t.Fatalf("sessions changed: %+v", body.Sessions)
-		}
-		if len(body.Herdr) != 1 || body.Herdr["conditional_input"] != want {
-			t.Fatalf("herdr = %+v, want %s", body.Herdr, want)
+func TestSessionsListsWithoutHerdrCapability(t *testing.T) {
+	server, _ := newTestServer(t)
+	res, e := http.Get(server.URL + "/api/sessions")
+	if e != nil {
+		t.Fatal(e)
+	}
+	var body map[string]json.RawMessage
+	e = json.NewDecoder(res.Body).Decode(&body)
+	res.Body.Close()
+	if e != nil || res.StatusCode != 200 {
+		t.Fatal(res.StatusCode, e)
+	}
+	keys := make([]string, 0, len(body))
+	for key := range body {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	if strings.Join(keys, ",") != "bridge,sessions,start" {
+		t.Fatalf("keys %v", keys)
+	}
+	var sessions []session.Meta
+	if e := json.Unmarshal(body["sessions"], &sessions); e != nil || len(sessions) != 1 || sessions[0].ID != "claude:native" {
+		t.Fatalf("sessions changed: %+v %v", sessions, e)
+	}
+}
+
+func postCommand(t *testing.T, ctx context.Context, server *httptest.Server, commandID string) (*http.Response, command.Result, error) {
+	t.Helper()
+	body := fmt.Sprintf(`{"command_id":%q,"session_id":"claude:native","runtime_binding":"bound","command_type":"prompt","payload":{"text":"hello"}}`, commandID)
+	r, e := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/api/sessions/claude:native/commands", strings.NewReader(body))
+	if e != nil {
+		t.Fatal(e)
+	}
+	r.Header.Set("Origin", "http://localhost:5173")
+	r.Header.Set("Content-Type", "application/json")
+	res, e := http.DefaultClient.Do(r)
+	if e != nil {
+		return nil, command.Result{}, e
+	}
+	defer res.Body.Close()
+	var result command.Result
+	e = json.NewDecoder(res.Body).Decode(&result)
+	return res, result, e
+}
+
+func TestBoundInputErrorsMapToStableCodes(t *testing.T) {
+	partial := fmt.Errorf("%w: prompt text sent, Enter withheld or uncertain: %w", binding.ErrDeliveryUnknown, fmt.Errorf("%w: pane.send_keys", herdr.ErrUnsupported))
+	for i, tc := range []struct {
+		err    error
+		status int
+		want   command.Result
+	}{
+		{&binding.Rejected{Code: binding.CodeBindingMismatch, Err: errors.New("changed")}, 409, command.Result{Status: "rejected", Code: "RUNTIME_BINDING_MISMATCH"}},
+		{&binding.Rejected{Code: binding.CodeSessionEnded, Err: errors.New("gone")}, 409, command.Result{Status: "rejected", Code: "SESSION_ENDED"}},
+		{&binding.Rejected{Code: binding.CodeInvalidPrompt, Err: errors.New("control")}, 409, command.Result{Status: "rejected", Code: "INVALID_PROMPT"}},
+		{&binding.Rejected{Code: binding.CodeInvalidInput, Err: errors.New("empty")}, 409, command.Result{Status: "rejected", Code: "INVALID_INPUT"}},
+		{&binding.Rejected{Code: binding.CodeInputRejected, Err: &herdr.APIError{Code: "pane_send_failed"}}, 409, command.Result{Status: "rejected", Code: "INPUT_REJECTED"}},
+		{fmt.Errorf("%w: pane.send_text", herdr.ErrUnsupported), 409, command.Result{Status: "rejected", Code: "HERDR_UNSUPPORTED"}},
+		{partial, 202, command.Result{Status: "delivery_unknown", Code: "DELIVERY_UNKNOWN"}},
+		{fmt.Errorf("%w: %w", binding.ErrDeliveryUnknown, context.DeadlineExceeded), 202, command.Result{Status: "delivery_unknown", Code: "DELIVERY_UNKNOWN"}},
+		{errors.New("session binding changed"), 409, command.Result{Status: "rejected", Code: "SESSION_CHANGED"}},
+		{errors.New("chat transcript unavailable"), 409, command.Result{Status: "rejected", Code: "CHAT_UNAVAILABLE"}},
+		{errors.New("something unexpected"), 202, command.Result{Status: "delivery_unknown", Code: "DELIVERY_UNKNOWN"}},
+	} {
+		server, sessions := newTestServer(t)
+		sessions.boundErr = tc.err
+		res, result, e := postCommand(t, context.Background(), server, fmt.Sprintf("00000000-0000-4000-8000-0000000001%02d", i))
+		if e != nil || res.StatusCode != tc.status || result != tc.want {
+			t.Fatalf("%v: status %d result %+v err %v", tc.err, res.StatusCode, result, e)
 		}
 	}
 }
+
+func TestBoundInputOutlivesClientDisconnect(t *testing.T) {
+	server, sessions := newTestServer(t)
+	started := make(chan struct{})
+	finished := make(chan error, 1)
+	sessions.bound = func(ctx context.Context) error {
+		close(started)
+		select {
+		case <-ctx.Done():
+			finished <- ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+			finished <- nil
+		}
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	id := "00000000-0000-4000-8000-000000000200"
+	go func() {
+		<-started
+		cancel()
+	}()
+	if _, _, e := postCommand(t, ctx, server, id); !errors.Is(e, context.Canceled) {
+		t.Fatalf("client request not cancelled: %v", e)
+	}
+	if e := <-finished; e != nil {
+		t.Fatalf("dispatch cancelled with the client: %v", e)
+	}
+	// The receipt is finished just after the dispatch returns; until then a
+	// retry reads the pending receipt, never a second dispatch.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		res, result, e := postCommand(t, context.Background(), server, id)
+		if e != nil || res.StatusCode != 202 || sessions.count.Load() != 1 {
+			t.Fatalf("retry after disconnect: %v %+v %v count %d", res, result, e, sessions.count.Load())
+		}
+		if result.Status == "accepted" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("receipt never finished: %+v", result)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestWebSocketReplaysSnapshotGapAndDisconnectKeepsSession(t *testing.T) {
 	server, sessions := newTestServer(t)
 	snap := sessions.hub.Snapshot()

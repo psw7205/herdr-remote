@@ -150,9 +150,7 @@ type Registry struct {
 	claudeRoot string
 	codexRoot  string
 	items      map[string]*Item
-	// conditional is the agent.binding capability seen by the last successful Refresh.
-	conditional string
-	ends        uint64
+	ends       uint64
 }
 
 // maxInactive bounds the ended and superseded items kept for clients still
@@ -167,7 +165,7 @@ type Option func(*Registry)
 func WithCodexRoot(root string) Option { return func(r *Registry) { r.codexRoot = root } }
 
 func NewRegistry(ctx context.Context, gateway Gateway, claudeRoot string, options ...Option) *Registry {
-	r := &Registry{ctx: ctx, gateway: gateway, claudeRoot: claudeRoot, items: make(map[string]*Item), conditional: herdr.ConditionalInputUnknown}
+	r := &Registry{ctx: ctx, gateway: gateway, claudeRoot: claudeRoot, items: make(map[string]*Item)}
 	for _, option := range options {
 		option(r)
 	}
@@ -182,11 +180,6 @@ func (r *Registry) resolve(a *adapter, native string) (string, error) {
 		return "", errors.New("Codex root not configured")
 	}
 	return a.resolve(r.codexRoot, native)
-}
-func (r *Registry) ConditionalInput() string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.conditional
 }
 func status(raw string) string {
 	switch raw {
@@ -205,14 +198,15 @@ func status(raw string) string {
 
 // Lifecycle values published in Meta and agent.status.
 //
-//   - active: Herdr verified the current runtime binding.
+//   - active: the Bridge verified the current runtime binding.
 //   - unverified: a claude:<native> item (created only from a verified binding)
 //     lost its binding while Herdr still runs claude on its pane; every write
 //     fails closed until the same native session is verified again.
 //   - unbound: the item has no verified binding and never had one, so every
 //     write fails closed: a pane:<pane> item whose native session was never
-//     identified (stock Herdr, or no binding yet), or any codex:<native> item,
-//     which is read-only because Herdr issues no binding for Codex.
+//     identified (no binding yet, or a platform that cannot verify one), or any
+//     codex:<native> item, which is read-only because no binding is verified
+//     for Codex.
 //   - superseded: a pane:<pane> item whose pane gained a verified claude:<native>
 //     item, or a codex:<native> item from Herdr's agent_session report, in the
 //     same Refresh; SuccessorID names it. The agent keeps running.
@@ -247,8 +241,8 @@ type observation struct {
 	verified bool
 	path     string
 	resolved bool
-	// boundNative is the native session a successful agent.binding call named,
-	// even when the binding was rejected (e.g. a terminal_id race).
+	// boundNative is the native session a successful Binding call named, even
+	// when the binding was rejected (e.g. a terminal_id race).
 	boundNative string
 }
 
@@ -262,7 +256,7 @@ func reportedNativeID(a herdr.Agent) string {
 }
 
 // codexObservation is a Codex pane. Its only identity is Herdr's agent_session
-// report: Herdr issues no runtime binding for Codex, so the item is read-only.
+// report: no runtime binding is verified for Codex, so the item is read-only.
 type codexObservation struct {
 	agent    herdr.Agent
 	native   string
@@ -279,11 +273,8 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	observed := make([]observation, 0, len(snapshot.Agents))
 	var codexObserved []codexObservation
 	codexClaims := make(map[string]int)
-	conditional := herdr.ConditionalInputUnknown
 	for _, a := range snapshot.Agents {
-		// Codex panes never reach agent.binding: Herdr verifies no Codex
-		// binding, and an error for one must not move the server-wide
-		// conditional input capability that Claude writes depend on.
+		// Codex panes never reach Binding: no Codex binding is verified.
 		if a.Agent == "codex" && a.PaneID != "" {
 			o := codexObservation{agent: a, native: reportedNativeID(a)}
 			if o.native != "" {
@@ -297,7 +288,6 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		}
 		o := observation{agent: a}
 		binding, e := r.gateway.Binding(ctx, a.PaneID)
-		conditional = herdr.ObserveConditionalInput(conditional, e)
 		if e == nil {
 			o.boundNative = binding.NativeSessionID
 		}
@@ -371,11 +361,10 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.conditional = conditional
 	// Continuity without a verified binding: an active claude:<native> item
 	// stays on its pane, as "unverified", while Herdr still reports claude on
 	// that pane and neither Herdr's own native session report (agent_session)
-	// nor a rejected agent.binding result names another native ID. A verified
+	// nor a rejected Binding result names another native ID. A verified
 	// binding for the same native ID elsewhere, a different native report, or
 	// the pane leaving the snapshot ends it.
 	// terminal_id is not used because live handoff reissues it, and cwd cannot

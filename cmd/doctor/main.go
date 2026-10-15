@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/psw7205/herdr-remote/internal/binding"
 	"github.com/psw7205/herdr-remote/internal/herdr"
 	"github.com/psw7205/herdr-remote/internal/tailnet"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -37,12 +39,15 @@ type agentReport struct {
 	VerifiedBinding          bool   `json:"verified_binding"`
 }
 
+// WriteEnabled means the Bridge can verify runtime bindings and send input
+// through stock Herdr here: this platform reads process start times, and Herdr
+// answered pane.process_info for a Claude pane or lists no Claude pane. It does
+// not mean any session is verified; Agents and Blockers say that.
 type report struct {
 	Version               string        `json:"herdr_version"`
 	Protocol              int           `json:"herdr_protocol"`
 	WriteEnabled          bool          `json:"write_enabled"`
 	TerminalMirrorEnabled bool          `json:"terminal_mirror_enabled"`
-	ConditionalInput      string        `json:"conditional_input"`
 	Blockers              []string      `json:"blockers"`
 	Agents                []agentReport `json:"agents"`
 	Tailnet               tailnetReport `json:"tailnet"`
@@ -130,12 +135,13 @@ func (r *tailnetReport) inspectExposure(serve tailnet.ServeConfig, host, listen 
 	}
 }
 
-func diagnose(ctx context.Context, gateway reader, tn tailnetReport, out io.Writer) error {
+func diagnose(ctx context.Context, gateway reader, startTimeSupported bool, tn tailnetReport, out io.Writer) error {
 	s, err := gateway.Snapshot(ctx)
 	if err != nil {
 		return fmt.Errorf("read Herdr snapshot: %w", err)
 	}
-	r := report{Version: s.Version, Protocol: s.Protocol, ConditionalInput: herdr.ConditionalInputUnknown, Agents: []agentReport{}, Blockers: []string{}, Tailnet: tn}
+	r := report{Version: s.Version, Protocol: s.Protocol, Agents: []agentReport{}, Blockers: []string{}, Tailnet: tn}
+	claudePanes, claudeAnswered, verified := 0, 0, false
 	for _, a := range s.Agents {
 		item := agentReport{PaneID: a.PaneID, Agent: a.Agent, Status: a.Status}
 		item.NativeAssociation = a.Session != nil && a.Session.Value != "" && a.Session.Agent == a.Agent && a.Session.Kind == "id"
@@ -145,33 +151,40 @@ func diagnose(ctx context.Context, gateway reader, tn tailnetReport, out io.Writ
 		} else {
 			item.ProcessCount = len(p.ForegroundProcesses)
 		}
+		if a.Agent == "claude" {
+			claudePanes++
+			if err == nil {
+				claudeAnswered++
+			}
+		}
 		_, err = gateway.TerminalSnapshot(ctx, a.PaneID)
 		if err != nil {
 			item.TerminalReadError = err.Error()
 		} else {
 			item.VisibleSnapshotAvailable = true
 		}
-		binding, bindingErr := gateway.Binding(ctx, a.PaneID)
-		r.ConditionalInput = herdr.ObserveConditionalInput(r.ConditionalInput, bindingErr)
-		if bindingErr == nil && binding.Token != "" && binding.NativeSessionID != "" && binding.TerminalID == a.TerminalID && binding.Agent == a.Agent {
+		bound, bindingErr := gateway.Binding(ctx, a.PaneID)
+		if bindingErr == nil && bound.Token != "" && bound.NativeSessionID != "" && bound.TerminalID == a.TerminalID && bound.Agent == a.Agent {
 			for _, process := range p.ForegroundProcesses {
-				if process.PID == binding.ProcessID {
+				if process.PID == bound.ProcessID {
 					item.VerifiedBinding = true
 					break
 				}
 			}
 		}
 		if item.VerifiedBinding {
-			r.WriteEnabled = true
+			verified = true
 			if item.VisibleSnapshotAvailable {
 				r.TerminalMirrorEnabled = true
 			}
 		}
 		r.Agents = append(r.Agents, item)
 	}
-	if r.ConditionalInput == herdr.ConditionalInputUnsupported {
-		r.Blockers = append(r.Blockers, "Herdr server lacks agent.binding/agent.bound_input (likely a stock build); conditional input remains unavailable. See docs/herdr-patch.md.")
-	} else if !r.WriteEnabled {
+	r.WriteEnabled = startTimeSupported && (claudePanes == 0 || claudeAnswered > 0)
+	if !startTimeSupported {
+		r.Blockers = append(r.Blockers, "This platform cannot read process start times (only macOS can); the Bridge verifies no native runtime binding, so every session stays read-only.")
+	}
+	if !verified {
 		r.Blockers = append(r.Blockers, "No verified native runtime binding; conditional input remains unavailable.")
 	}
 	if tn.Funnel {
@@ -191,6 +204,8 @@ func diagnose(ctx context.Context, gateway reader, tn tailnetReport, out io.Writ
 
 func main() {
 	socket := flag.String("socket", os.Getenv("HERDR_SOCKET_PATH"), "existing Herdr public API socket (or HERDR_SOCKET_PATH)")
+	home, _ := os.UserHomeDir()
+	claudeDir := flag.String("claude-dir", filepath.Join(home, ".claude"), "Claude root whose sessions/ holds the process metadata bindings are verified against (the Bridge's -claude-dir)")
 	tailscaleBin := flag.String("tailscale-bin", "", "Tailscale CLI path (default: PATH, then well-known install locations)")
 	bridgeListen := flag.String("bridge-listen", "127.0.0.1:8787", "Bridge listen address that Tailscale Serve should proxy to")
 	flag.Parse()
@@ -208,7 +223,7 @@ func main() {
 	tailnetCtx, cancelTailnet := context.WithTimeout(ctx, 5*time.Second)
 	tn := inspectTailnet(tailnetCtx, run, cliErr, *bridgeListen)
 	cancelTailnet()
-	if err := diagnose(ctx, herdr.NewGateway(*socket), tn, os.Stdout); err != nil {
+	if err := diagnose(ctx, binding.New(herdr.NewGateway(*socket), *claudeDir), binding.Supported(), tn, os.Stdout); err != nil {
 		slog.Error("Herdr inspection failed", "error", err)
 		os.Exit(1)
 	}

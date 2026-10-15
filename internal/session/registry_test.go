@@ -43,37 +43,29 @@ func (f *fakeHerdr) Binding(_ context.Context, p string) (herdr.Binding, error) 
 	}
 	return f.bindings[p], nil
 }
-func TestConditionalInputCapabilityFailsClosed(t *testing.T) {
+
+// errUnverified stands in for any Binding failure: the registry treats every
+// one alike and never infers support from it.
+var errUnverified = errors.New("no verified native runtime binding")
+
+func TestUnverifiedClaudePaneFailsClosed(t *testing.T) {
 	a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle"}
-	f := &fakeHerdr{}
 	ctx := context.Background()
-	r := NewRegistry(ctx, f, t.TempDir())
-	if e := r.Refresh(ctx); e != nil || r.ConditionalInput() != "unknown" {
-		t.Fatalf("no agents: %v %s", e, r.ConditionalInput())
-	}
-	f.agents = []herdr.Agent{a}
-	f.bindingErr = errors.New("dial unix: connection refused")
-	if r.Refresh(ctx); r.ConditionalInput() != "unknown" {
-		t.Fatalf("transport error counted as evidence: %s", r.ConditionalInput())
-	}
-	f.bindingErr = &herdr.APIError{Code: "binding_unavailable", Message: "no native session"}
-	if r.Refresh(ctx); r.ConditionalInput() != "supported" {
-		t.Fatalf("method-level error: %s", r.ConditionalInput())
-	}
-	f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
-	if r.Refresh(ctx); r.ConditionalInput() != "unsupported" {
-		t.Fatalf("unsupported: %s", r.ConditionalInput())
-	}
-	items := r.List()
-	if len(items) != 1 || items[0].Chat || items[0].Terminal || items[0].Binding != "" {
-		t.Fatalf("unsupported Herdr enabled controls: %+v", items)
-	}
-	if e := r.BoundInput(ctx, items[0].ID, "", "terminal_input", "x"); e == nil {
-		t.Fatal("unsupported Herdr accepted input")
-	}
-	f.snapshotErr = errors.New("snapshot failed")
-	if e := r.Refresh(ctx); e == nil || r.ConditionalInput() != "unsupported" {
-		t.Fatalf("snapshot failure changed capability: %v %s", e, r.ConditionalInput())
+	for _, err := range []error{errUnverified, errors.New("dial unix: connection refused")} {
+		f := &fakeHerdr{agents: []herdr.Agent{a}, bindingErr: err}
+		r := NewRegistry(ctx, f, t.TempDir())
+		if e := r.Refresh(ctx); e != nil {
+			t.Fatal(e)
+		}
+		items := r.List()
+		if len(items) != 1 || items[0].Chat || items[0].Terminal || items[0].Binding != "" || items[0].Lifecycle != LifecycleUnbound {
+			t.Fatalf("%v: unverified pane enabled controls: %+v", err, items)
+		}
+		for _, kind := range []string{"prompt", "interrupt", "terminal_input"} {
+			if e := r.BoundInput(ctx, items[0].ID, "", kind, "x"); e == nil || f.inputs != 0 {
+				t.Fatalf("%v: unverified pane accepted %s", err, kind)
+			}
+		}
 	}
 }
 func (f *fakeHerdr) BoundInput(context.Context, string, string, string, string) error {
@@ -338,18 +330,17 @@ func TestBindingLossKeepsSessionUnverified(t *testing.T) {
 	handoff := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Status: "working", CWD: "repo"}
 	reported := handoff
 	reported.Session = &herdr.NativeSession{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: nativeA}
-	unsupported := fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
 	cases := []struct {
 		name    string
 		agent   herdr.Agent
 		binding herdr.Binding
 		err     error
 	}{
-		{"stock Herdr after handoff", handoff, herdr.Binding{}, unsupported},
+		{"unverified after handoff", handoff, herdr.Binding{}, errUnverified},
 		{"transient transport error", handoff, herdr.Binding{}, errors.New("dial unix: connection refused")},
-		{"method-level binding error", handoff, herdr.Binding{}, &herdr.APIError{Code: "binding_unavailable", Message: "no native session"}},
+		{"Herdr API error", handoff, herdr.Binding{}, &herdr.APIError{Code: "pane_not_found", Message: "gone"}},
 		{"snapshot and binding race", handoff, herdr.Binding{Token: "B", TerminalID: "term_c", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude"}, nil},
-		{"Herdr reports the same native session", reported, herdr.Binding{}, unsupported},
+		{"Herdr reports the same native session", reported, herdr.Binding{}, errUnverified},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -394,7 +385,7 @@ func TestBindingLossEndsOnlyOnConfirmedEnd(t *testing.T) {
 			id := "claude:" + nativeA
 			events := statusEvents(t, r, id)
 			f.agents = tc.agents
-			f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+			f.bindingErr = errUnverified
 			if err := r.Refresh(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -438,7 +429,7 @@ func TestBindingRecovery(t *testing.T) {
 			events := statusEvents(t, r, old)
 			a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Status: "idle", CWD: "repo"}
 			f.agents = []herdr.Agent{a}
-			f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+			f.bindingErr = errUnverified
 			if err := r.Refresh(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -570,7 +561,7 @@ func TestPaneItemSupersededByVerifiedNativeSession(t *testing.T) {
 		want    string
 	}{
 		{"verified before the transcript exists", herdr.Binding{Token: "T", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"}, nil, LifecycleActive},
-		{"never bound", herdr.Binding{}, &herdr.APIError{Code: "binding_unavailable", Message: "no native session"}, LifecycleUnbound},
+		{"never bound", herdr.Binding{}, errUnverified, LifecycleUnbound},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -627,7 +618,7 @@ func TestEndedSessionRevivesOnVerifiedBinding(t *testing.T) {
 	}
 	// Ended items get no continuity, so the pane is re-listed as unbound.
 	f.agents = []herdr.Agent{a}
-	f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+	f.bindingErr = errUnverified
 	if err := r.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -655,9 +646,9 @@ func TestEndedSessionRevivesOnVerifiedBinding(t *testing.T) {
 }
 
 // Two active items share a pane only if one snapshot listed that pane twice
-// and the per-pane agent.binding calls disagreed; continuity must not pick one.
+// and the per-pane Binding calls disagreed; continuity must not pick one.
 func TestAmbiguousPaneGetsNoContinuity(t *testing.T) {
-	f := &fakeHerdr{agents: []herdr.Agent{{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Status: "idle"}}, bindingErr: fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)}
+	f := &fakeHerdr{agents: []herdr.Agent{{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Status: "idle"}}, bindingErr: errUnverified}
 	r := NewRegistry(context.Background(), f, t.TempDir())
 	for _, native := range []string{nativeA, nativeB} {
 		id := "claude:" + native
@@ -746,7 +737,7 @@ func TestSameNativeVerifiedOnTwoPanesIsAmbiguous(t *testing.T) {
 	})
 }
 
-// sequenceHerdr answers successive agent.binding calls for one pane from a
+// sequenceHerdr answers successive Binding calls for one pane from a
 // queue, so one snapshot can list a pane twice with different bindings.
 type sequenceHerdr struct {
 	fakeHerdr
@@ -771,7 +762,7 @@ func TestDuplicatedPaneSupersedesNothing(t *testing.T) {
 	a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle", CWD: "repo"}
 	b := a
 	b.TerminalID = "term_b"
-	f := &sequenceHerdr{fakeHerdr: fakeHerdr{agents: []herdr.Agent{a}, bindingErr: fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)}}
+	f := &sequenceHerdr{fakeHerdr: fakeHerdr{agents: []herdr.Agent{a}, bindingErr: errUnverified}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	r := NewRegistry(ctx, f, root)
@@ -805,7 +796,7 @@ type flappingHerdr struct {
 
 func (f *flappingHerdr) Binding(ctx context.Context, p string) (herdr.Binding, error) {
 	if f.calls.Add(1)%2 == 0 {
-		return herdr.Binding{}, fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+		return herdr.Binding{}, errUnverified
 	}
 	return f.fakeHerdr.Binding(ctx, p)
 }
@@ -842,7 +833,6 @@ func TestConcurrentRefreshAndReads(t *testing.T) {
 					return
 				}
 			}
-			_ = r.ConditionalInput()
 		}
 	}()
 	go func() {
@@ -1030,7 +1020,7 @@ func TestTranscriptWatcherFollowsItemLifecycle(t *testing.T) {
 
 	// Unverified: the agent still writes, so Chat keeps updating on the same watcher.
 	f.agents = []herdr.Agent{a}
-	f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+	f.bindingErr = errUnverified
 	if err := r.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1176,7 +1166,7 @@ func TestMovedTranscriptIsResolvedAgain(t *testing.T) {
 	a := f.agents[0]
 	a.TerminalID = "term_b"
 	f.agents = []herdr.Agent{a}
-	f.bindingErr = fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
+	f.bindingErr = errUnverified
 	if err := r.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}

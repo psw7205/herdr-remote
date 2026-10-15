@@ -14,7 +14,7 @@ describe('start session screen', () => {
 })
 
 describe('session list start entry', () => {
-  const render = (canStart: boolean) => renderToStaticMarkup(<SessionList sessions={[]} loaded error="" conditionalInput="supported" canStart={canStart} onStart={() => {}} onOpen={() => {}} />)
+  const render = (canStart: boolean) => renderToStaticMarkup(<SessionList sessions={[]} loaded error="" canStart={canStart} onStart={() => {}} onOpen={() => {}} />)
   it('offers a new session only when the Bridge allows a kind', () => {
     expect(render(true)).toContain('aria-label="새 세션 시작"')
     expect(render(false)).not.toContain('새 세션 시작')

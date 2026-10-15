@@ -4,9 +4,10 @@
 > [Herdr](https://github.com/herdrdev/herdr). It lets you read and continue Claude Code sessions
 > that are already running in Herdr panes from a phone browser, over localhost or Tailscale Serve.
 > The Bridge never runs or resumes agents itself: Herdr owns the processes and PTYs, new sessions
-> are started only by asking Herdr, and chat history is read from Claude Code's native transcripts. It requires macOS, Claude Code, and a Herdr build
-> with the conditional input patch ([`psw7205/herdr`](https://github.com/psw7205/herdr/tree/mobile-binding),
-> branch `mobile-binding`); stock Herdr lacks the required API. Codex CLI sessions are shown as
+> are started only by asking Herdr, and chat history is read from Claude Code's native transcripts. It requires macOS, Claude Code, and stock Herdr
+> 0.9.x (socket protocol 22); no fork or patch is needed. Before every write the Bridge re-derives a runtime
+> binding from Herdr's process info, the OS process start time, and Claude Code's per-process session
+> metadata, and it writes nothing when the binding does not match. Codex CLI sessions are shown as
 > read-only chat when Herdr's Codex hook reports their session; Codex input is not supported yet.
 > This is a personal project, not affiliated with Herdr. The documentation is in Korean.
 
@@ -32,7 +33,7 @@ repo와 Go module 이름은 `herdr-remote`다.
 | --- | --- |
 | Claude Code / macOS | 기존 session 발견, Chat, prompt, interrupt, Terminal fallback |
 | 대화 복구 | incremental JSONL, snapshot/replay/live, Bridge 재시작 뒤 복구 |
-| 입력 보호 | Herdr binding 검증, durable command receipt, 같은 command 재전송 방지 |
+| 입력 보호 | Bridge의 binding 재확인(text 전·Enter 전), durable command receipt, 같은 command 재전송 방지 |
 | 모바일 UI | 상태별 session 목록, Chat, light/dark theme, code 복사, 특수 키가 있는 Terminal, PWA. 실기기 keyboard와 설치형 PWA는 미검증 |
 | Tailnet | Serve 경유 소유자 phone에서 Chat·prompt·Terminal 확인. 화면 잠금·네트워크 전환 뒤 reconnect와 다른 사용자 거부의 실측은 미검증 |
 | Codex CLI | Herdr Codex hook이 보고한 session의 rollout을 read-only Chat으로 표시(ADR-038). prompt·interrupt·Terminal은 미지원. 실제 Herdr Codex pane에서는 미실측 |
@@ -56,25 +57,23 @@ Claude의 localhost handoff와 Bridge 재시작 복구는 실제 process에서 �
 
 | 항목 | 조건 |
 | --- | --- |
-| OS·agent | macOS에서 Herdr pane으로 실행 중인 Claude Code interactive session. Codex CLI의 read-only Chat에는 Herdr Codex integration hook이 필요하다(`herdr integration status`로 확인) |
-| Herdr | 조건부 입력 patch가 적용된 Herdr server가 실행 중이어야 한다. 아래 설명 참조 |
+| OS·agent | macOS에서 Herdr pane으로 실행 중인 Claude Code interactive session. Claude 입력에는 Herdr integration hook이 필요 없다. Codex CLI의 read-only Chat에는 Herdr Codex integration hook이 필요하다(`herdr integration status`로 확인) |
+| Herdr | stock Herdr 0.9.x(socket protocol 22) server가 실행 중이어야 한다. fork·patch·Rust toolchain은 필요 없다 |
 | Toolchain | [`mise`](https://mise.jdx.dev). Go·Node.js·pnpm version은 `mise.toml`이 고정한다 |
 | Tailscale | 모바일 원격 접속에만 필요하다. Bridge host와 mobile device가 같은 tailnet에 로그인돼 있어야 한다 |
 
-Bridge는 Herdr가 꺼졌을 때 대신 시작하지 않는다. stock Herdr에는 필수 API인
-`agent.binding`과 `agent.bound_input`이 없다. 필요한 patch는 fork
-[`psw7205/herdr`의 `mobile-binding` branch](https://github.com/psw7205/herdr/tree/mobile-binding)
-(`v0.9.3` 위의 단일 commit `de31ede9`)다. build·설치·rollback·upgrade 절차는
-[Herdr patch runbook](docs/herdr-patch.md)을 따른다. stock과 patched binary가 같은 version
-문자열을 사용할 수 있으므로 version이 아니라 `doctor`로 확인한다. Herdr updater가 stock
-binary를 설치하면 조건부 입력이 비활성화되며 Bridge는 입력을 fail closed한다.
+Bridge는 Herdr가 꺼졌을 때 대신 시작하지 않는다. 입력 전 `runtime_binding` 검증은 Bridge가 직접 한다.
+Herdr의 process 정보, OS process 시작 시각, Claude Code가 process마다 쓰는 session metadata를 대조해
+binding을 만들고, prompt는 text 전과 Enter 전에 다시 확인한다([ADR-040](docs/adr.md#adr-040--입력-검증을-bridge로-옮기고-stock-herdr-api로-전송한다)).
+process 시작 시각은 macOS에서만 읽으므로 다른 OS에서는 입력과 Terminal이 fail closed한다. stock Herdr를
+그대로 쓰므로 `herdr update`가 입력을 끄지 않는다. Herdr나 Claude Code를 갱신한 뒤에는 `doctor`로 확인한다.
 
 ## 빠른 시작
 
 먼저 localhost에서 동작을 확인한다.
 
-1. patched Herdr를 준비한다. [Herdr patch runbook](docs/herdr-patch.md)의 §3–5(build, stock
-   binary 백업·설치, live handoff)를 따른다. 실행 중인 Herdr server를 종료하지 않는다.
+1. Herdr server가 실행 중이고(`herdr status server`) Claude Code가 Herdr pane에서 실행 중인지 확인한다.
+   설치된 stock Herdr를 그대로 쓴다. 실행 중인 Herdr server를 종료하지 않는다.
 2. 저장소 root에서 client를 build하고 `doctor`로 확인한 뒤 Bridge를 실행한다.
 
    ```sh
@@ -91,8 +90,11 @@ binary를 설치하면 조건부 입력이 비활성화되며 Bridge는 입력�
 3. 같은 machine의 브라우저에서 [http://127.0.0.1:8787](http://127.0.0.1:8787)로 접속한다.
 
 `doctor`는 read-only이며 transcript 원문이나 binding token을 출력하지 않는다. 종료 코드 0은
-조회 성공이고, 모든 handoff acceptance의 완료를 의미하지 않는다. `blockers`가 비어 있는지,
-`conditional_input`이 `supported`이고 대상 agent의 `verified_binding`이 참인지 확인한다.
+조회 성공이고, 모든 handoff acceptance의 완료를 의미하지 않는다. 출력은 `herdr_version`, `herdr_protocol`,
+`write_enabled`, `terminal_mirror_enabled`, `blockers`, agent별 `verified_binding`, `tailnet`이다.
+`write_enabled`는 이 OS에서 process 시작 시각을 읽을 수 있고 Herdr가 `pane.process_info`에 답했다는 뜻이다.
+`blockers`가 비어 있고 `write_enabled`와 대상 agent의 `verified_binding`이 참인지 확인한다. `doctor`의 `-claude-dir`는
+Bridge와 같은 값으로 둔다.
 Tailnet을 아직 설정하지 않았어도 blocker는 아니다. localhost 전용 사용도 지원 범위다.
 
 Vite hot reload와 변경별 검증 절차는 [CONTRIBUTING.md](CONTRIBUTING.md)에 있다.
@@ -148,7 +150,7 @@ network 경계도 좁히도록 tailnet ACL/grant로 Bridge host의 HTTPS 접근�
 | Flag | 기본값·역할 |
 | --- | --- |
 | `-herdr-socket` | `$HOME/.config/herdr/herdr.sock`. 다른 named session은 명시적으로 지정 |
-| `-claude-dir` | `$HOME/.claude`. Claude native transcript root |
+| `-claude-dir` | `$HOME/.claude`. Claude native transcript root. binding 검증에 쓰는 `sessions/<pid>.json`도 여기서 읽는다 |
 | `-codex-dir` | `$HOME/.codex`. Codex home. `sessions/` 아래 rollout만 read-only로 읽는다 |
 | `-receipts-dir` | `$HOME/.local/state/herdr-remote/receipts`. durable command receipts |
 | `-listen` | `127.0.0.1:8787`. loopback만 허용 |
@@ -166,7 +168,7 @@ network 경계도 좁히도록 tailnet ACL/grant로 Bridge host의 HTTPS 접근�
 
 ```text
 기존 Herdr agent → native transcript → Go Bridge → Chat
-Chat command → durable receipt → Herdr binding 검증 → 기존 PTY
+Chat command → durable receipt → Bridge binding 재확인 → Herdr pane 입력 → 기존 PTY
 ```
 
 동작 규칙과 invariant는 [Architecture](docs/architecture.md#8-invariants)가 기준이다. 운영에서 알아 둘 것:
@@ -255,7 +257,6 @@ prompt와 transcript 본문은 log에 쓰지 않는다.
 | [PRD](docs/prd.md) | 제품 요구와 범위 |
 | [ADR](docs/adr.md) | architecture 결정 |
 | [Architecture](docs/architecture.md) | 결정을 조합한 runtime 구조, data flow, invariant |
-| [Herdr patch runbook](docs/herdr-patch.md) | 조건부 입력 patch의 확인·설치·rollback·upgrade |
 | [Issues](https://github.com/psw7205/herdr-remote/issues) | 남은 작업과 완료 기준. label `P0`~`P2`는 우선순위, `in-use`·`blocked`·`optional`은 상태 |
 
 로컬 조사·실측 상세는 Git에서 제외한 `docs/records/`에 보관한다. 공개 문서에는 현재 동작과

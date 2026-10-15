@@ -1,13 +1,12 @@
 // Anonymous sample data for the dev-only fixture page. Nothing here comes from
 // a real transcript, pane or host; every name, path and message is invented.
-import type { ConditionalInput, Delivery, Message, Session, StartCandidate, StartCapability, StartDelivery, ToolActivity } from '../api'
+import type { Delivery, Message, Session, StartCandidate, StartCapability, StartDelivery, ToolActivity } from '../api'
 import { fixtureChanges, type FixtureChanges } from './changes'
 
 export type FixtureSession = { session: Session; messages: Message[] }
 export type Scenario = {
   name: ScenarioName
   sessions: FixtureSession[]
-  conditionalInput: ConditionalInput
   command: Delivery
   // Milliseconds added to every HTTP answer.
   latency: number
@@ -26,7 +25,7 @@ export type Scenario = {
   script?: { session: string; steps: ScriptStep[] }
 }
 export type ScriptStep = { after: number; type: 'message.tool' | 'message.updated' | 'message.assistant'; message: Message; status?: Session['status'] }
-export const scenarioNames = ['default', 'long', 'live', 'disconnected', 'delivery-unknown', 'rejected', 'empty', 'herdr-down', 'unsupported', 'slow', 'superseded', 'start-trust', 'start-unknown', 'no-root', 'codex', 'changes-large', 'tools', 'stale-client', 'wide-table'] as const
+export const scenarioNames = ['default', 'long', 'live', 'disconnected', 'delivery-unknown', 'rejected', 'empty', 'herdr-down', 'unbound', 'slow', 'superseded', 'start-trust', 'start-unknown', 'no-root', 'codex', 'changes-large', 'tools', 'stale-client', 'wide-table'] as const
 export type ScenarioName = typeof scenarioNames[number]
 
 const minute = 60_000
@@ -211,7 +210,7 @@ const startCandidates: StartCandidate[] = [
 const created = { workspace_id: 'w9', tab_id: 'w9:t1', pane_id: 'w9:p1', agent: 'mobile-fixture' }
 
 export function scenario(name: ScenarioName): Scenario {
-  const out: Scenario = { name, sessions: sessions(), conditionalInput: 'supported', command: { status: 'accepted' }, latency: 60, listFails: false, socketFails: false, liveEvery: 0,
+  const out: Scenario = { name, sessions: sessions(), command: { status: 'accepted' }, latency: 60, listFails: false, socketFails: false, liveEvery: 0,
     bridge: { revision: '3c7a1e9f0b2d4865a7c9e1f3b5d7a9c1e3f5a7b9', modified: false, client_build: '0f1e2d3c4b5a6978' },
     start: { capability: { kinds: ['claude'], new_workspace: true }, candidates: startCandidates, result: { status: 'accepted', created }, latency: 2500 },
     changes: fixtureChanges(name) }
@@ -227,9 +226,8 @@ export function scenario(name: ScenarioName): Scenario {
     case 'rejected': out.command = { status: 'rejected', code: 'SESSION_CHANGED' }; break
     case 'empty': out.sessions = []; break
     case 'herdr-down': out.listFails = true; break
-    case 'unsupported': {
-      out.conditionalInput = 'unsupported'
-      out.command = { status: 'rejected', code: 'HERDR_UNSUPPORTED' }
+    case 'unbound': {
+      out.command = { status: 'rejected', code: 'SESSION_ENDED' }
       out.sessions = out.sessions.map(({ session, messages }) => ({ session: { ...session, runtime_binding: undefined, terminal: false, lifecycle: session.id.startsWith('pane:') ? 'unbound' : 'unverified' }, messages }))
       break
     }

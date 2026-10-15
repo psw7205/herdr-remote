@@ -39,7 +39,7 @@ export function rejectedMessage(code?: string): string {
     case 'AGENT_NOT_READY':
       return 'agent가 작업 중이거나 응답을 기다리고 있어 전달하지 않았습니다. Terminal에서 확인하세요.'
     case 'HERDR_UNSUPPORTED':
-      return '이 Herdr에는 원격 입력 기능이 없어 전달하지 않았습니다. PC에서 Herdr patch를 확인하세요.'
+      return '이 Herdr에는 필요한 입력 API가 없어 전달하지 않았습니다. PC에서 Herdr version을 확인하세요.'
     default:
       return `전달이 거부됐습니다 (${code ?? '알 수 없음'}).`
   }

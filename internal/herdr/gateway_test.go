@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -301,53 +302,6 @@ func TestPaneSizeRejectsMissingPaneOrEmptyRect(t *testing.T) {
 	}
 }
 
-func TestBindingUsesNativeSessionAndRejectsWrongPane(t *testing.T) {
-	path := socketServer(t, func(c net.Conn) {
-		var req struct {
-			ID     string `json:"id"`
-			Method string `json:"method"`
-			Params struct {
-				Target string `json:"target"`
-			} `json:"params"`
-		}
-		json.NewDecoder(c).Decode(&req)
-		if req.Method != "agent.binding" || req.Params.Target != "w1:p2" {
-			t.Errorf("wrong lookup %+v", req)
-		}
-		json.NewEncoder(c).Encode(map[string]any{"id": req.ID, "result": map[string]any{"type": "agent_binding", "binding": map[string]any{"token": "verified", "terminal_id": "term_a", "native_session_id": "native-a", "process_id": 42, "agent": "claude", "cwd": "repo"}}})
-	})
-	b, e := NewGateway(path).Binding(context.Background(), "w1:p2")
-	if e != nil || b.NativeSessionID != "native-a" || b.Token != "verified" {
-		t.Fatalf("got %+v %v", b, e)
-	}
-}
-func TestBoundInputUsesSeparateMethodWithoutRetry(t *testing.T) {
-	path := socketServer(t, func(c net.Conn) {
-		var req struct {
-			ID     string `json:"id"`
-			Method string `json:"method"`
-			Params struct {
-				Target  string `json:"target"`
-				Binding string `json:"binding"`
-				Input   struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"input"`
-			} `json:"params"`
-		}
-		json.NewDecoder(c).Decode(&req)
-		if req.Method != "agent.bound_input" || req.Params.Target != "w1:p2" || req.Params.Binding != "verified" || req.Params.Input.Type != "prompt" || req.Params.Input.Text != "hello" {
-			t.Errorf("wrong command %+v", req)
-		}
-		json.NewEncoder(c).Encode(map[string]any{"id": req.ID, "result": map[string]string{"type": "ok"}})
-	})
-	g := NewGateway(path)
-	e := g.BoundInput(context.Background(), "w1:p2", "verified", "prompt", "hello")
-	if e != nil {
-		t.Fatal(e)
-	}
-}
-
 // Observed shape of a Herdr 0.9.1 unknown-method rejection. The expected
 // variant list is truncated; detection must not depend on it.
 const unknownMethodResponse = `{"id":"","error":{"code":"invalid_request","message":"invalid request: unknown variant ` + "`%s`, expected one of `ping`, `session.snapshot`, `pane.read`" + ` at line 1 column 71"}}`
@@ -380,8 +334,8 @@ func TestUnknownMethodIsUnsupported(t *testing.T) {
 		"0.9.2 echoed id":  echoedUnknownMethodResponse,
 	} {
 		t.Run(name, func(t *testing.T) {
-			path := rejectAs(t, "agent.binding", fmt.Sprintf(response, "agent.binding"))
-			_, err := NewGateway(path).Binding(context.Background(), "w1:p2")
+			path := rejectAs(t, "pane.send_input", fmt.Sprintf(response, "pane.send_input"))
+			err := NewGateway(path).SendInput(context.Background(), "w1:p2", "x", nil)
 			if !errors.Is(err, ErrUnsupported) {
 				t.Fatalf("got %v", err)
 			}
@@ -394,8 +348,8 @@ func TestUnknownMethodIsUnsupported(t *testing.T) {
 }
 
 func TestEchoedUnknownOtherMethodStaysAPIError(t *testing.T) {
-	path := rejectAs(t, "agent.binding", fmt.Sprintf(echoedUnknownMethodResponse, "agent.other"))
-	_, err := NewGateway(path).Binding(context.Background(), "w1:p2")
+	path := rejectAs(t, "pane.send_input", fmt.Sprintf(echoedUnknownMethodResponse, "pane.other"))
+	err := NewGateway(path).SendInput(context.Background(), "w1:p2", "x", nil)
 	var api *APIError
 	if errors.Is(err, ErrUnsupported) || !errors.As(err, &api) {
 		t.Fatalf("got %v", err)
@@ -403,16 +357,16 @@ func TestEchoedUnknownOtherMethodStaysAPIError(t *testing.T) {
 }
 
 func TestOtherUncorrelatedErrorsStayMismatch(t *testing.T) {
-	unsupported := fmt.Sprintf(unknownMethodResponse, "agent.binding")
+	unsupported := fmt.Sprintf(unknownMethodResponse, "pane.send_input")
 	for name, response := range map[string]string{
-		"other method":  fmt.Sprintf(unknownMethodResponse, "agent.other"),
-		"params error":  `{"id":"","error":{"code":"invalid_request","message":"invalid request: missing field ` + "`target`" + ` at line 1 column 40"}}`,
+		"other method":  fmt.Sprintf(unknownMethodResponse, "pane.other"),
+		"params error":  `{"id":"","error":{"code":"invalid_request","message":"invalid request: missing field ` + "`pane_id`" + ` at line 1 column 40"}}`,
 		"other code":    strings.Replace(unsupported, "invalid_request", "internal_error", 1),
 		"mismatched id": strings.Replace(unsupported, `"id":""`, `"id":"other"`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			path := rejectAs(t, "agent.binding", response)
-			_, err := NewGateway(path).Binding(context.Background(), "w1:p2")
+			path := rejectAs(t, "pane.send_input", response)
+			err := NewGateway(path).SendInput(context.Background(), "w1:p2", "x", nil)
 			if err == nil || errors.Is(err, ErrUnsupported) || err.Error() != "Herdr response correlation mismatch" {
 				t.Fatalf("got %v", err)
 			}
@@ -420,20 +374,83 @@ func TestOtherUncorrelatedErrorsStayMismatch(t *testing.T) {
 	}
 }
 
-func TestObserveConditionalInput(t *testing.T) {
+func TestSendMethodsUseStockParamsAndRequireOk(t *testing.T) {
+	ok := `{"type":"ok"}`
 	for _, tc := range []struct {
-		current string
-		err     error
-		want    string
+		name   string
+		send   func(*Gateway) error
+		method string
+		params map[string]any
 	}{
-		{ConditionalInputUnknown, errors.New("dial failed"), ConditionalInputUnknown},
-		{ConditionalInputUnknown, nil, ConditionalInputSupported},
-		{ConditionalInputUnknown, &APIError{Code: "session_ended"}, ConditionalInputSupported},
-		{ConditionalInputSupported, fmt.Errorf("%w: agent.binding", ErrUnsupported), ConditionalInputUnsupported},
-		{ConditionalInputUnsupported, nil, ConditionalInputUnsupported},
+		{"input text only", func(g *Gateway) error { return g.SendInput(context.Background(), "w1:p2", "hi\nthere", nil) }, "pane.send_input", map[string]any{"pane_id": "w1:p2", "text": "hi\nthere"}},
+		{"input keys", func(g *Gateway) error { return g.SendInput(context.Background(), "w1:p2", "", []string{"enter"}) }, "pane.send_input", map[string]any{"pane_id": "w1:p2", "keys": []any{"enter"}}},
+		{"keys", func(g *Gateway) error { return g.SendKeys(context.Background(), "w1:p2", []string{"ctrl+c"}) }, "pane.send_keys", map[string]any{"pane_id": "w1:p2", "keys": []any{"ctrl+c"}}},
+		{"text", func(g *Gateway) error { return g.SendText(context.Background(), "w1:p2", "\x1b[A") }, "pane.send_text", map[string]any{"pane_id": "w1:p2", "text": "\x1b[A"}},
 	} {
-		if got := ObserveConditionalInput(tc.current, tc.err); got != tc.want {
-			t.Fatalf("Observe(%s, %v) = %s, want %s", tc.current, tc.err, got, tc.want)
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeHerdr{answer: func(string, map[string]any, int) (string, *APIError) { return ok, nil }}
+			if err := tc.send(NewGateway(serveFake(t, f))); err != nil {
+				t.Fatal(err)
+			}
+			if got := f.methods(); len(got) != 1 || got[0] != tc.method {
+				t.Fatalf("methods = %v", got)
+			}
+			if got := f.call(0).Params; !reflect.DeepEqual(got, tc.params) {
+				t.Fatalf("params = %#v, want %#v", got, tc.params)
+			}
+		})
+	}
+}
+
+func TestSendRejectsUnexpectedResultAndKeepsAPIErrorTyped(t *testing.T) {
+	f := &fakeHerdr{answer: func(string, map[string]any, int) (string, *APIError) { return `{"type":"agent_info"}`, nil }}
+	if err := NewGateway(serveFake(t, f)).SendKeys(context.Background(), "w1:p2", []string{"enter"}); err == nil {
+		t.Fatal("accepted non-ok result")
+	}
+	f = &fakeHerdr{answer: func(string, map[string]any, int) (string, *APIError) {
+		return "", &APIError{Code: "pane_send_failed", Message: "canonical limit"}
+	}}
+	err := NewGateway(serveFake(t, f)).SendInput(context.Background(), "w1:p2", "x", nil)
+	var api *APIError
+	if !errors.As(err, &api) || api.Code != "pane_send_failed" {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestSendRejectsEmptyInputWithoutConnecting(t *testing.T) {
+	g := NewGateway("/nonexistent")
+	ctx := context.Background()
+	for name, err := range map[string]error{
+		"input":   g.SendInput(ctx, "w1:p2", "", nil),
+		"keys":    g.SendKeys(ctx, "w1:p2", nil),
+		"text":    g.SendText(ctx, "w1:p2", ""),
+		"no pane": g.SendText(ctx, "", "x"),
+	} {
+		if err == nil || strings.Contains(err.Error(), "nonexistent") {
+			t.Fatalf("%s: got %v", name, err)
+		}
+	}
+}
+
+func TestAgentInfoReadsTerminalForExplicitPane(t *testing.T) {
+	f := &fakeHerdr{answer: func(string, map[string]any, int) (string, *APIError) {
+		return `{"type":"agent_info","agent":{"terminal_id":"term_a","pane_id":"w1:p2","agent":"claude","agent_status":"idle","workspace_id":"w1","tab_id":"w1:t1","focused":false}}`, nil
+	}}
+	a, err := NewGateway(serveFake(t, f)).AgentInfo(context.Background(), "w1:p2")
+	if err != nil || a.TerminalID != "term_a" || a.Agent != "claude" || a.Status != "idle" {
+		t.Fatalf("got %+v %v", a, err)
+	}
+	if c := f.call(0); c.Method != "agent.get" || !reflect.DeepEqual(c.Params, map[string]any{"target": "w1:p2"}) {
+		t.Fatalf("request %+v", c)
+	}
+	for _, wire := range []string{
+		`{"type":"agent_info","agent":{"terminal_id":"term_a","pane_id":"w1:p9"}}`,
+		`{"type":"agent_info","agent":{"terminal_id":"","pane_id":"w1:p2"}}`,
+		`{"type":"agent_info","agent":null}`,
+	} {
+		f := &fakeHerdr{answer: func(string, map[string]any, int) (string, *APIError) { return wire, nil }}
+		if _, err := NewGateway(serveFake(t, f)).AgentInfo(context.Background(), "w1:p2"); err == nil {
+			t.Fatalf("accepted %s", wire)
 		}
 	}
 }

@@ -9,12 +9,11 @@
 
 취약점은 공개 issue가 아니라 이 repo의 GitHub **Security → Report a vulnerability**로 비공개
 신고한다. 개인 project라 응답 시한은 보장하지 않는다. 지원 대상은 `main`의 최신 commit이다.
-Herdr patch(fork `psw7205/herdr`의 `mobile-binding`)에서 비롯된 문제도 이 repo로 신고한다.
 
 신고에는 다음을 포함한다.
 
 - 영향과 재현 절차
-- 이 repo의 commit, Herdr patch commit, Claude Code version
+- 이 repo의 commit, Herdr version, Claude Code version
 - 필요하면 `doctor` 출력. tailnet host, login, 절대 경로는 [README](README.md#진단-출력-공유)처럼
   placeholder로 바꾼다
 

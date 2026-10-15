@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"github.com/psw7205/herdr-remote/internal/binding"
 	"github.com/psw7205/herdr-remote/internal/command"
 	"github.com/psw7205/herdr-remote/internal/gitstate"
 	"github.com/psw7205/herdr-remote/internal/herdr"
@@ -29,7 +30,7 @@ func main() {
 		os.Exit(1)
 	}
 	socket := flag.String("herdr-socket", filepath.Join(home, ".config", "herdr", "herdr.sock"), "existing Herdr API socket")
-	claudeDir := flag.String("claude-dir", filepath.Join(home, ".claude"), "Claude native transcript root")
+	claudeDir := flag.String("claude-dir", filepath.Join(home, ".claude"), "Claude root: native transcripts (projects/) and the process metadata runtime bindings are verified against (sessions/)")
 	codexDir := flag.String("codex-dir", filepath.Join(home, ".codex"), "Codex home whose sessions/ holds rollout transcripts (read-only Chat)")
 	receiptDir := flag.String("receipts-dir", filepath.Join(home, ".local", "state", "herdr-remote", "receipts"), "durable command receipts")
 	listen := flag.String("listen", "127.0.0.1:8787", "loopback HTTP address")
@@ -66,7 +67,10 @@ func main() {
 		slog.Error("invalid -project-root", "error", err)
 		os.Exit(2)
 	}
-	registry := session.NewRegistry(ctx, gateway, *claudeDir, session.WithCodexRoot(*codexDir))
+	if !binding.Supported() {
+		slog.Warn("process start time unsupported on this platform; no runtime binding is verified, so every session stays read-only")
+	}
+	registry := session.NewRegistry(ctx, binding.New(gateway, *claudeDir), *claudeDir, session.WithCodexRoot(*codexDir))
 	if err = registry.Refresh(ctx); err != nil {
 		slog.Error("Herdr unavailable", "error", err)
 		os.Exit(1)

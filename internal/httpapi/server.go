@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/coder/websocket"
+	"github.com/psw7205/herdr-remote/internal/binding"
 	"github.com/psw7205/herdr-remote/internal/command"
 	"github.com/psw7205/herdr-remote/internal/gitstate"
 	"github.com/psw7205/herdr-remote/internal/herdr"
@@ -32,7 +33,6 @@ type Sessions interface {
 	Project(string) (string, error)
 	BoundInput(context.Context, string, string, string, string) error
 	Terminal(context.Context, string, string) (herdr.TerminalSnapshot, error)
-	ConditionalInput() string
 }
 
 // Starter asks Herdr for a new session (ADR-037). A nil Starter disables it.
@@ -185,7 +185,7 @@ func problem(w http.ResponseWriter, status int, code string) {
 	jsonResponse(w, status, map[string]string{"error": code})
 }
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
-	jsonResponse(w, 200, map[string]any{"sessions": s.registry.List(), "herdr": map[string]string{"conditional_input": s.registry.ConditionalInput()}, "start": s.startCapability(), "bridge": s.Build()})
+	jsonResponse(w, 200, map[string]any{"sessions": s.registry.List(), "start": s.startCapability(), "bridge": s.Build()})
 }
 
 // startCapability tells the client which agent kinds it may start and
@@ -399,6 +399,13 @@ func originAllowed(r *http.Request, origins []string) bool {
 	}
 	return false
 }
+
+// commandTimeout bounds one bound input dispatch: two inspections (agent.get
+// and two process_info reads each), up to two writes and the prompt settle.
+// The server has no WriteTimeout, so this is the longest a command holds its
+// request.
+const commandTimeout = 30 * time.Second
+
 func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	if !originAllowed(r, s.origins) {
 		problem(w, 403, "ORIGIN_REJECTED")
@@ -431,24 +438,26 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "INVALID_COMMAND")
 		return
 	}
-	result := s.receipts.Execute(r.Context(), req, func(ctx context.Context, req command.Request) command.Result {
+	// The dispatch outlives the request: a client that disconnects between a
+	// prompt's text and its Enter must not leave the prompt half delivered.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), commandTimeout)
+	defer cancel()
+	result := s.receipts.Execute(ctx, req, func(ctx context.Context, req command.Request) command.Result {
 		err := s.registry.BoundInput(ctx, req.SessionID, req.RuntimeBinding, req.Type, req.Payload.Text)
 		if err == nil {
 			return command.Result{Status: "accepted"}
 		}
+		var rejected *binding.Rejected
+		switch {
+		case errors.Is(err, binding.ErrDeliveryUnknown):
+			slog.Warn("bound input delivery uncertain", "error", err)
+			return command.Result{Status: "delivery_unknown", Code: "DELIVERY_UNKNOWN"}
 		// Herdr rejects an unknown method while deserializing the request, before
 		// any dispatch or PTY write, so this is a definite non-delivery.
-		if errors.Is(err, herdr.ErrUnsupported) {
+		case errors.Is(err, herdr.ErrUnsupported):
 			return command.Result{Status: "rejected", Code: "HERDR_UNSUPPORTED"}
-		}
-		var api *herdr.APIError
-		if errors.As(err, &api) {
-			switch api.Code {
-			case "runtime_binding_mismatch", "session_ended", "agent_not_ready", "invalid_prompt", "invalid_input", "input_rejected":
-				return command.Result{Status: "rejected", Code: strings.ToUpper(api.Code)}
-			case "delivery_unknown":
-				return command.Result{Status: "delivery_unknown", Code: "DELIVERY_UNKNOWN"}
-			}
+		case errors.As(err, &rejected):
+			return command.Result{Status: "rejected", Code: strings.ToUpper(rejected.Code)}
 		}
 		if err.Error() == "chat transcript unavailable" {
 			return command.Result{Status: "rejected", Code: "CHAT_UNAVAILABLE"}

@@ -26,8 +26,8 @@ it('points pending-command guidance to Terminal only when the session has one', 
     expect(text).not.toContain('Terminal')
   }
 })
-it('explains a rejection from a Herdr build without conditional input', () => {
-  expect(rejectedMessage('HERDR_UNSUPPORTED')).toContain('Herdr patch')
+it('explains a rejection from a Herdr build without the input API', () => {
+  expect(rejectedMessage('HERDR_UNSUPPORTED')).toContain('Herdr version')
   expect(rejectedMessage('INPUT_REJECTED')).toBe('전달이 거부됐습니다 (INPUT_REJECTED).')
   expect(rejectedMessage('SESSION_CHANGED')).toBe('세션이 바뀌어 전달하지 않았습니다. 목록에서 다시 여세요.')
 })

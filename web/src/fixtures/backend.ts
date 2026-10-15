@@ -47,7 +47,7 @@ async function answer(scenario: Scenario, method: string, url: URL, body: string
   if (scenario.listFails) throw new TypeError('fixture: Bridge unreachable')
   if (method === 'GET' && url.pathname === '/api/sessions') {
     const sessions = [...rooms.values()].filter(room => room.session.active).map(preview)
-    return json({ sessions, herdr: { conditional_input: scenario.conditionalInput }, start: scenario.start.capability, bridge: scenario.bridge })
+    return json({ sessions, start: scenario.start.capability, bridge: scenario.bridge })
   }
   if (method === 'GET' && url.pathname === '/api/start-candidates') return json({ candidates: scenario.start.candidates, start: scenario.start.capability })
   if (method === 'POST' && url.pathname === '/api/sessions') {

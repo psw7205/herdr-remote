@@ -17,7 +17,6 @@ function open(url: string) {
 it('serves the fixture list through the real client parser', async () => {
   restore = installFixtureBackend(scenario('default'))
   const list = await listSessions()
-  expect(list.conditionalInput).toBe('supported')
   expect(new Set(list.sessions.map(item => item.status))).toEqual(new Set(['needs_attention', 'working', 'completed', 'idle', 'error']))
   expect(list.sessions.some(item => item.lifecycle === 'unverified')).toBe(true)
 })

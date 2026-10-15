@@ -8,17 +8,22 @@ import (
 	"fmt"
 	"github.com/psw7205/herdr-remote/internal/herdr"
 	"github.com/psw7205/herdr-remote/internal/tailnet"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 )
 
 type fixtureReader struct {
-	processErr  error
-	binding     bool
-	unsupported bool
+	processErr error
+	binding    bool
+	agents     []herdr.Agent
 }
 
 func (f fixtureReader) Snapshot(context.Context) (herdr.Snapshot, error) {
+	if f.agents != nil {
+		return herdr.Snapshot{Version: "0.9.5", Protocol: 22, Agents: f.agents}, nil
+	}
 	return herdr.Snapshot{Version: "0.9.1", Protocol: 22, Agents: []herdr.Agent{
 		{PaneID: "w1:p1", TerminalID: "term_a", Agent: "claude", Status: "done"},
 		{PaneID: "w1:p2", TerminalID: "term_b", Agent: "claude", Session: &herdr.NativeSession{Agent: "claude", Kind: "id", Value: "native-b"}},
@@ -32,45 +37,89 @@ func (f fixtureReader) ProcessInfo(_ context.Context, id string) (herdr.ProcessI
 }
 func TestDoctorReportsBlockersWithoutInventingCapabilities(t *testing.T) {
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{}, tailnetReport{}, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{}, true, tailnetReport{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.WriteEnabled || got.TerminalMirrorEnabled {
-		t.Fatal("unsupported control was enabled")
+	if !got.WriteEnabled || got.TerminalMirrorEnabled || got.Agents[0].VerifiedBinding || got.Agents[1].VerifiedBinding {
+		t.Fatalf("write capability or an unverified session misreported: %+v", got)
 	}
 	if len(got.Agents) != 2 || got.Agents[0].NativeAssociation || !got.Agents[1].NativeAssociation {
 		t.Fatalf("incorrect association report: %+v", got)
 	}
-	if got.ConditionalInput != "unknown" || len(got.Blockers) != 1 || strings.Contains(got.Blockers[0], "herdr-patch.md") {
-		t.Fatalf("plain binding errors are not API evidence: %+v", got)
+	if len(got.Blockers) != 1 || !strings.Contains(got.Blockers[0], "No verified native runtime binding") {
+		t.Fatalf("blockers %v", got.Blockers)
 	}
 	if bytes.Contains(out.Bytes(), []byte("native-b")) {
 		t.Fatal("doctor unnecessarily prints native session identity")
 	}
 }
-func TestDoctorNamesMissingHerdrPatch(t *testing.T) {
+func diagnoseReport(t *testing.T, f fixtureReader, supported bool) (report, []byte) {
+	t.Helper()
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{unsupported: true}, tailnetReport{}, &out); err != nil {
+	if err := diagnose(context.Background(), f, supported, tailnetReport{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.ConditionalInput != "unsupported" || got.WriteEnabled || got.TerminalMirrorEnabled {
-		t.Fatalf("unsupported Herdr enabled controls: %+v", got)
-	}
-	if len(got.Blockers) != 1 || !strings.Contains(got.Blockers[0], "agent.binding") || !strings.Contains(got.Blockers[0], "docs/herdr-patch.md") {
-		t.Fatalf("missing patch blocker: %v", got.Blockers)
+	return got, out.Bytes()
+}
+
+func TestDoctorWriteEnabledRule(t *testing.T) {
+	codexOnly := []herdr.Agent{{PaneID: "w1:p3", TerminalID: "term_c", Agent: "codex"}}
+	for _, tc := range []struct {
+		name      string
+		reader    fixtureReader
+		supported bool
+		want      bool
+	}{
+		{"Claude pane answered process_info", fixtureReader{}, true, true},
+		{"no Claude pane", fixtureReader{agents: codexOnly}, true, true},
+		{"no agents", fixtureReader{agents: []herdr.Agent{}}, true, true},
+		{"process_info failed for every Claude pane", fixtureReader{processErr: errors.New("gone")}, true, false},
+		{"platform cannot read start times", fixtureReader{binding: true}, false, false},
+		{"platform unsupported without Claude pane", fixtureReader{agents: codexOnly}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _ := diagnoseReport(t, tc.reader, tc.supported)
+			if got.WriteEnabled != tc.want {
+				t.Fatalf("write_enabled = %v, want %v: %+v", got.WriteEnabled, tc.want, got)
+			}
+			platform := slices.ContainsFunc(got.Blockers, func(b string) bool { return strings.Contains(b, "process start times") })
+			if platform == tc.supported {
+				t.Fatalf("platform blocker %v with support %v: %v", platform, tc.supported, got.Blockers)
+			}
+		})
 	}
 }
+
+func TestDoctorReportFieldsAreExact(t *testing.T) {
+	_, raw := diagnoseReport(t, fixtureReader{binding: true}, true)
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatal(err)
+	}
+	keys := slices.Sorted(maps.Keys(top))
+	if want := []string{"agents", "blockers", "herdr_protocol", "herdr_version", "tailnet", "terminal_mirror_enabled", "write_enabled"}; !slices.Equal(keys, want) {
+		t.Fatalf("report keys %v, want %v", keys, want)
+	}
+	var agents []map[string]json.RawMessage
+	if err := json.Unmarshal(top["agents"], &agents); err != nil || len(agents) != 2 {
+		t.Fatalf("agents %s %v", top["agents"], err)
+	}
+	if _, ok := agents[1]["verified_binding"]; !ok {
+		t.Fatalf("agent report lacks verified_binding: %v", agents[1])
+	}
+}
+
 func TestDoctorReportsProcessFailurePerPane(t *testing.T) {
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{processErr: errors.New("gone")}, tailnetReport{}, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{processErr: errors.New("gone")}, true, tailnetReport{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
@@ -84,9 +133,6 @@ func (f fixtureReader) TerminalSnapshot(_ context.Context, id string) (herdr.Ter
 	return herdr.TerminalSnapshot{PaneID: id, Source: "visible", Format: "ansi", Text: "private terminal output"}, nil
 }
 func (f fixtureReader) Binding(_ context.Context, id string) (herdr.Binding, error) {
-	if f.unsupported {
-		return herdr.Binding{}, fmt.Errorf("%w: agent.binding", herdr.ErrUnsupported)
-	}
 	if !f.binding || id != "w1:p2" {
 		return herdr.Binding{}, errors.New("binding unavailable")
 	}
@@ -94,14 +140,14 @@ func (f fixtureReader) Binding(_ context.Context, id string) (herdr.Binding, err
 }
 func TestDoctorDetectsBoundInputWithoutPrintingToken(t *testing.T) {
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{binding: true}, tailnetReport{}, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{binding: true}, true, tailnetReport{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.WriteEnabled || !got.TerminalMirrorEnabled || !got.Agents[1].VerifiedBinding || got.ConditionalInput != "supported" {
+	if !got.WriteEnabled || !got.TerminalMirrorEnabled || !got.Agents[1].VerifiedBinding {
 		t.Fatalf("binding omitted: %+v", got)
 	}
 	if len(got.Blockers) != 0 {
@@ -113,7 +159,7 @@ func TestDoctorDetectsBoundInputWithoutPrintingToken(t *testing.T) {
 }
 func TestDoctorReportsVisibleReadWithoutOutputDisclosure(t *testing.T) {
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{}, tailnetReport{}, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{}, true, tailnetReport{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
@@ -158,7 +204,7 @@ func TestInspectTailnetReportsMissingSetupAsIssues(t *testing.T) {
 		t.Fatalf("issues not actionable: %v", tn.Issues)
 	}
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{binding: true}, tn, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{binding: true}, true, tn, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
@@ -190,7 +236,7 @@ func TestDoctorBlocksFunnel(t *testing.T) {
 		t.Fatalf("funnel missed: %+v", tn)
 	}
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{binding: true}, tn, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{binding: true}, true, tn, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
@@ -224,7 +270,7 @@ func TestDoctorBlocksTCPForwardToBridge(t *testing.T) {
 			t.Fatalf("%s: TCP forward missed: %+v", tc.name, tn)
 		}
 		var out bytes.Buffer
-		if err := diagnose(context.Background(), fixtureReader{binding: true}, tn, &out); err != nil {
+		if err := diagnose(context.Background(), fixtureReader{binding: true}, true, tn, &out); err != nil {
 			t.Fatal(err)
 		}
 		var got report
@@ -248,7 +294,7 @@ func TestDoctorIgnoresTCPForwardToOtherPort(t *testing.T) {
 		t.Fatalf("unrelated TCP forward reported: %+v", tn)
 	}
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{binding: true}, tn, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{binding: true}, true, tn, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report
@@ -284,7 +330,7 @@ func TestDoctorBlocksExposureWithoutMagicDNS(t *testing.T) {
 		t.Fatalf("issues: %v", tn.Issues)
 	}
 	var out bytes.Buffer
-	if err := diagnose(context.Background(), fixtureReader{binding: true}, tn, &out); err != nil {
+	if err := diagnose(context.Background(), fixtureReader{binding: true}, true, tn, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got report

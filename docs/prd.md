@@ -466,9 +466,9 @@ agent_session_id
 
 cwd/mtime 기반 transcript guessing은 첫 slice에서 사용하지 않는다.
 
-모든 write는 Herdr가 발급한 현재 `runtime_binding`을 조건으로 실행한다.
+모든 write는 Bridge가 쓰기 직전에 다시 검증한 현재 `runtime_binding`을 조건으로 실행한다.
 `pane_id`, `terminal_id`, 일반 `revision`은 process/session incarnation을 대신하지 않는다.
-identity가 불명확하거나 조건부 입력을 지원하지 않으면 prompt/interrupt/raw input을 비활성화한다.
+identity가 불명확하거나 binding을 검증할 수 없으면 prompt/interrupt/raw input을 비활성화한다.
 
 목록은 현재 Herdr에서 발견한 active agent를 대상으로 한다. session lifecycle은 다섯 가지다.
 
@@ -632,7 +632,8 @@ Client는 응답을 받기 전 브라우저가 reload되더라도 같은 초안�
 이전 command를 확인하거나 명시적으로 포기하기 전에는 새 ID로 보내지 않는다.
 
 Chat의 user message는 native transcript에서 관찰한 뒤 확정한다. 전송 중 표시는 별도의 pending UI다.
-Herdr 조건부 write가 없으면 조회 후 입력하는 workaround로 이 보장을 대체하지 않는다.
+Bridge는 text를 보내기 전과 Enter를 보내기 전에 각각 `runtime_binding`을 다시 검증하고, 검증된 binding이 없으면
+쓰지 않는다.
 
 ## 14. Chat UI
 

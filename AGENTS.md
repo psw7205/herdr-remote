@@ -8,7 +8,7 @@
 - 요구와 architecture 결정은 `docs/prd.md`, `docs/adr.md`를 기준으로 한다. PRD는 결정 snapshot이며 현재 구조는
   `docs/architecture.md`가 설명한다. 구현 사실은 code와 runtime에서 검증한다.
 - 문서 배치와 갱신 규칙은 `docs/README.md`를 따른다.
-- Herdr 연동을 바꾸기 전 현재 설치 버전의 공개 schema, 소유 source와 runtime을 확인한다. 로컬 `docs/records/`가 있으면 보조 자료로 읽되 과거 조사 결과를 현재 지원 여부로 단정하지 않는다.
+- Herdr 연동을 바꾸기 전 현재 설치 버전의 공개 schema, Herdr source와 runtime을 확인한다. 로컬 `docs/records/`가 있으면 보조 자료로 읽되 과거 조사 결과를 현재 지원 여부로 단정하지 않는다.
 - `git status --short`와 현재 branch를 확인한다. 기존 사용자 변경을 보존하고 요청 범위만 수정한다.
 - 검토·분석 요청은 read-only다. 구현 요청에는 성공 기준과 관련 검증을 먼저 정한다.
 
@@ -18,7 +18,8 @@
   resume하지 않는다. 새 session은 사용자의 명시적 요청이 있을 때 Herdr 공개 API(`workspace.create`·`tab.create`·
   `agent.start`)로만 요청하며, agent 인자와 임의 경로는 받지 않는다(`docs/adr.md` ADR-037).
 - Chat history의 source of truth는 native transcript다. transcript에는 쓰지 않는다.
-- prompt, interrupt, raw input은 현재 Herdr `runtime_binding`을 검증하는 경로만 사용한다. 미지원 API를 raw pane input으로 우회하지 않는다.
+- prompt, interrupt, raw input은 Bridge가 쓰기 직전에 다시 계산한 `runtime_binding`이 client 값과 같을 때만 stock Herdr pane 입력으로 보낸다.
+  prompt는 text → binding 재확인 → Enter 순서이며 재확인이 실패하면 Enter를 보내지 않는다. 검증된 binding이 없으면 쓰지 않는다(`docs/adr.md` ADR-040).
 - 같은 `command_id`는 한 번만 dispatch한다. timeout이나 crash는 미전달의 증거가 아니며 `delivery_unknown`을 자동 재전송하지 않는다.
 - command receipt는 conversation persistence가 아니다. receipt 삭제로 오래된 command ID를 다시 수락하게 만들지 않는다.
 - snapshot cursor와 replay/live 등록의 원자성을 유지한다. Bridge restart나 transcript resync는 epoch를 바꾼다.
@@ -35,8 +36,9 @@
 | 경로 | 책임 |
 | --- | --- |
 | `cmd/bridge/`, `cmd/doctor/` | server 진입점, read-only 진단 |
-| `internal/herdr/` | 검증된 Herdr socket API |
-| `internal/session/` | discovery, binding, lifecycle, adapter 연결 |
+| `internal/herdr/` | stock Herdr 공개 socket API client |
+| `internal/binding/` | `runtime_binding` 계산·검증(Herdr process 정보, OS process 시작 시각, Claude PID metadata)과 stock method 전송 순서(재확인 → text → 재확인 → Enter) |
+| `internal/session/` | discovery, lifecycle, adapter 연결, 입력·Terminal 전 사전 검사 |
 | `internal/claude/`, `internal/codex/`, `internal/transcript/` | native history 해석, incremental file read |
 | `internal/command/`, `internal/stream/` | durable receipt, snapshot/replay/live |
 | `internal/httpapi/` | HTTP/WS, Origin·Host·identity 경계 |
@@ -51,8 +53,6 @@ Package manager는 pnpm, toolchain 기준은 `mise.toml`이다.
 
 ## Herdr 및 실제 runtime 작업
 
-- stock Herdr와 local patch는 같은 version 문자열을 사용한다. version만으로 conditional input 지원을 판단하지 않는다.
-- 별도 `herdr` repo를 수정할 때는 그 repo의 지침과 변경 상태도 확인한다. 이 repo의 검증만으로 Herdr patch 검증을 대신하지 않는다.
 - 설치된 binary·사용자 hook·LaunchAgent 변경은 code 변경과 구분하고, 작업 범위 안에서 backup과 복구 방법을 확보한다.
 - 기존 사용자 agent를 종료하거나 새 session으로 교체해 handoff 성공을 만들지 않는다.
 - lifecycle 재현이 필요하면 `CONTRIBUTING.md`의 격리 Herdr 환경을 사용하고, 생성한 테스트 자원과 설정 변경을 정리한다.

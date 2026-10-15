@@ -1,6 +1,4 @@
-// Package herdr implements the inspected Herdr JSON socket API. Stock Herdr
-// provides no conditional input; the mobile-binding patch adds agent.binding
-// and agent.bound_input, and ErrUnsupported tells the two builds apart.
+// Package herdr implements the inspected Herdr JSON socket API.
 package herdr
 
 import (
@@ -20,8 +18,8 @@ const maxResponseBytes = 4 << 20
 
 var ErrEmptyTarget = errors.New("explicit pane target required")
 
-// ErrUnsupported means the Herdr server rejected the method name itself, as a
-// stock build does for agent.binding and agent.bound_input.
+// ErrUnsupported means the Herdr server rejected the method name itself, so
+// the request reached no handler.
 var ErrUnsupported = errors.New("Herdr method unsupported")
 var requestSequence atomic.Uint64
 
@@ -97,55 +95,16 @@ type PaneSize struct {
 	Rows int
 }
 
-// Binding is issued by the Herdr server for one live native process/session.
-// A pane ID or terminal ID alone is never sufficient for a write.
+// Binding identifies one live native process/session in a pane's foreground;
+// the Bridge verifies it (internal/binding), Herdr does not issue it. A pane ID
+// or terminal ID alone is never sufficient for a write.
 type Binding struct {
-	Token           string `json:"token"`
-	TerminalID      string `json:"terminal_id"`
-	NativeSessionID string `json:"native_session_id"`
-	ProcessID       uint32 `json:"process_id"`
-	Agent           string `json:"agent"`
-	CWD             string `json:"cwd"`
-}
-
-func (g *Gateway) Binding(ctx context.Context, paneID string) (Binding, error) {
-	if paneID == "" {
-		return Binding{}, ErrEmptyTarget
-	}
-	var result struct {
-		Type    string   `json:"type"`
-		Binding *Binding `json:"binding"`
-	}
-	if err := g.read(ctx, "agent.binding", map[string]string{"target": paneID}, &result); err != nil {
-		return Binding{}, err
-	}
-	if result.Type != "agent_binding" || result.Binding == nil || result.Binding.Token == "" || result.Binding.NativeSessionID == "" || result.Binding.ProcessID == 0 || result.Binding.TerminalID == "" {
-		return Binding{}, errors.New("invalid native runtime binding")
-	}
-	return *result.Binding, nil
-}
-
-func (g *Gateway) BoundInput(ctx context.Context, paneID, binding, kind, text string) error {
-	if paneID == "" {
-		return ErrEmptyTarget
-	}
-	if binding == "" {
-		return errors.New("native runtime binding required")
-	}
-	if kind != "prompt" && kind != "interrupt" && kind != "terminal_input" {
-		return errors.New("unsupported bound input type")
-	}
-	var result struct {
-		Type string `json:"type"`
-	}
-	params := map[string]any{"target": paneID, "binding": binding, "input": map[string]string{"type": kind, "text": text}}
-	if err := g.read(ctx, "agent.bound_input", params, &result); err != nil {
-		return err
-	}
-	if result.Type != "ok" {
-		return errors.New("invalid bound input response")
-	}
-	return nil
+	Token           string
+	TerminalID      string
+	NativeSessionID string
+	ProcessID       uint32
+	Agent           string
+	CWD             string
 }
 
 func (g *Gateway) TerminalSnapshot(ctx context.Context, paneID string) (TerminalSnapshot, error) {
@@ -222,24 +181,80 @@ func (g *Gateway) PaneSize(ctx context.Context, paneID string) (PaneSize, error)
 
 func (e *APIError) Error() string { return e.Code + ": " + e.Message }
 
-// Conditional input capability observed from agent.binding responses.
-const (
-	ConditionalInputUnknown     = "unknown"
-	ConditionalInputSupported   = "supported"
-	ConditionalInputUnsupported = "unsupported"
-)
-
-// ObserveConditionalInput folds one agent.binding result into current.
-// Transport and response-shape errors are not evidence either way.
-func ObserveConditionalInput(current string, err error) string {
-	var api *APIError
-	switch {
-	case current == ConditionalInputUnsupported || errors.Is(err, ErrUnsupported):
-		return ConditionalInputUnsupported
-	case err == nil || errors.As(err, &api):
-		return ConditionalInputSupported
+// AgentInfo reads agent.get for one pane. Its terminal_id names the terminal
+// Herdr currently runs in that pane.
+func (g *Gateway) AgentInfo(ctx context.Context, paneID string) (Agent, error) {
+	if paneID == "" {
+		return Agent{}, ErrEmptyTarget
 	}
-	return current
+	var result struct {
+		Type  string `json:"type"`
+		Agent *Agent `json:"agent"`
+	}
+	if err := g.read(ctx, "agent.get", map[string]string{"target": paneID}, &result); err != nil {
+		return Agent{}, err
+	}
+	if result.Type != "agent_info" || result.Agent == nil || result.Agent.PaneID != paneID || result.Agent.TerminalID == "" {
+		return Agent{}, errors.New("agent response target mismatch")
+	}
+	return *result.Agent, nil
+}
+
+// SendInput is pane.send_input: Herdr wraps text in bracketed paste when the
+// program enabled it, encodes keys for the terminal's keyboard protocol, and
+// rejects the whole submission before queueing it when the PTY's canonical
+// line limit would truncate it.
+func (g *Gateway) SendInput(ctx context.Context, paneID, text string, keys []string) error {
+	if paneID == "" {
+		return ErrEmptyTarget
+	}
+	if text == "" && len(keys) == 0 {
+		return errors.New("empty input")
+	}
+	params := map[string]any{"pane_id": paneID}
+	if text != "" {
+		params["text"] = text
+	}
+	if len(keys) > 0 {
+		params["keys"] = keys
+	}
+	return g.write(ctx, "pane.send_input", params)
+}
+
+// SendKeys is pane.send_keys: each key name is encoded for the terminal's
+// keyboard protocol.
+func (g *Gateway) SendKeys(ctx context.Context, paneID string, keys []string) error {
+	if paneID == "" {
+		return ErrEmptyTarget
+	}
+	if len(keys) == 0 {
+		return errors.New("empty input")
+	}
+	return g.write(ctx, "pane.send_keys", map[string]any{"pane_id": paneID, "keys": keys})
+}
+
+// SendText is pane.send_text: Herdr writes the bytes to the PTY verbatim.
+func (g *Gateway) SendText(ctx context.Context, paneID, text string) error {
+	if paneID == "" {
+		return ErrEmptyTarget
+	}
+	if text == "" {
+		return errors.New("empty input")
+	}
+	return g.write(ctx, "pane.send_text", map[string]string{"pane_id": paneID, "text": text})
+}
+
+func (g *Gateway) write(ctx context.Context, method string, params any) error {
+	var result struct {
+		Type string `json:"type"`
+	}
+	if err := g.read(ctx, method, params, &result); err != nil {
+		return err
+	}
+	if result.Type != "ok" {
+		return errors.New("invalid " + method + " response")
+	}
+	return nil
 }
 
 func (g *Gateway) Snapshot(ctx context.Context) (Snapshot, error) {

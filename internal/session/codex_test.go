@@ -19,7 +19,7 @@ const (
 	codexB = "01a0aaaa-0000-7000-8000-00000000000b"
 )
 
-// recordingHerdr records every agent.binding target so tests can prove that
+// recordingHerdr records every Binding target so tests can prove that
 // Codex panes never reach it.
 type recordingHerdr struct {
 	*fakeHerdr
@@ -169,26 +169,20 @@ func TestCodexSessionIsReadOnlyChatFromAgentSession(t *testing.T) {
 		}
 	}
 	if g.inputs != 0 || g.bindingAsked(a.PaneID) {
-		t.Fatalf("codex pane reached Herdr writes or agent.binding: inputs=%d asked=%v", g.inputs, g.asked)
-	}
-	if got := r.ConditionalInput(); got != herdr.ConditionalInputUnknown {
-		t.Fatalf("codex-only snapshot judged conditional input %s", got)
+		t.Fatalf("codex pane reached Herdr writes or Binding: inputs=%d asked=%v", g.inputs, g.asked)
 	}
 }
 
-// Codex panes must not feed the server-wide capability that Claude writes use.
-func TestCodexPaneDoesNotAffectConditionalInput(t *testing.T) {
+// Only Claude panes are inspected for a binding.
+func TestOnlyClaudePanesReachBinding(t *testing.T) {
 	claudePane := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle"}
 	r, g, _ := codexRegistry(t, claudePane, codexAgent("w1:p3", codexA))
-	g.bindingErr = &herdr.APIError{Code: "binding_unavailable", Message: "no native session"}
+	g.bindingErr = errUnverified
 	if err := r.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if !g.bindingAsked(claudePane.PaneID) || g.bindingAsked("w1:p3") {
-		t.Fatalf("agent.binding targets %v", g.asked)
-	}
-	if got := r.ConditionalInput(); got != herdr.ConditionalInputSupported {
-		t.Fatalf("conditional input %s", got)
+		t.Fatalf("Binding targets %v", g.asked)
 	}
 }
 

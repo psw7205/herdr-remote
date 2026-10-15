@@ -32,13 +32,12 @@ export type Cursor = { epoch: string; sequence: number }
 export type Snapshot = { cursor: Cursor; data: Message[] }
 export type Event = { type: string; cursor: Cursor; payload: unknown; event_id: string }
 export type Delivery = { status: 'accepted' | 'rejected' | 'delivery_unknown'; code?: string }
-export type ConditionalInput = 'supported' | 'unsupported' | 'unknown'
 // Which agent kinds the Bridge may ask Herdr to start, and whether a new
 // workspace is possible (only with a -project-root). ADR-037.
 export type StartCapability = { kinds: string[]; new_workspace: boolean }
 export const noStart: StartCapability = { kinds: [], new_workspace: false }
 export type BridgeBuild = { revision: string; modified: boolean; clientBuild: string }
-export type SessionList = { sessions: Session[]; conditionalInput: ConditionalInput; start: StartCapability; bridge: BridgeBuild | null }
+export type SessionList = { sessions: Session[]; start: StartCapability; bridge: BridgeBuild | null }
 export type Placement = 'new_workspace' | 'new_tab'
 // A folder a new session may start in. The Bridge resolves the opaque id to
 // a path; the client never sends one.
@@ -51,9 +50,9 @@ async function readJSON<T>(response: Response): Promise<T> {
   return body as T
 }
 export async function listSessions(): Promise<SessionList> {
-  const body = await readJSON<{ sessions: Session[]; herdr?: { conditional_input?: ConditionalInput }; start?: StartCapability; bridge?: { revision: string; modified: boolean; client_build: string } }>(await fetch('/api/sessions', { cache: 'no-store' }))
+  const body = await readJSON<{ sessions: Session[]; start?: StartCapability; bridge?: { revision: string; modified: boolean; client_build: string } }>(await fetch('/api/sessions', { cache: 'no-store' }))
   const bridge = body.bridge ? { revision: body.bridge.revision, modified: body.bridge.modified, clientBuild: body.bridge.client_build } : null
-  return { sessions: body.sessions, conditionalInput: body.herdr?.conditional_input ?? 'unknown', start: body.start ?? noStart, bridge }
+  return { sessions: body.sessions, start: body.start ?? noStart, bridge }
 }
 export async function listStartCandidates(): Promise<{ candidates: StartCandidate[]; start: StartCapability }> {
   return readJSON(await fetch('/api/start-candidates', { cache: 'no-store' }))
