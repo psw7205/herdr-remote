@@ -190,11 +190,11 @@ Chat command → durable receipt → Bridge binding 재확인 → Herdr pane 입
 | --- | --- |
 | `mise run build` | `web/dist`와 `bin/herdr-remote-bridge`를 build |
 | `mise run install` | build 뒤 `$PREFIX/bin/herdr-remote-bridge`(기본 `~/.local`)에 설치. 직전 binary는 `.prev`로 남긴다. build한 binary의 VCS stamp가 없거나 HEAD와 다르면 `web/dist`를 바꾸거나 설치하기 전에 멈춘다 |
-| `mise run redeploy` | vet·test 통과 뒤 install, LaunchAgent 재시작, health 확인. install의 stamp 검사를 함께 한다. 응답이 없으면 `.prev`로 되돌리고 다시 재시작한다. 응답한 Bridge가 HEAD와 `web/dist`를 실행하지 않으면 실패로 끝낸다 |
+| `mise run redeploy` | vet·test 통과 뒤 install, LaunchAgent를 plist로 다시 등록해 시작, health 확인. install의 stamp 검사를 함께 한다. macOS는 LaunchAgent를 bootstrap 때 기록한 실행 파일 identity에 묶으므로 binary를 바꾼 뒤 `kickstart`만 하면 launch constraint 위반으로 죽는다. 응답이 없으면 `.prev`로 되돌리고 다시 등록한다. 응답한 Bridge가 HEAD와 `web/dist`를 실행하지 않으면 실패로 끝낸다 |
 | `mise run status` | HEAD, 설치된 binary, `web/dist`, 응답하는 Bridge의 revision과 client build를 한 줄씩 보인다. 실행 중인 Bridge가 HEAD·`web/dist`와 다르거나 응답이 없으면 1로 끝난다. `running none client none`은 응답은 있지만 `bridge` 필드가 없는 경우(이전 Bridge나 다른 service)이고, 요청 자체가 실패하면 `did not answer`다 |
 | `mise run stop` | LaunchAgent를 내린다(`launchctl bootout`). 이미 내려가 있으면 안내만 한다. 내린 뒤 `redeploy`를 쓰려면 먼저 `start`한다 |
 | `mise run start` | 내려간 LaunchAgent를 `~/Library/LaunchAgents/<label>.plist`(또는 `HERDR_REMOTE_LAUNCHD_PLIST`)로 올리고 Bridge를 시작해 health를 확인한다. 이미 올라가 있으면 실행만 보장한다 |
-| `mise run restart` | `stop` 뒤 plist를 다시 올려 시작한다. `ProgramArguments`를 바꾼 뒤에는 `redeploy`의 `kickstart`로 반영되지 않으므로 이 task를 쓴다 |
+| `mise run restart` | build 없이 `stop` 뒤 plist를 다시 올려 시작한다. `ProgramArguments`만 바꿨을 때 쓴다 |
 
 `redeploy`·`stop`·`start`·`restart`는 macOS `launchd` 전용이며, `redeploy`는 LaunchAgent가 설치한 binary를
 실행할 때만 진행한다. 다른 process manager는 `install` 뒤 직접 재시작한다. 되돌리는 것은 binary뿐이고 `web/dist`는 새

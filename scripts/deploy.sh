@@ -254,16 +254,24 @@ start() {
 	echo "deploy: $label is running and $health_url answered"
 }
 
-# restart reloads the plist, so changed ProgramArguments take effect; redeploy's
-# kickstart -k only swaps the process.
-restart() {
-	require_launchd restart
+# reload re-registers the job instead of kickstart -k: macOS ties a LaunchAgent
+# to the executable identity recorded at bootstrap, and an ad-hoc signed build
+# changes that identity, so a replaced binary dies at launch with a code-signing
+# launch constraint violation until the plist is bootstrapped again.
+reload() {
 	local plist
 	plist=$(plist_path)
 	stop
 	launchctl bootstrap "gui/$(id -u)" "$plist"
-	run_loaded
-	echo "deploy: $label restarted from $plist and $health_url answered"
+	launchctl kickstart "$service"
+}
+
+# restart reloads the plist without a build, so changed ProgramArguments take effect.
+restart() {
+	require_launchd restart
+	reload
+	healthy || die "$health_url did not answer; check the Bridge log"
+	echo "deploy: $label restarted and $health_url answered"
 }
 
 redeploy() {
@@ -290,7 +298,7 @@ redeploy() {
 	build_web
 	install_bin
 
-	launchctl kickstart -k "$service"
+	reload
 	if healthy; then
 		echo "deploy: $label restarted and $health_url answered"
 		verify_running "$head_revision" "$(dist_build)" || die "the running Bridge does not match this checkout; see above"
@@ -299,7 +307,7 @@ redeploy() {
 	fi
 	[[ -f $target.prev ]] || die "$health_url did not answer and there is no previous binary to restore"
 	mv -f "$target.prev" "$target"
-	launchctl kickstart -k "$service"
+	reload
 	if healthy; then
 		die "$health_url did not answer; restored the previous binary (web/dist keeps the new build)"
 	fi
