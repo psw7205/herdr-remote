@@ -5,7 +5,7 @@ import { SessionList } from './SessionList'
 
 describe('start session screen', () => {
   it('states that the permission mode follows the PC shell and is not guaranteed', () => {
-    const html = renderToStaticMarkup(<StartSession start={{ kinds: ['claude'], new_workspace: true }} onBack={() => {}} />)
+    const html = renderToStaticMarkup(<StartSession start={{ kinds: ['claude'], new_workspace: true }} onBack={() => {}} onOpen={() => {}} onUnlisted={() => {}} />)
     expect(html).toContain('PC 사용자 shell 설정')
     expect(html).toContain('보장하지 않습니다')
     expect(html).toContain('폴더를 고르세요')

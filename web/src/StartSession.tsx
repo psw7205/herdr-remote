@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FolderGit2, LoaderCircle, RefreshCw } from 'lucide-react'
-import { listStartCandidates, startSession, type StartCandidate, type StartCapability } from './api'
+import { listSessions, listStartCandidates, startSession, type Session, type StartCandidate, type StartCapability } from './api'
 import { Notice, type NoticeAction } from './Notice'
-import { chooseStart, groupCandidates, noRootNotice, permissionNotice, placementLabel, readPendingStart, startOutcome, uncertainStart, writePendingStart, type PendingStart, type StartOutcome } from './sessionStart'
+import { chooseStart, findStartedSession, groupCandidates, noRootNotice, permissionNotice, placementLabel, readPendingStart, startOutcome, uncertainStart, writePendingStart, type PendingStart, type StartOutcome } from './sessionStart'
 import { TopBar } from './TopBar'
 import { withTimeout } from './withTimeout'
 import styles from './StartSession.module.css'
 import ui from './ui.module.css'
 
 // Herdr answers after its agent readiness wait (up to 30s); the Bridge bounds
-// a start at 50s. Waiting longer keeps a normal start from looking uncertain.
-const START_TIMEOUT_MS = 60_000
+// a start at 60s. Waiting longer keeps a normal start from looking uncertain.
+const START_TIMEOUT_MS = 70_000
 const KIND = 'claude'
 
-export function StartSession({ start, onBack }: { start: StartCapability; onBack: () => void }) {
+// onOpen receives the started session once it is listed; onUnlisted gets the
+// start result when it is not listed in time, to show on the list instead.
+export function StartSession({ start, onBack, onOpen, onUnlisted }: { start: StartCapability; onBack: () => void; onOpen: (session: Session) => void; onUnlisted: (text: string) => void }) {
   const [candidates, setCandidates] = useState<StartCandidate[]>([])
   // The candidate listing carries the capability too, so a reload straight
   // into this screen does not wait for the session list.
@@ -23,7 +25,8 @@ export function StartSession({ start, onBack }: { start: StartCapability; onBack
   const [selected, setSelected] = useState<string | null>(null)
   const [pending, setPending] = useState<PendingStart | null>(() => readPendingStart())
   const [outcome, setOutcome] = useState<StartOutcome | null>(() => readPendingStart() ? uncertainStart : null)
-  const [busy, setBusy] = useState(false)
+  const [phase, setPhase] = useState<'idle' | 'starting' | 'opening'>('idle')
+  const busy = phase !== 'idle'
   const unmount = useRef(new AbortController())
   useEffect(() => () => unmount.current.abort(), [])
 
@@ -37,20 +40,29 @@ export function StartSession({ start, onBack }: { start: StartCapability; onBack
   useEffect(() => { void load() }, [load])
 
   const send = useCallback(async (intent: PendingStart) => {
-    writePendingStart(intent); setPending(intent); setBusy(true); setOutcome(null)
+    writePendingStart(intent); setPending(intent); setPhase('starting'); setOutcome(null)
     try {
       const result = await withTimeout(signal => startSession(intent.candidate, intent.kind, intent.placement, intent.id, signal), START_TIMEOUT_MS, unmount.current.signal)
       const next = startOutcome(result)
       if (next.settled) { writePendingStart(null); setPending(null); setSelected(null) }
+      if (next.pane) {
+        // Accepted: go straight to the new session, whatever its readiness.
+        setPhase('opening')
+        const session = await findStartedSession(next.pane, listSessions, { signal: unmount.current.signal })
+        if (unmount.current.signal.aborted) return
+        if (session) onOpen(session)
+        else onUnlisted(next.text)
+        return
+      }
       setOutcome(next)
       void load()
     } catch {
       // A lost answer is not a non-delivery: keep the ID for a re-check.
       if (!unmount.current.signal.aborted) setOutcome(uncertainStart)
     } finally {
-      if (!unmount.current.signal.aborted) setBusy(false)
+      if (!unmount.current.signal.aborted) setPhase('idle')
     }
-  }, [load])
+  }, [load, onOpen, onUnlisted])
 
   const chosen = candidates.find(item => item.id === selected)
   const submit = () => {
@@ -101,7 +113,7 @@ export function StartSession({ start, onBack }: { start: StartCapability; onBack
     </main>
     <footer className={styles.footer}>
       <button type="button" className={styles.primary} disabled={!chosen || busy || !allowed || pendingOther} onClick={submit}>
-        {busy ? <><LoaderCircle aria-hidden size={18} className={styles.spin} />시작하는 중… 최대 30초</> : chosen ? `${chosen.name}에서 Claude 시작` : '폴더를 고르세요'}
+        {phase === 'opening' ? <><LoaderCircle aria-hidden size={18} className={styles.spin} />세션을 여는 중…</> : busy ? <><LoaderCircle aria-hidden size={18} className={styles.spin} />시작하는 중…</> : chosen ? `${chosen.name}에서 Claude 시작` : '폴더를 고르세요'}
       </button>
     </footer>
   </div>

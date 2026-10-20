@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { getChanges, getFileDiff, getSession, listSessions, sendCommand, terminalFrame, type Event } from '../api'
+import { getChanges, getFileDiff, getSession, listSessions, sendCommand, startSession, terminalFrame, type Event } from '../api'
 import { installFixtureBackend } from './backend'
 import { scenario } from './scenarios'
 import { COLLAPSE_AFTER } from '../ToolActivity'
@@ -92,4 +92,18 @@ it('updates a running tool in place on the same cursor and replays it', async ()
   expect(events.map(event => event.type)).toEqual(['message.updated', 'message.tool', 'message.updated', 'message.assistant', 'agent.status'])
   expect(events[0].payload).toMatchObject({ id: running.id, tool: { state: 'completed' } })
   expect((await getSession(working.id)).snapshot.data.find(item => item.id === running.id)?.tool?.state).toBe('completed')
+})
+
+it('lists the started session by its pane once the start is accepted', async () => {
+  vi.useFakeTimers()
+  const fixture = scenario('default')
+  restore = installFixtureBackend({ ...fixture, latency: 0, start: { ...fixture.start, latency: 0 } })
+  const pane = fixture.start.room!.session.pane_id
+  expect((await listSessions()).sessions.some(item => item.pane_id === pane)).toBe(false)
+  const started = startSession(fixture.start.candidates[1].id, 'claude', 'new_workspace', 'command-start')
+  await vi.advanceTimersByTimeAsync(10)
+  expect((await started).status).toBe('accepted')
+  const listed = (await listSessions()).sessions.find(item => item.pane_id === pane)
+  expect(listed).toMatchObject({ id: 'claude:fixture-fresh', chat: true })
+  expect((await getSession(listed!.id)).snapshot.data).toEqual([])
 })

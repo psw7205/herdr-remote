@@ -216,6 +216,63 @@ func TestStartAgentOutcomes(t *testing.T) {
 	}
 }
 
+// Herdr drops the managed name when the pane's shell startup is detected as
+// another agent before Claude launches, so readiness is then read from the
+// pane: Claude at its prompt is ready, a transient other kind or an empty pane
+// is waited out, and another name or terminal on the pane is a lost start.
+func TestStartAgentReadsReadinessFromThePaneWithoutManagedName(t *testing.T) {
+	fastStartTiming(t)
+	pane := func(agent, status, name string) string {
+		b, _ := json.Marshal(map[string]any{"type": "agent_info", "agent": map[string]any{"terminal_id": "term_a", "pane_id": "w1:p7", "name": name, "agent": agent, "agent_status": status}})
+		return string(b)
+	}
+	notFound := &APIError{Code: "agent_not_found", Message: "no agent"}
+	for name, tc := range map[string]struct {
+		byPane func(n int) (string, *APIError)
+		want   error
+	}{
+		"other_kind_then_claude_idle": {func(n int) (string, *APIError) {
+			switch {
+			case n < 3:
+				return pane("codex", "idle", ""), nil
+			case n < 5:
+				return "", notFound
+			}
+			return pane("claude", "idle", ""), nil
+		}, nil},
+		"claude_blocked":   {func(int) (string, *APIError) { return pane("claude", "blocked", ""), nil }, ErrAgentNotReady},
+		"claude_working":   {func(int) (string, *APIError) { return pane("claude", "working", ""), nil }, ErrAgentUnconfirmed},
+		"other_kind_stays": {func(int) (string, *APIError) { return pane("codex", "idle", ""), nil }, ErrAgentUnconfirmed},
+		"never_detected":   {func(int) (string, *APIError) { return "", notFound }, ErrAgentUnconfirmed},
+		"another_name":     {func(int) (string, *APIError) { return pane("claude", "idle", "other"), nil }, ErrAgentUnconfirmed},
+		"other_terminal": {func(int) (string, *APIError) {
+			return `{"type":"agent_info","agent":{"terminal_id":"term_b","pane_id":"w1:p7","agent":"claude","agent_status":"idle"}}`, nil
+		}, ErrAgentUnconfirmed},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var mu sync.Mutex
+			byPane := 0
+			f := &fakeHerdr{answer: func(method string, params map[string]any, _ int) (string, *APIError) {
+				if method == "agent.start" {
+					return startedWire, nil
+				}
+				if params["target"] == "mobile-a" {
+					return "", notFound
+				}
+				mu.Lock()
+				byPane++
+				n := byPane
+				mu.Unlock()
+				return tc.byPane(n)
+			}}
+			err := NewGateway(serveFake(t, f)).StartAgent(context.Background(), "mobile-a", "claude", "w1:p7")
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestStartAgentRetriesBusyOnlyWhileShellInitializes(t *testing.T) {
 	fastStartTiming(t)
 	busy := &APIError{Code: "agent_pane_busy", Message: "busy"}

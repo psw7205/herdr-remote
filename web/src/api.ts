@@ -82,12 +82,20 @@ export function composerHint(session: Pick<Session, 'active' | 'lifecycle' | 'te
   if (lifecycle === 'unverified') return 'agent 연결을 확인할 수 없어 입력할 수 없습니다.'
   if (lifecycle === 'superseded') return '같은 agent의 대화로 전환하는 중입니다.'
   if (lifecycle === 'unbound' && session.agent === 'codex') return 'Codex 입력은 아직 지원하지 않습니다. PC의 Herdr에서 입력하세요.'
+  if (lifecycle === 'unbound' && session.status === 'needs_attention') return 'PC의 Herdr에서 시작 확인을 기다리고 있습니다.'
   if (lifecycle === 'unbound') return '이 세션은 원격 입력을 지원하지 않습니다. PC의 Herdr에서 입력하세요.'
   const place = session.terminal ? 'Terminal' : 'PC의 Herdr'
   if (!session.chat) return `이 세션은 ${place}에서 입력하세요.`
   if (session.status === 'working') return '작업 중입니다. 끝나면 이어서 입력할 수 있습니다.'
   if (session.status === 'needs_attention') return `입력을 기다리고 있습니다. ${place}에서 응답하세요.`
   return `지금은 ${place}에서 입력하세요.`
+}
+// chatUnavailableNotice explains a session without Chat. A never-bound session
+// waiting on a startup screen (folder trust) has no native session yet, which
+// is a step at the PC, not a missing conversation.
+export function chatUnavailableNotice(session: Pick<Session, 'active' | 'lifecycle' | 'terminal' | 'status'> & Partial<Pick<Session, 'agent'>>): string {
+  if (sessionLifecycle(session) === 'unbound' && session.status === 'needs_attention' && session.agent !== 'codex') return 'Claude가 폴더 신뢰 같은 시작 화면에서 기다리고 있습니다. PC의 Herdr에서 확인하면 여기에서 이어서 대화할 수 있습니다.'
+  return session.terminal ? '이 세션의 대화를 찾지 못했습니다. Terminal에서 확인하세요.' : '이 세션의 대화를 찾지 못했습니다. PC의 Herdr에서 확인하세요.'
 }
 export function successorOf(session: Pick<Session, 'lifecycle' | 'successor_id'>): string | null {
   return session.lifecycle === 'superseded' && session.successor_id ? session.successor_id : null

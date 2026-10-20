@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listSessions, noStart, supersededBy, type BridgeBuild, type Session, type StartCapability } from './api'
 import { loadedClientBuild } from './build'
-import { backAction, followAlias, formatRoute, parseRoute, resolveTerminal, startRoute, successorRoute, type Route } from './route'
+import { backAction, followAlias, formatRoute, listRoute, parseRoute, resolveTerminal, startRoute, successorRoute, type Route } from './route'
 import { ChangedFiles, FileDiffView } from './ChangesView'
 import { SessionChat } from './SessionChat'
 import { SessionList } from './SessionList'
@@ -34,6 +34,8 @@ export function App() {
   const [error, setError] = useState('')
   const [start, setStart] = useState<StartCapability>(noStart)
   const [bridge, setBridge] = useState<BridgeBuild | null>(null)
+  // A start result shown on the list when the new session was not listed in time.
+  const [notice, setNotice] = useState('')
   const open = useRef<string | null>(null)
   const ended = useRef(new Set<string>())
   // Superseded pane: ids mapped to their successors, for older history entries.
@@ -106,11 +108,18 @@ export function App() {
   }, [navigate])
 
   const openChanges = useCallback((session: Session) => navigate({ session: session.id, view: 'changes' }), [navigate])
+  // The started session is added to the list at once so its Chat renders
+  // before the next list poll; replacing the start entry keeps Back on the list.
+  const openStarted = useCallback((session: Session) => {
+    setSessions(current => current.some(item => item.id === session.id) ? current : [...current, session])
+    navigate({ session: session.id, view: 'chat' }, true)
+  }, [navigate])
+  const startUnlisted = useCallback((text: string) => { setNotice(text); navigate(listRoute, true) }, [navigate])
 
   const chatSession = listed ?? (terminal?.id === route.session ? terminal : undefined)
   let screen
   if (route.view === 'start') {
-    screen = <StartSession start={start} onBack={back} />
+    screen = <StartSession start={start} onBack={back} onOpen={openStarted} onUnlisted={startUnlisted} />
   } else if (route.view === 'changes' && route.session && chatSession) {
     const id = route.session
     screen = route.file
@@ -122,7 +131,7 @@ export function App() {
     screen = <SessionChat key={route.session} initial={chatSession} onBack={back} onTerminal={openTerminal} onChanges={openChanges} />
   } else {
     // A deep link waits on the first list load under the list's own skeleton.
-    screen = <SessionList sessions={route.session && !loaded ? [] : sessions} loaded={loaded} error={error} bridge={bridge} loadedBuild={loadedBuild} canStart={start.kinds.includes('claude')} onStart={() => navigate(startRoute)} onOpen={item => navigate({ session: item.id, view: 'chat' })} />
+    screen = <SessionList sessions={route.session && !loaded ? [] : sessions} loaded={loaded} error={error} notice={notice} onDismissNotice={() => setNotice('')} bridge={bridge} loadedBuild={loadedBuild} canStart={start.kinds.includes('claude')} onStart={() => { setNotice(''); navigate(startRoute) }} onOpen={item => { setNotice(''); navigate({ session: item.id, view: 'chat' }) }} />
   }
   return <div className="app-shell" ref={shell}>{screen}</div>
 }

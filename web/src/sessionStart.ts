@@ -1,5 +1,5 @@
 import type { NoticeTone } from './Notice'
-import type { Placement, StartCandidate, StartDelivery } from './api'
+import type { Placement, Session, SessionList, StartCandidate, StartDelivery } from './api'
 
 // One start intent at a time. Its command ID is stored before sending so a
 // reload or timeout re-checks the same receipt instead of starting again.
@@ -29,7 +29,10 @@ export function chooseStart(pending: PendingStart | null, candidate: StartCandid
   return { id: newID(), candidate: candidate.id, placement: candidate.placement, kind }
 }
 
-export type StartOutcome = { tone: NoticeTone; text: string; settled: boolean }
+// pane names the new session's pane when Herdr accepted the start: the client
+// opens that session's Chat, whose own status shows whether Claude is ready.
+// text is shown only when the session does not appear in the list in time.
+export type StartOutcome = { tone: NoticeTone; text: string; settled: boolean; pane?: string }
 
 export const permissionNotice = '새 세션의 권한 모드는 PC 사용자 shell 설정(alias 등)을 따릅니다. Bridge는 권한 모드를 정하거나 보장하지 않습니다.'
 export const noRootNotice = '새 workspace는 Bridge를 -project-root와 함께 실행해야 만들 수 있습니다. 지금은 열린 workspace에 새 tab만 열 수 있습니다.'
@@ -39,14 +42,9 @@ export const uncertainStart: StartOutcome = { tone: 'warning', text: 'Herdr가 �
 export function startOutcome(result: StartDelivery): StartOutcome {
   if (result.status === 'delivery_unknown') return uncertainStart
   if (result.status === 'accepted') {
-    switch (result.code) {
-      case 'AGENT_NOT_READY':
-        return { tone: 'warning', text: 'PC의 Herdr에서 확인 필요: Claude가 폴더 신뢰 같은 시작 화면에서 기다리고 있습니다. 대화가 아직 확인되지 않아 모바일 Terminal은 열리지 않습니다. 확인하면 목록에서 이어서 열 수 있습니다.', settled: true }
-      case 'AGENT_START_UNCONFIRMED':
-        return { tone: 'warning', text: 'Claude 시작을 요청했지만 준비됐는지 확인하지 못했습니다. 목록이나 PC의 Herdr에서 확인하세요.', settled: true }
-      default:
-        return { tone: 'info', text: 'Claude를 시작했습니다. 목록에 나타나면 열 수 있고, 대화가 확인되면 입력이 열립니다.', settled: true }
-    }
+    const pane = result.created?.pane_id
+    if (result.code === 'AGENT_NOT_READY') return { tone: 'warning', text: 'Claude가 폴더 신뢰 같은 시작 화면에서 기다리고 있습니다. PC의 Herdr에서 확인하면 목록에서 이어서 열 수 있습니다.', settled: true, pane }
+    return { tone: 'info', text: 'Claude를 시작했습니다. 목록에 나타나면 열 수 있습니다.', settled: true, pane }
   }
   switch (result.code) {
     case 'CANDIDATE_CHANGED':
@@ -64,6 +62,32 @@ export function startOutcome(result: StartDelivery): StartOutcome {
     default:
       return { tone: 'danger', text: `시작이 거부됐습니다 (${result.code ?? '알 수 없음'}).`, settled: true }
   }
+}
+
+export const FIND_ATTEMPTS = 5
+export const FIND_INTERVAL_MS = 3000
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', done); resolve() }, ms)
+    const done = () => { clearTimeout(timer); resolve() }
+    signal?.addEventListener('abort', done, { once: true })
+  })
+}
+
+// findStartedSession looks the new session up by its pane: its item ID can be
+// pane:<pane> or claude:<native> depending on when the Bridge verified it, and
+// may change between the two. The Bridge lists the pane within one of its
+// own refreshes, so a few list polls are enough.
+export async function findStartedSession(pane: string, list: () => Promise<SessionList>, { attempts = FIND_ATTEMPTS, interval = FIND_INTERVAL_MS, signal }: { attempts?: number; interval?: number; signal?: AbortSignal } = {}): Promise<Session | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) await sleep(interval, signal)
+    if (signal?.aborted) return null
+    const sessions = await list().then(body => body.sessions, () => [])
+    const found = sessions.find(item => item.pane_id === pane)
+    if (found) return found
+  }
+  return null
 }
 
 export type CandidateGroup = { key: string; title: string; candidates: StartCandidate[] }

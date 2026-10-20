@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,10 +28,17 @@ func TestResolveRejectsAmbiguousAndTraversal(t *testing.T) {
 		os.MkdirAll(dir, 0700)
 		os.WriteFile(filepath.Join(dir, id+".jsonl"), nil, 0600)
 	}
-	if _, e := Resolve(root, id); e == nil {
-		t.Fatal("ambiguous transcript accepted")
+	if _, e := Resolve(root, id); e == nil || errors.Is(e, ErrNoTranscript) {
+		t.Fatalf("ambiguous transcript accepted or reported as missing: %v", e)
 	}
-	if _, e := Resolve(root, "../../secret"); e == nil {
-		t.Fatal("traversal accepted")
+	if _, e := Resolve(root, "../../secret"); e == nil || errors.Is(e, ErrNoTranscript) {
+		t.Fatalf("traversal accepted or reported as missing: %v", e)
+	}
+}
+func TestResolveReportsMissingTranscriptDistinctly(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "projects", "repo"), 0700)
+	if _, e := Resolve(root, "33333333-3333-4333-8333-333333333333"); !errors.Is(e, ErrNoTranscript) {
+		t.Fatalf("missing transcript not reported: %v", e)
 	}
 }

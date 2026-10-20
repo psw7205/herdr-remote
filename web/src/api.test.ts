@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { composerHint, lifecycleNotice, sendCommand, eventURL, listSessions, sessionLifecycle, successorOf, supersededBy, type Session } from './api'
+import { chatUnavailableNotice, composerHint, lifecycleNotice, sendCommand, eventURL, listSessions, sessionLifecycle, successorOf, supersededBy, type Session } from './api'
 
 const session: Session = { id: 'claude:native-a', agent: 'claude', pane_id: 'w1:p2', project: 'repo', title: 'Task', status: 'idle', runtime_binding: 'bound-a', chat: true, terminal: true, active: true }
 afterEach(() => vi.unstubAllGlobals())
@@ -60,6 +60,15 @@ describe('session list', () => {
   it('explains an unbound session by what it cannot do', () => {
     const unbound: Session = { ...session, id: 'pane:w1:p2', runtime_binding: undefined, chat: false, terminal: false, lifecycle: 'unbound' }
     expect(composerHint(unbound)).toBe('이 세션은 원격 입력을 지원하지 않습니다. PC의 Herdr에서 입력하세요.')
+  })
+  it('describes a never-bound session on a startup screen as waiting for the PC', () => {
+    const trusting: Session = { ...session, id: 'pane:w1:p2', status: 'needs_attention', runtime_binding: undefined, chat: false, terminal: false, lifecycle: 'unbound' }
+    expect(composerHint(trusting)).toBe('PC의 Herdr에서 시작 확인을 기다리고 있습니다.')
+    expect(chatUnavailableNotice(trusting)).toContain('시작 화면에서 기다리고 있습니다')
+    expect(chatUnavailableNotice(trusting)).not.toContain('찾지 못했습니다')
+    expect(chatUnavailableNotice({ ...trusting, status: 'idle' })).toBe('이 세션의 대화를 찾지 못했습니다. PC의 Herdr에서 확인하세요.')
+    expect(chatUnavailableNotice(session)).toBe('이 세션의 대화를 찾지 못했습니다. Terminal에서 확인하세요.')
+    expect(chatUnavailableNotice({ ...trusting, agent: 'codex' })).toContain('찾지 못했습니다')
   })
   it('says Codex input is not supported yet on its read-only Chat', () => {
     const codex: Session = { ...session, id: 'codex:native-c', agent: 'codex', runtime_binding: undefined, chat: true, terminal: false, lifecycle: 'unbound' }

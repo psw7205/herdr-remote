@@ -24,7 +24,7 @@ Bridge는 agent를 직접 실행하거나 resume하지 않고 conversation을 �
 | incarnation | 같은 pane에서 실행된 특정 process의 한 번의 생애. PID만으로는 구분하지 않고 시작 시각과 native session으로 확인한다 |
 | fail closed | 검증할 수 없으면 허용하지 않는 동작. binding을 검증할 수 없으면 입력과 Terminal을 막는다 |
 | Refresh | Bridge가 2초마다 Herdr에서 agent 목록을 읽고 binding을 다시 계산해 session item을 갱신하는 주기 |
-| item | 목록의 session 단위. 검증된 Claude native session은 `claude:<native-id>`, Herdr가 보고한 Codex native session은 `codex:<native-id>`, 식별 전 pane은 `pane:<pane-id>`다 |
+| item | 목록의 session 단위. 검증된 Claude native session은 `claude:<native-id>`(transcript가 아직 없어도), Herdr가 보고한 Codex native session은 `codex:<native-id>`, 식별 전이거나 transcript가 모호한 pane은 `pane:<pane-id>`다 |
 | `lifecycle` / `status` | `lifecycle`은 item의 검증·종료 상태(`active`, `unverified`, `ended` 등), `status`는 agent의 작업 상태(`working`, `idle` 등)다 |
 | cursor (epoch, sequence) | client가 받은 마지막 event 위치. epoch는 Bridge restart나 transcript 재동기화 때 바뀐다 |
 | snapshot / replay | 재연결 시 buffer에 남은 event를 이어 보내면 replay, 그렇지 못하면 전체 대화를 다시 보내면 snapshot이다 |
@@ -267,13 +267,23 @@ POST /api/sessions  { command_id, command_type: session_start,
   → command.Store.Execute (digest: 후보·kind·배치, runtime_binding 없음)
   → dispatch 직전 경로 재해석(EvalSymlinks, root 안·workspace 열림 확인). 실패 → 409 CANDIDATE_CHANGED
   → workspace.create 또는 tab.create (focus: false, env 없음) → root pane
-  → agent.start(인자 없음) → agent.get polling으로 준비 대기
-  → receipt에 생성된 workspace·tab·pane ID 기록. start 한 건은 50s 제한(client 60s)
+  → agent.start(인자 없음) → agent.get polling으로 준비 대기(이름 → 안 풀리면 pane)
+  → receipt에 생성된 workspace·tab·pane ID 기록. start 한 건은 60s 제한(client 70s)
 ```
 
-- 새 session은 특별 경로 없이 4.1 discovery를 따른다. `pane:<pane-id>`로 보이고 native session이
-  검증되면 `claude:<native-id>`가 되며, 그 뒤에만 Chat 입력이 열린다.
-- 신뢰 확인 같은 시작 화면에서 멈추면 `AGENT_NOT_READY`로 끝나고, binding이 없어 PC의 Herdr에서 수락한다.
+- 새 session은 특별 경로 없이 4.1 discovery를 따른다. Claude Code는 process 시작 시 native session ID를
+  `sessions/<pid>.json`에 쓰므로 binding이 검증되면 transcript가 없어도 `claude:<native-id>`·`chat: true`(빈
+  history)로 보이고 첫 prompt를 Chat에서 보낼 수 있다. transcript는 첫 message에 생기며 같은 item에서 watcher가
+  시작되고 새 epoch로 동기화된다.
+- client는 시작이 `accepted`(code 없음·`AGENT_NOT_READY`·`AGENT_START_UNCONFIRMED`)면 receipt의 `created.pane_id`로
+  목록에서 item을 찾아 바로 Chat으로 들어간다(`web/src/sessionStart.ts` `findStartedSession`). 몇 번의 3s poll
+  안에 보이지 않으면 목록으로 돌아가 결과를 보인다. 거부와 `delivery_unknown`은 시작 화면에 남는다.
+- 신뢰 확인 같은 시작 화면에서 멈추면 `AGENT_NOT_READY`로 끝난다. metadata가 아직 없어 binding이 없으므로
+  `pane:<pane-id>`·`unbound`·`needs_attention`으로 보이고 PC의 Herdr에서 수락하면 `claude:` item이 supersede한다.
+- 준비 대기(`internal/herdr/start.go` `waitInteractive`): Herdr는 새 pane의 shell 초기화 중 다른 agent CLI(예:
+  completion 생성)를 잠깐 감지하면 managed name을 지운다. 이름 조회가 실패하면 pane으로 조회해 그 pane의 `claude`가
+  `idle`/`done`이면 준비, `blocked`면 `AGENT_NOT_READY`, 다른 이름이나 terminal이면 `AGENT_START_UNCONFIRMED`다.
+  `agent_pane_busy`는 shell이 foreground인 동안 10s까지 재시도한다.
 - 근거: [ADR-037](adr.md#adr-037--새-session-생성은-herdr에-요청한다), [ADR-033](adr.md#adr-033--command-receipt로-retry-중복-실행을-방지한다).
 
 ### 4.6 변경된 파일
@@ -350,8 +360,10 @@ transcript 형식을 모른다([ADR-007](adr.md#adr-007--unified-event-protocol�
 
 ## 6. Session lifecycle 요약
 
-- item ID는 검증된 Claude native session이면 `claude:<native-id>`, Herdr가 보고한 Codex native session이면
-  `codex:<native-id>`, 식별 전이면 `pane:<pane-id>`다.
+- item ID는 검증된 Claude native session이면 `claude:<native-id>`(transcript가 아직 없어도), Herdr가 보고한 Codex
+  native session이면 `codex:<native-id>`, 식별 전이거나 같은 native ID의 transcript가 2개 이상이면 `pane:<pane-id>`다.
+- `chat`은 transcript가 있거나 아직 없는 검증된 native session이면 true다. `pane:` item, 모호한 transcript, invalid
+  transcript는 false이며 prompt는 `CHAT_UNAVAILABLE`로 거부된다.
 - `lifecycle`: `active`, `unverified`, `unbound`, `superseded`(+`successor_id`), `ended`. `unbound`는 검증된
   binding을 가진 적이 없는 item(`pane:` item, 모든 `codex:` item)이며 모든 write가 fail closed한다.
 - `codex:` item은 binding과 Terminal 없이 Chat만 read-only로 보인다. pane이 사라지거나, Herdr가 그 pane에서
@@ -361,7 +373,8 @@ transcript 형식을 모른다([ADR-007](adr.md#adr-007--unified-event-protocol�
   그 밖은 `error`로 옮긴다.
 - binding이 없는 상태에서는 prompt, interrupt, Terminal read/input이 모두 fail closed한다.
 - transcript watcher는 `active`·`unverified` 동안만 돈다. `ended`·`superseded`가 되면 닫고, 다시
-  `active`가 되면 처음부터 읽어 새 epoch으로 동기화한다.
+  `active`가 되면 처음부터 읽어 새 epoch으로 동기화한다. transcript가 아직 없는 item은 Refresh마다 다시 resolve해
+  파일이 생기면 같은 item에서 watcher를 시작한다.
 - 종료된 item은 stream snapshot만 남기고 parsed history를 해제하며, 최근 종료된 32개만 유지한다.
 - `GET /api/sessions`는 `ended`·`superseded` item을 빼지만 `GET /api/sessions/{id}`와 WS는 계속 제공한다.
   client는 3s 목록 poll에서 열린 item이 빠지면 `GET /api/sessions/{id}`의 `successor_id`를 읽고, 목록에 있는
@@ -405,7 +418,7 @@ network 계층 ACL은 [P0-03](https://github.com/psw7205/herdr-remote/issues/2)�
 | I4 | browser/WS 종료는 agent, pane, session에 영향을 주지 않는다 | `internal/httpapi` WS 종료 시 구독 해제만 수행 |
 | I5 | Agent-specific parsing은 Bridge 안에만 있다 | `internal/claude`, `internal/codex` |
 | I6 | Client는 native transcript format을 모른다 | `internal/session` `Message{id, role, text, timestamp, tool}`와 `internal/stream` envelope |
-| I7 | Chat이 표현하지 못하거나 transcript가 불명확하면 같은 pane의 Terminal로 fallback한다 | `session.error`, `chat: false`, `internal/session` `Registry.Terminal` |
+| I7 | Chat이 표현하지 못하거나 transcript가 모호·invalid하면 같은 pane의 Terminal로 fallback한다. transcript가 아직 없는 검증된 session은 빈 Chat이다 | `session.error`, `chat: false`, `internal/session` `Registry.Terminal` |
 | I8 | Bridge restart 뒤 Herdr와 native transcript에서 상태를 재구성한다 | `cmd/bridge` 시작 Refresh, 새 epoch snapshot, `-receipts-dir` receipt 재사용 |
 | I9 | Bridge는 conversation의 유일한 copy가 아니다 | stream state는 memory projection. receipt는 digest와 결과만 저장 |
 | I10 | Bridge 접근은 localhost 또는 Tailscale Serve 경유만 허용한다 | `cmd/bridge` loopback bind 검사, `internal/httpapi` Host·identity·Origin gate |

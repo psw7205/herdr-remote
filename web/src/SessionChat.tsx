@@ -3,7 +3,7 @@ import { ArrowDown, FileDiff, RefreshCw, SquareTerminal, WifiOff } from 'lucide-
 import { MessageMarkdown } from './MessageMarkdown'
 import { applyMessageEvent, chatEntries, textCount, toolsLive } from './chatItems'
 import { chooseCommand, pendingCommandCopy, readPending, rejectedMessage, type PendingCommand } from './commandDelivery'
-import { composerHint, eventURL, getSession, lifecycleNotice, sendCommand, sessionLifecycle, type Cursor, type Event, type Message, type Session } from './api'
+import { chatUnavailableNotice, composerHint, eventURL, getSession, lifecycleNotice, sendCommand, sessionLifecycle, type Cursor, type Event, type Message, type Session } from './api'
 import { Composer, type ComposerStatus } from './Composer'
 import { readDraft, writeDraft } from './draftStore'
 import { Notice, type NoticeAction } from './Notice'
@@ -249,7 +249,7 @@ export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initia
     {connection === 'syncing' && loaded && <div className={styles.band} data-state="syncing" role="status"><RefreshCw aria-hidden size={16} />다시 연결하는 중…</div>}
     {(lifecycleNotice(session) || !session.chat || unsupported) && <div className={styles.notices}>
       {lifecycleNotice(session) && <Notice tone="warning">{lifecycleNotice(session)}</Notice>}
-      {!session.chat && <Notice tone="info" actions={terminalAction}>{session.terminal ? '이 세션의 대화를 찾지 못했습니다. Terminal에서 확인하세요.' : '이 세션의 대화를 찾지 못했습니다. PC의 Herdr에서 확인하세요.'}</Notice>}
+      {!session.chat && <Notice tone="info" actions={terminalAction}>{chatUnavailableNotice(session)}</Notice>}
       {unsupported && <Notice tone="warning" actions={terminalAction}>{session.terminal ? 'Chat에 표시할 수 없는 내용이 있습니다. Terminal에서 확인하세요.' : 'Chat에 표시할 수 없는 내용이 있습니다. PC의 Herdr에서 확인하세요.'}</Notice>}
     </div>}
     <div className={styles.frame}>

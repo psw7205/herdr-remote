@@ -25,6 +25,12 @@ describe('session list', () => {
     expect(html).not.toContain('agent가 없습니다')
     expect(html).toContain('aria-busy="true"')
   })
+  it('shows a start result with a dismiss action', () => {
+    const html = render({ notice: 'Claude를 시작했습니다. 목록에 나타나면 열 수 있습니다.', onDismissNotice: () => {} })
+    expect(html).toContain('Claude를 시작했습니다.')
+    expect(html).toContain('>닫기<')
+    expect(render({})).not.toContain('>닫기<')
+  })
   it('shows the Bridge build as a short revision next to the count', () => {
     const bridge: BridgeBuild = { revision: '65f5c6bd7eceb1cd601405dec32f04078918f161', modified: false, clientBuild: '0123456789abcdef' }
     const html = render({ sessions: [session], bridge })

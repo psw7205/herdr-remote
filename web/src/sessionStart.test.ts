@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { startSession, type StartCandidate } from './api'
-import { chooseStart, groupCandidates, placementLabel, startOutcome } from './sessionStart'
+import { startSession, type Session, type StartCandidate } from './api'
+import { chooseStart, findStartedSession, groupCandidates, placementLabel, startOutcome } from './sessionStart'
 
 const closed: StartCandidate = { id: 'c1', name: 'sample-api', root: 'work', open: false, placement: 'new_workspace' }
 const open: StartCandidate = { id: 'c2', name: 'docs-site', root: 'work', open: true, workspace: 'docs', placement: 'new_tab' }
@@ -43,11 +43,23 @@ describe('start intent', () => {
 })
 
 describe('start outcome copy', () => {
-  it('shows a trust screen as a step at the PC or Terminal, not a failure', () => {
-    const outcome = startOutcome({ status: 'accepted', code: 'AGENT_NOT_READY', created: { workspace_id: 'w2', tab_id: 'w2:t1', pane_id: 'w2:p1', agent: 'mobile-a' } })
-    expect(outcome.text).toContain('PC의 Herdr에서 확인 필요')
+  const created = { workspace_id: 'w2', tab_id: 'w2:t1', pane_id: 'w2:p1', agent: 'mobile-a' }
+  it('opens the new session by its pane whenever Herdr accepted the start', () => {
+    expect(startOutcome({ status: 'accepted', created })).toMatchObject({ tone: 'info', settled: true, pane: 'w2:p1' })
+    expect(startOutcome({ status: 'accepted', code: 'AGENT_NOT_READY', created })).toMatchObject({ settled: true, pane: 'w2:p1' })
+    expect(startOutcome({ status: 'accepted', code: 'AGENT_START_UNCONFIRMED', created })).toMatchObject({ tone: 'info', settled: true, pane: 'w2:p1' })
+    expect(startOutcome({ status: 'rejected', code: 'AGENT_START_FAILED', created }).pane).toBeUndefined()
+  })
+  it('shows a trust screen as a step at the PC, not a failure', () => {
+    const outcome = startOutcome({ status: 'accepted', code: 'AGENT_NOT_READY', created })
+    expect(outcome.text).toContain('PC의 Herdr에서 확인하면')
     expect(outcome.tone).toBe('warning')
     expect(outcome.settled).toBe(true)
+  })
+  it('does not warn about an unconfirmed start: the session screen shows readiness', () => {
+    const outcome = startOutcome({ status: 'accepted', code: 'AGENT_START_UNCONFIRMED', created })
+    expect(outcome.text).not.toContain('확인하지 못했습니다')
+    expect(outcome.tone).toBe('info')
   })
   it('never settles an uncertain delivery', () => {
     const outcome = startOutcome({ status: 'delivery_unknown', code: 'DELIVERY_UNKNOWN' })
@@ -62,8 +74,43 @@ describe('start outcome copy', () => {
   it('explains a folder that changed after listing', () => {
     expect(startOutcome({ status: 'rejected', code: 'CANDIDATE_CHANGED' }).text).toContain('폴더 상태가 바뀌어')
   })
-  it('does not promise input before the session is verified', () => {
-    expect(startOutcome({ status: 'accepted' }).text).toContain('대화가 확인되면 입력이 열립니다')
+})
+
+describe('finding the started session', () => {
+  const session = (id: string, pane: string): Session => ({ id, agent: 'claude', pane_id: pane, project: '/work/a', title: '', status: 'idle', chat: true, terminal: true, active: true })
+  const list = (...pages: Session[][]) => {
+    const fn = vi.fn()
+    for (const page of pages) fn.mockResolvedValueOnce({ sessions: page, start: { kinds: ['claude'], new_workspace: true }, bridge: null })
+    return fn
+  }
+  afterEach(() => vi.useRealTimers())
+  it('finds the session by pane whether it is listed as pane: or claude:', async () => {
+    vi.useFakeTimers()
+    const pages = list([session('claude:other', 'w1:p1')], [session('pane:w2:p1', 'w2:p1')])
+    const found = findStartedSession('w2:p1', pages, { attempts: 3, interval: 3000 })
+    await vi.advanceTimersByTimeAsync(3000)
+    expect((await found)?.id).toBe('pane:w2:p1')
+    expect(pages).toHaveBeenCalledTimes(2)
+    expect((await findStartedSession('w2:p1', list([session('claude:new', 'w2:p1')]), { attempts: 1 }))?.id).toBe('claude:new')
+  })
+  it('gives up after the attempts and tolerates a failed poll', async () => {
+    vi.useFakeTimers()
+    const pages = vi.fn().mockRejectedValueOnce(new TypeError('network lost')).mockResolvedValue({ sessions: [], start: { kinds: [], new_workspace: false }, bridge: null })
+    const result = findStartedSession('w2:p1', pages, { attempts: 3, interval: 1000 })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(await result).toBeNull()
+    expect(pages).toHaveBeenCalledTimes(3)
+  })
+  it('stops when aborted', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const pages = list([], [session('pane:w2:p1', 'w2:p1')])
+    const result = findStartedSession('w2:p1', pages, { attempts: 3, interval: 3000, signal: controller.signal })
+    await vi.advanceTimersByTimeAsync(10)
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(await result).toBeNull()
+    expect(pages).toHaveBeenCalledTimes(1)
   })
 })
 

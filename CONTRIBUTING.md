@@ -41,7 +41,9 @@ Herdr와 Bridge 없이 UI 상태를 확인할 때는 Vite만 띄우고 `http://1
 접속한다. `?scenario=`로 `long`, `live`, `disconnected`, `delivery-unknown`, `rejected`, `empty`,
 `herdr-down`, `unbound`, `slow`, `superseded`, `start-trust`, `start-unknown`, `no-root`, `codex`, `changes-large`,
 `tools`, `stale-client`, `wide-table`을 고를 수 있다. `stale-client`는 설치된 client build가 열린 화면과 달라 새로고침 안내가 뜨는
-상태다. `unbound`는 검증된 binding이 없어 입력과 Terminal이 막힌 session 목록이다. `tools`는 작업 중 session에 tool group(접힘, 오류, 결과 없음, 잘린 결과)을 보이고, 실행 중인
+상태다. `unbound`는 검증된 binding이 없어 입력과 Terminal이 막힌 session 목록이다. 새 세션 시작은 모든 scenario에서
+`accepted` 뒤 생성된 pane의 대화 없는 session을 목록에 더하고 그 Chat으로 들어가며, `start-trust`는 신뢰 확인 화면에서
+기다리는 상태로 들어간다. `tools`는 작업 중 session에 tool group(접힘, 오류, 결과 없음, 잘린 결과)을 보이고, 실행 중인
 tool이 몇 초 뒤 `message.updated`로 끝나는 흐름을 재생한다. 변경된 파일 화면은 모든 scenario에서 session마다 다른 상태(수정·추가·삭제·이름 변경·binary,
 변경 없음, Git repository 아님, 조회 오류)를 보이고, `changes-large`는 파일 수와 diff 크기 상한에 걸린
 화면을 보인다. `wide-table`은 열 12개짜리 넓은 표와 긴 code block을 보인다. `/`로 시작하는 입력은 transcript에서 숨는 slash command처럼 echo 없이 수락된다. 이 page는
@@ -126,7 +128,11 @@ mise exec -- go run ./cmd/bridge -herdr-socket <e2e socket> -receipts-dir "$E2E/
   `"$E2E/h" pane send-keys <pane-id> down enter`로 수락한 뒤 다시 시작한다.
 - `agent start`는 사용자 shell에서 실행되므로 alias가 붙인 옵션이 적용된다. permission 대기를
   재현하려면 pane에 `command claude ...`를 직접 입력한다.
-- native session은 첫 prompt 뒤 생긴다. Bridge `prompt`는 `claude:<native-id>` item에만 전달된다.
+- native session ID는 Claude 시작 시 `sessions/<pid>.json`에 생기고 transcript는 첫 prompt 뒤 생긴다. binding이
+  검증되면 transcript가 없어도 `claude:<native-id>` item이며 Chat에서 첫 prompt를 보낼 수 있다. 신뢰 확인 화면에서는
+  metadata가 아직 없어 binding이 없다.
+- 사용자 shell rc가 다른 agent CLI를 실행하면(예: completion 생성) Herdr가 새 pane에서 그 agent를 잠깐 감지해 managed
+  name을 지운다. 그 session은 `agent list`에 이름 없이 남고 Bridge는 pane 조회로 준비를 판정한다.
 - Bridge로 시작한 session은 agent 인자가 없어 사용자 기본 model로 뜬다. 그 안에서 `/model`을 쓰면
   사용자 설정의 기본 model이 바뀌므로, 바꿨다면 정리할 때 원래 값으로 되돌린다.
 - 다른 Herdr binary(새 release 등) 확인은 설치 binary를 바꾸지 않고 `"$E2E/h" server live-handoff --import-exe <binary>`로 한다.

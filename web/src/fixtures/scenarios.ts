@@ -18,7 +18,8 @@ export type Scenario = {
   // A pane: item that Herdr later re-keys to a verified claude: session.
   supersede?: { from: string; to: FixtureSession; after: number }
   // New session start (ADR-037): capability, folders and the start answer.
-  start: { capability: StartCapability; candidates: StartCandidate[]; result: StartDelivery; latency: number }
+  // room is the started session as the Bridge lists it once Herdr accepted.
+  start: { capability: StartCapability; candidates: StartCandidate[]; result: StartDelivery; latency: number; room?: FixtureSession }
   // Changed Files per session id; a session without an entry is a clean repo.
   changes: Record<string, FixtureChanges>
   // Timed transcript events on one session: new items and tool updates.
@@ -208,11 +209,15 @@ const startCandidates: StartCandidate[] = [
   { id: 'fixture-candidate-infra', name: 'infra-notes', root: 'workspace', open: false, placement: 'new_workspace' },
 ]
 const created = { workspace_id: 'w9', tab_id: 'w9:t1', pane_id: 'w9:p1', agent: 'mobile-fixture' }
+// A started Claude before its first message: verified, Chat open, no history.
+const fresh: FixtureSession = { session: { ...base, id: 'claude:fixture-fresh', pane_id: created.pane_id, project: '/workspace/docs-site', title: '', status: 'idle', runtime_binding: 'fixture-binding-fresh' }, messages: [] }
+// The same start stopped at the folder trust screen: no native session yet.
+const trusting: FixtureSession = { session: { ...base, id: `pane:${created.pane_id}`, pane_id: created.pane_id, project: '/workspace/docs-site', title: '', status: 'needs_attention', runtime_binding: undefined, chat: false, terminal: false, lifecycle: 'unbound' }, messages: [] }
 
 export function scenario(name: ScenarioName): Scenario {
   const out: Scenario = { name, sessions: sessions(), command: { status: 'accepted' }, latency: 60, listFails: false, socketFails: false, liveEvery: 0,
     bridge: { revision: '3c7a1e9f0b2d4865a7c9e1f3b5d7a9c1e3f5a7b9', modified: false, client_build: '0f1e2d3c4b5a6978' },
-    start: { capability: { kinds: ['claude'], new_workspace: true }, candidates: startCandidates, result: { status: 'accepted', created }, latency: 2500 },
+    start: { capability: { kinds: ['claude'], new_workspace: true }, candidates: startCandidates, result: { status: 'accepted', created }, latency: 2500, room: fresh },
     changes: fixtureChanges(name) }
   switch (name) {
     case 'long': {
@@ -239,7 +244,7 @@ export function scenario(name: ScenarioName): Scenario {
       out.supersede = { from: pane.id, to: { session: withPreview({ ...pane, id: 'claude:fixture-successor', runtime_binding: 'fixture-binding-successor', chat: true }, next), messages: next }, after: 4000 }
       break
     }
-    case 'start-trust': out.start.result = { status: 'accepted', code: 'AGENT_NOT_READY', created }; break
+    case 'start-trust': out.start.result = { status: 'accepted', code: 'AGENT_NOT_READY', created }; out.start.room = trusting; break
     case 'start-unknown': out.start.result = { status: 'delivery_unknown', code: 'DELIVERY_UNKNOWN' }; break
     case 'no-root':
       out.start.capability = { kinds: ['claude'], new_workspace: false }

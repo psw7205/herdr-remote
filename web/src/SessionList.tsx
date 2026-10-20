@@ -10,7 +10,7 @@ import { TopBar } from './TopBar'
 import styles from './SessionList.module.css'
 import ui from './ui.module.css'
 
-export function SessionList({ sessions, loaded, error, bridge = null, loadedBuild = null, canStart = false, onStart, onOpen }: { sessions: Session[]; loaded: boolean; error: string; bridge?: BridgeBuild | null; loadedBuild?: string | null; canStart?: boolean; onStart?: () => void; onOpen: (session: Session) => void }) {
+export function SessionList({ sessions, loaded, error, notice = '', onDismissNotice, bridge = null, loadedBuild = null, canStart = false, onStart, onOpen }: { sessions: Session[]; loaded: boolean; error: string; notice?: string; onDismissNotice?: () => void; bridge?: BridgeBuild | null; loadedBuild?: string | null; canStart?: boolean; onStart?: () => void; onOpen: (session: Session) => void }) {
   const groups = groupSessions(sessions)
   const now = Date.now()
   const build = bridgeBuildLabel(bridge)
@@ -18,8 +18,9 @@ export function SessionList({ sessions, loaded, error, bridge = null, loadedBuil
   return <div className={styles.screen}>
     <TopBar title="세션" subtitle={loaded && !error ? <span>{sessions.length > 0 ? `${sessions.length}개 실행 중` : 'Herdr 연결됨'}{build && ` · ${build}`}</span> : undefined}
       actions={canStart && onStart ? <button type="button" className={ui.iconButton} onClick={onStart} aria-label="새 세션 시작"><Plus aria-hidden size={22} /></button> : undefined} />
-    {(error || stale) && <div className={styles.notices}>
+    {(error || stale || notice) && <div className={styles.notices}>
       {error && <Notice tone="danger">{error}</Notice>}
+      {notice && <Notice tone="info" actions={onDismissNotice ? [{ label: '닫기', onClick: onDismissNotice }] : []}>{notice}</Notice>}
       {stale && <Notice tone="info" actions={[{ label: '새로고침', onClick: () => location.reload() }]}>새 화면 build가 설치되었습니다. 새로고침하면 적용됩니다.</Notice>}
     </div>}
     <main className={styles.list} aria-busy={!loaded} aria-label="세션 목록">

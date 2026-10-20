@@ -38,6 +38,19 @@ describe('composer controls', () => {
     expect(html).not.toContain('Terminal 열기')
     expect(html).not.toContain('대화를 찾지 못했습니다')
   })
+  it('opens the composer on a verified session that has no conversation yet', () => {
+    const html = render({ ...session, status: 'idle' })
+    expect(html).not.toMatch(/<textarea[^>]*disabled/)
+    expect(html).not.toContain('대화를 찾지 못했습니다')
+  })
+  it('explains a session stopped at a startup screen instead of a missing conversation', () => {
+    const html = render({ ...session, id: 'pane:w1:p1', status: 'needs_attention', runtime_binding: undefined, chat: false, terminal: false, lifecycle: 'unbound' })
+    expect(html).toContain('시작 화면에서 기다리고 있습니다')
+    expect(html).toContain('PC의 Herdr에서 시작 확인을 기다리고 있습니다.')
+    expect(html).not.toContain('대화를 찾지 못했습니다')
+    expect(html).not.toContain('원격 입력을 지원하지 않습니다')
+    expect(html).toMatch(/<textarea[^>]*disabled/)
+  })
   it('offers no Stop when the agent is not working', () => {
     expect(render({ ...session, status: 'idle' })).not.toContain('작업 중단')
     expect(render({ ...session, status: 'needs_attention' })).not.toContain('작업 중단')

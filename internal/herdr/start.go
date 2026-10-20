@@ -155,11 +155,13 @@ var (
 
 // Startup timing mirrors the Herdr CLI's `agent start`: the server reports
 // agent_pane_busy while a fresh pane's shell initializes, and readiness is
-// observed by polling agent.get until Herdr's own 30s startup deadline.
+// observed by polling agent.get until Herdr's own 30s startup deadline. The
+// busy retry outlasts a shell startup that runs other programs (completion
+// generators for other agent CLIs took about 3s in measurement).
 var (
 	agentStartWait      = 31 * time.Second
 	agentPollInterval   = 200 * time.Millisecond
-	shellReadyRetry     = 2 * time.Second
+	shellReadyRetry     = 10 * time.Second
 	shellReadyRetryStep = 100 * time.Millisecond
 )
 
@@ -212,22 +214,34 @@ func (g *Gateway) shellInitializing(ctx context.Context, paneID string) bool {
 func (g *Gateway) waitInteractive(ctx context.Context, name, kind, paneID, terminalID string) error {
 	ctx, cancel := context.WithTimeout(ctx, agentStartWait)
 	defer cancel()
+	idle := func(state AgentState) bool { return state.Status == "idle" || state.Status == "done" }
 	for {
 		state, err := g.agentGet(ctx, name)
-		if err != nil {
-			// A name can be briefly unresolvable; the pane still identifies
-			// the terminal, which is pinned below.
+		named := err == nil
+		if !named {
+			// The name can be briefly unresolvable, and Herdr drops a managed
+			// name for good when it detects another agent on the pane first:
+			// a shell startup that runs another agent's CLI (for completions)
+			// is detected as that agent for a few seconds. The pane still
+			// identifies the terminal, which is pinned below, and the agent
+			// that reaches its prompt there is the one that was started.
 			state, err = g.agentGet(ctx, paneID)
 		}
 		if err == nil {
 			switch {
-			case state.TerminalID != terminalID || state.Name != name || state.Agent != "" && state.Agent != kind:
+			case state.TerminalID != terminalID:
 				return ErrAgentUnconfirmed
+			case named && (state.Name != name || state.Agent != "" && state.Agent != kind):
+				return ErrAgentUnconfirmed
+			case !named && state.Name != "" && state.Name != name:
+				return ErrAgentUnconfirmed
+			case !named && state.Agent != kind:
+				// Nothing started yet, or a transient detection of another kind.
 			case state.Status == "blocked":
 				return ErrAgentNotReady
-			case (state.Status == "idle" || state.Status == "done") && state.InteractiveReady:
+			case idle(state) && (state.InteractiveReady || !named):
 				return nil
-			case (state.Status == "idle" || state.Status == "done") && !state.LaunchPending:
+			case idle(state) && !state.LaunchPending:
 				return ErrAgentExited
 			}
 		}

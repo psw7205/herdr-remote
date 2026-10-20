@@ -241,6 +241,10 @@ type observation struct {
 	verified bool
 	path     string
 	resolved bool
+	// empty is a verified native session whose transcript does not exist yet:
+	// Claude Code writes it with the first message, so the session has no
+	// history rather than an unreadable one.
+	empty bool
 	// boundNative is the native session a successful Binding call named, even
 	// when the binding was rejected (e.g. a terminal_id race).
 	boundNative string
@@ -293,8 +297,11 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		}
 		if e == nil && binding.Agent == "claude" && binding.TerminalID == a.TerminalID && binding.Token != "" && binding.ProcessID != 0 && binding.NativeSessionID != "" {
 			o.binding, o.verified = binding, true
-			if path, e := claude.Resolve(r.claudeRoot, binding.NativeSessionID); e == nil {
+			switch path, e := claude.Resolve(r.claudeRoot, binding.NativeSessionID); {
+			case e == nil:
 				o.path, o.resolved = path, true
+			case errors.Is(e, claude.ErrNoTranscript):
+				o.empty = true
 			}
 		}
 		observed = append(observed, o)
@@ -314,7 +321,7 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	}
 	for i := range observed {
 		if o := &observed[i]; o.verified && claims[o.binding.NativeSessionID] > 1 {
-			o.binding, o.verified, o.path, o.resolved = herdr.Binding{}, false, "", false
+			o.binding, o.verified, o.path, o.resolved, o.empty = herdr.Binding{}, false, "", false, false
 		}
 	}
 	// Two Codex panes reporting one native session (e.g. `codex resume X`
@@ -335,9 +342,16 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	// moved transcript is followed; an unresolvable ID keeps the old path.
 	// Keys are item IDs, so the two agents' native IDs never meet.
 	resolved := make(map[string]string)
+	// noTranscript lists the Claude items whose native session has no
+	// transcript yet: Chat opens on an empty history and the transcript is
+	// looked for again on every Refresh. An ambiguous ID is in neither map.
+	noTranscript := make(map[string]bool)
 	for _, o := range observed {
-		if o.resolved {
-			resolved[claudeAdapter.prefix+o.binding.NativeSessionID] = o.path
+		switch id := claudeAdapter.prefix + o.binding.NativeSessionID; {
+		case o.resolved:
+			resolved[id] = o.path
+		case o.empty:
+			noTranscript[id] = true
 		}
 	}
 	for _, o := range codexObserved {
@@ -348,15 +362,18 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	r.mu.RLock()
 	var pending []*Item
 	for id, item := range r.items {
-		if _, ok := resolved[id]; item.meta.Active && item.path != "" && !ok {
+		if _, ok := resolved[id]; item.meta.Active && !ok && !noTranscript[id] && item.nativeID != "" && (item.path != "" || item.adapter() == claudeAdapter) {
 			pending = append(pending, item)
 		}
 	}
 	r.mu.RUnlock()
 	for _, item := range pending {
 		// format and nativeID never change after the item is created.
-		if path, e := r.resolve(item.adapter(), item.nativeID); e == nil {
+		switch path, e := r.resolve(item.adapter(), item.nativeID); {
+		case e == nil:
 			resolved[item.adapter().prefix+item.nativeID] = path
+		case errors.Is(e, claude.ErrNoTranscript):
+			noTranscript[item.adapter().prefix+item.nativeID] = true
 		}
 	}
 	r.mu.Lock()
@@ -386,8 +403,9 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		}
 		byPane[item.meta.PaneID] = item
 	}
+	// found holds each item's new Meta except Chat, which the apply loop
+	// below derives from the item's transcript state.
 	found := make(map[string]Meta)
-	paths := make(map[string]string)
 	// Verified observations claim IDs first so that an unverified continuity
 	// observation can never override a verified one, whatever the snapshot order.
 	for _, o := range observed {
@@ -397,15 +415,12 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		a := o.agent
 		meta := Meta{ID: "pane:" + a.PaneID, Agent: a.Agent, PaneID: a.PaneID, Project: o.binding.CWD, Title: a.Title, Status: status(a.Status), Active: true, Binding: o.binding.Token, Terminal: true}
 		id := "claude:" + o.binding.NativeSessionID
-		if item, ok := r.items[id]; ok {
-			// Same native session as a known item: keep its identity even if
-			// the transcript cannot be resolved again right now.
+		// A known native session keeps its identity even if the transcript
+		// cannot be resolved again right now; a new one is identified by its
+		// transcript, or by having none yet. An ambiguous transcript (several
+		// files) keeps a new session a pane: item.
+		if _, ok := r.items[id]; ok || o.resolved || o.empty {
 			meta.ID = id
-			meta.Chat = item.path != ""
-		} else if o.resolved {
-			meta.ID = id
-			meta.Chat = true
-			paths[id] = o.path
 		}
 		found[meta.ID] = meta
 	}
@@ -419,12 +434,7 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		a := o.agent
 		id := codexAdapter.prefix + o.native
 		meta := Meta{ID: id, Agent: a.Agent, PaneID: a.PaneID, Project: a.CWD, Title: a.Title, Status: status(a.Status), Active: true}
-		if item, ok := r.items[id]; ok {
-			meta.Chat = item.path != ""
-		} else if o.resolved {
-			meta.Chat = true
-			paths[id] = o.path
-		} else {
+		if _, ok := r.items[id]; !ok && !o.resolved {
 			continue
 		}
 		claimedCodex[i] = true
@@ -441,7 +451,6 @@ func (r *Registry) Refresh(ctx context.Context) error {
 			reported := reportedNativeID(a)
 			if !taken && (reported == "" || reported == item.nativeID) && (o.boundNative == "" || o.boundNative == item.nativeID) {
 				meta.ID = item.meta.ID
-				meta.Chat = item.path != ""
 				meta.Project = item.meta.Project
 			}
 		}
@@ -459,7 +468,6 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		if item := byPane[a.PaneID]; item != nil && !ambiguous[a.PaneID] && item.adapter() == codexAdapter {
 			if _, taken := found[item.meta.ID]; !taken && (o.native == "" || o.native == item.nativeID) {
 				meta.ID = item.meta.ID
-				meta.Chat = item.path != ""
 				meta.Project = item.meta.Project
 			}
 		}
@@ -501,32 +509,46 @@ func (r *Registry) Refresh(ctx context.Context) error {
 		item.meta.Status = "completed"
 		item.stream.Append("agent.status", map[string]any{"status": "completed", "lifecycle": LifecycleEnded})
 	}
+	// Chat is open while the item has a transcript, or is a native session
+	// that has none yet. A pane: item, an ambiguous transcript and a Codex
+	// pane without a rollout keep it closed.
 	for id, meta := range found {
+		path := resolved[id]
 		if item, ok := r.items[id]; ok {
 			if item.meta.Binding != meta.Binding || item.meta.Status != meta.Status || item.meta.Active != meta.Active {
 				item.stream.Append("agent.status", map[string]any{"status": meta.Status, "lifecycle": lifecycle(meta)})
 			}
-			item.meta = meta
-			if path, ok := resolved[id]; ok && item.path != "" && path != item.path {
+			switch {
+			case path != "" && item.path != "" && path != item.path:
 				slog.Info("transcript moved", "session", id)
 				item.stopWatch()
 				item.path = path
+			case path != "" && item.path == "":
+				// The first message created the transcript of a session that
+				// was listed, and may have been prompted, without one.
+				item.path = path
 			}
-			// A revived or moved item re-reads its transcript from the start, so
-			// the first batch resets the projection and replaces the stream epoch.
-			if meta.Chat && item.cancel == nil {
+			meta.Chat = item.path != "" || noTranscript[id]
+			item.meta = meta
+			// A revived, moved or newly written transcript is read from the
+			// start, so the first batch resets the projection and replaces the
+			// stream epoch.
+			if item.path != "" && item.cancel == nil {
 				item.startWatch(r.ctx)
 			}
 			continue
 		}
 		format := adapterFor(id)
-		item := &Item{meta: meta, path: paths[id], stream: stream.New(id), format: format, projection: format.newProjection()}
+		meta.Chat = path != "" || noTranscript[id]
+		item := &Item{meta: meta, path: path, stream: stream.New(id), format: format, projection: format.newProjection()}
 		if native, ok := strings.CutPrefix(id, format.prefix); ok {
 			item.nativeID = native
 		}
 		r.items[id] = item
-		if meta.Chat {
+		if path != "" {
 			item.startWatch(r.ctx)
+		} else if meta.Chat {
+			_ = item.stream.Reset([]Message{})
 		}
 	}
 	r.evictInactive()

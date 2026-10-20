@@ -218,9 +218,9 @@ func (s *Server) candidates(w http.ResponseWriter, r *http.Request) {
 }
 
 // startTimeout bounds one session_start dispatch: create (5s), a shell-busy
-// retry (2s) and Herdr's 30s agent readiness wait, with margin. The server has
-// no WriteTimeout, so this is the longest a start holds its request.
-const startTimeout = 50 * time.Second
+// retry (10s) and Herdr's 30s agent readiness wait, with margin. The server
+// has no WriteTimeout, so this is the longest a start holds its request.
+const startTimeout = 60 * time.Second
 
 var candidateIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 

@@ -51,8 +51,11 @@ async function answer(scenario: Scenario, method: string, url: URL, body: string
   }
   if (method === 'GET' && url.pathname === '/api/start-candidates') return json({ candidates: scenario.start.candidates, start: scenario.start.capability })
   if (method === 'POST' && url.pathname === '/api/sessions') {
-    // The answer arrives after the agent readiness wait, like the Bridge's.
+    // The answer arrives after the agent readiness wait, like the Bridge's,
+    // which has listed the new pane by then.
     await wait(scenario.start.latency)
+    const room = scenario.start.room
+    if (room && scenario.start.result.status === 'accepted' && !rooms.has(room.session.id)) rooms.set(room.session.id, { session: room.session, messages: [...room.messages], epoch: `fixture-${scenario.name}`, log: [], sockets: new Set() })
     return json(scenario.start.result, scenario.start.result.status === 'rejected' ? 409 : 202)
   }
   const match = url.pathname.match(/^\/api\/sessions\/([^/]+)(\/terminal|\/commands|\/changes|\/changes\/diff)?$/)

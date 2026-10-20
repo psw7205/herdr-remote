@@ -33,7 +33,8 @@ h() { "$dir/h" "$@"; }
 need() { for c in "$@"; do command -v "$c" >/dev/null || die "$c not on PATH"; done; }
 
 pane_list() { herdr pane list | jq -c '[.result.panes[] | {pane_id, terminal_id}]'; }
-claude_pids() { pgrep -x claude | sort || true; }
+# Claude's process name is its version string, so match argv0 instead of the name.
+claude_pids() { ps -axo pid=,args= | awk '$2 == "claude" || $2 ~ /\/claude$/ { print $1 }' | sort || true; }
 
 up() {
 	need herdr jq perl curl git mise

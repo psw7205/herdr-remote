@@ -165,24 +165,122 @@ func TestInvalidTranscriptDisablesChatWriteButKeepsTerminal(t *testing.T) {
 	}
 }
 
-func TestVerifiedBindingKeepsTerminalWhenTranscriptIsMissing(t *testing.T) {
+// emptyRegistry returns a Registry whose pane w1:p2 is verified as
+// claude:nativeA with binding "A" before any transcript exists.
+func emptyRegistry(t *testing.T) (*Registry, *fakeHerdr, string) {
+	t.Helper()
 	root := t.TempDir()
-	a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term-a", Agent: "claude", Status: "idle"}
-	f := &fakeHerdr{agents: []herdr.Agent{a}, bindings: map[string]herdr.Binding{a.PaneID: {Token: "bound", TerminalID: a.TerminalID, NativeSessionID: "11111111-1111-4111-8111-111111111111", ProcessID: 12, Agent: "claude", CWD: "repo"}}}
-	r := NewRegistry(context.Background(), f, root)
-	if err := r.Refresh(context.Background()); err != nil {
+	a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle", CWD: "repo"}
+	f := &fakeHerdr{agents: []herdr.Agent{a}, bindings: map[string]herdr.Binding{a.PaneID: {Token: "A", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	r := NewRegistry(ctx, f, root)
+	if err := r.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
-	item := r.List()[0]
-	if item.Chat || !item.Terminal || item.Binding != "bound" {
-		t.Fatalf("lost safe Terminal fallback %+v", item)
+	return r, f, root
+}
+
+// A verified session whose transcript does not exist yet (Claude Code writes
+// it with the first message) is listed as its native session with an empty
+// Chat, so the first prompt can be sent from Chat; the transcript is picked up
+// under the same ID once it exists.
+func TestVerifiedSessionWithoutTranscriptOpensEmptyChat(t *testing.T) {
+	r, f, root := emptyRegistry(t)
+	ctx := context.Background()
+	id := "claude:" + nativeA
+	items := r.List()
+	if len(items) != 1 || items[0].ID != id || !items[0].Chat || !items[0].Terminal || items[0].Binding != "A" || items[0].Lifecycle != LifecycleActive || items[0].LastMessage != nil {
+		t.Fatalf("empty session not listed as its native session: %+v", items)
 	}
-	if err := r.BoundInput(context.Background(), item.ID, "bound", "terminal_input", "\x1b"); err != nil {
+	snap, _, err := r.Get(id)
+	if err != nil || string(snap.Data) != "[]" {
+		t.Fatalf("empty history %s %v", snap.Data, err)
+	}
+	if watcherOf(r, id) != nil {
+		t.Fatal("watcher started without a transcript")
+	}
+	if err := r.BoundInput(ctx, id, "A", "prompt", "first"); err != nil {
+		t.Fatalf("first prompt rejected: %v", err)
+	}
+	if err := r.BoundInput(ctx, id, "A", "terminal_input", "\x1b"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.BoundInput(context.Background(), item.ID, "bound", "prompt", "unsafe"); err == nil {
-		t.Fatal("Chat prompt enabled without transcript")
+	if f.inputs != 2 {
+		t.Fatalf("Herdr received %d writes", f.inputs)
 	}
+	assertTokenRejected(t, r, id, "B", "")
+
+	writeTranscript(t, root, "repo", nativeA)
+	if err := r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if items := r.List(); len(items) != 1 || items[0].ID != id || !items[0].Chat || items[0].Binding != "A" {
+		t.Fatalf("item re-keyed when its transcript appeared: %+v", items)
+	}
+	if watcherOf(r, id) == nil {
+		t.Fatal("no watcher after the transcript appeared")
+	}
+	if loaded := waitHistory(t, r, id, "u-"+nativeA); loaded.Cursor.Epoch == snap.Cursor.Epoch {
+		t.Fatal("first transcript read kept the empty epoch")
+	}
+	if items := r.List(); items[0].LastMessage == nil || items[0].LastMessage.Role != "user" {
+		t.Fatalf("preview missing after the transcript appeared: %+v", items)
+	}
+}
+
+func TestEmptySessionKeepsContinuityAndFindsTranscriptWithoutBinding(t *testing.T) {
+	r, f, root := emptyRegistry(t)
+	ctx := context.Background()
+	id := "claude:" + nativeA
+	f.bindingErr = errUnverified
+	if err := r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if items := r.List(); len(items) != 1 || items[0].ID != id || items[0].Lifecycle != LifecycleUnverified || !items[0].Chat {
+		t.Fatalf("empty session lost continuity: %+v", items)
+	}
+	assertNoWrites(t, r, f, id)
+	writeTranscript(t, root, "repo", nativeA)
+	if err := r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if watcherOf(r, id) == nil {
+		t.Fatal("unverified item did not pick up its transcript")
+	}
+	waitHistory(t, r, id, "u-"+nativeA)
+	assertNoWrites(t, r, f, id)
+}
+
+func TestEmptySessionClosesChatWhileTranscriptIsAmbiguous(t *testing.T) {
+	r, f, root := emptyRegistry(t)
+	ctx := context.Background()
+	id := "claude:" + nativeA
+	writeTranscript(t, root, "repo", nativeA)
+	writeTranscript(t, root, "repo-copy", nativeA)
+	if err := r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	items := r.List()
+	if len(items) != 1 || items[0].ID != id || items[0].Chat || !items[0].Terminal || items[0].Binding != "A" {
+		t.Fatalf("ambiguous transcript left Chat open: %+v", items)
+	}
+	if err := r.BoundInput(ctx, id, "A", "prompt", "x"); err == nil || f.inputs != 0 {
+		t.Fatal("prompt accepted while the transcript is ambiguous")
+	}
+	if watcherOf(r, id) != nil {
+		t.Fatal("watcher started on an ambiguous transcript")
+	}
+	if err := os.Remove(filepath.Join(root, "projects", "repo-copy", nativeA+".jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if items := r.List(); len(items) != 1 || items[0].ID != id || !items[0].Chat || watcherOf(r, id) == nil {
+		t.Fatalf("resolved transcript did not reopen Chat: %+v", items)
+	}
+	waitHistory(t, r, id, "u-"+nativeA)
 }
 
 func TestTerminalRejectsPaneReplacedAfterClientOpened(t *testing.T) {
@@ -560,12 +658,19 @@ func TestPaneItemSupersededByVerifiedNativeSession(t *testing.T) {
 		err     error
 		want    string
 	}{
-		{"verified before the transcript exists", herdr.Binding{Token: "T", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"}, nil, LifecycleActive},
+		// A verified session whose ID matches several transcripts stays a
+		// pane: item until the ambiguity clears; one without any transcript
+		// is its native session from the start (see emptyRegistry).
+		{"verified while the transcript is ambiguous", herdr.Binding{Token: "T", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"}, nil, LifecycleActive},
 		{"never bound", herdr.Binding{}, errUnverified, LifecycleUnbound},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
+			writeTranscript(t, root, "repo", nativeA)
+			if tc.err == nil {
+				writeTranscript(t, root, "repo-copy", nativeA)
+			}
 			a := herdr.Agent{PaneID: "w1:p2", TerminalID: "term_a", Agent: "claude", Status: "idle", CWD: "repo"}
 			f := &fakeHerdr{agents: []herdr.Agent{a}, bindings: map[string]herdr.Binding{a.PaneID: tc.binding}, bindingErr: tc.err}
 			ctx, cancel := context.WithCancel(context.Background())
@@ -575,11 +680,11 @@ func TestPaneItemSupersededByVerifiedNativeSession(t *testing.T) {
 				t.Fatal(err)
 			}
 			old, next := "pane:w1:p2", "claude:"+nativeA
-			if items := r.List(); len(items) != 1 || items[0].ID != old || items[0].Lifecycle != tc.want {
+			if items := r.List(); len(items) != 1 || items[0].ID != old || items[0].Lifecycle != tc.want || items[0].Chat {
 				t.Fatalf("pane item %+v", items)
 			}
 			events := statusEvents(t, r, old)
-			writeTranscript(t, root, "repo", nativeA)
+			os.Remove(filepath.Join(root, "projects", "repo-copy", nativeA+".jsonl"))
 			f.bindingErr = nil
 			f.bindings[a.PaneID] = herdr.Binding{Token: "B", TerminalID: "term_a", NativeSessionID: nativeA, ProcessID: 12, Agent: "claude", CWD: "repo"}
 			if err := r.Refresh(ctx); err != nil {

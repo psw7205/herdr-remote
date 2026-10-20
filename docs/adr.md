@@ -2019,6 +2019,13 @@ Enter 전 재확인과 남는 window를 받아들인다), `herdr.conditional_inp
 유효하지 않다. "Binding·capability 손실은 lifecycle 종료가 아니다" 아래의 lifecycle 규칙과 알려진 한계는
 유효하며, 그 안의 "성공한 `agent.binding` 결과"는 Bridge가 계산한 binding으로 읽는다.
 
+2026-10-17 note([P1-19](https://github.com/psw7205/herdr-remote/issues/30)): 검증된 binding의 native session에
+transcript가 아직 없으면(Claude Code는 native ID를 process 시작 시 `sessions/<pid>.json`에 쓰고 transcript는 첫
+message에 만든다) `pane:<pane-id>`를 거치지 않고 처음부터 `claude:<native-id>` item이며 `chat: true`·빈 history다.
+Refresh마다 다시 resolve해 파일이 생기면 같은 item에서 watcher를 시작하고 새 epoch로 동기화한다. 같은 native ID의
+transcript가 2개 이상이면 지금처럼 `pane:` item·`chat: false`다. 따라서 아래 Supersession 규칙이 적용되는 경우는
+binding 없이 보이던 pane이 검증된 경우(신뢰 확인 수락 뒤)와 모호했던 transcript가 하나로 정리된 경우다.
+
 ### Decision
 
 Herdr가 native session, foreground process incarnation, terminal을 결합한 opaque binding을
@@ -2143,6 +2150,17 @@ stable release마다 rebase와 `just ci`·설치 검증을 거쳐 갱신한다. 
 ### Status
 
 Accepted (2026-09-28). 2026-09-29 구현, [P1-14](https://github.com/psw7205/herdr-remote/issues/13)
+
+2026-10-17 note([P1-19](https://github.com/psw7205/herdr-remote/issues/30)): "생성 이후"와 신뢰 확인 consequence는
+다음과 같이 바뀐다. Bridge가 binding을 검증하면(ADR-040) transcript가 없어도 새 session은 처음부터
+`claude:<native-id>` item이며 Chat이 빈 history로 열려 첫 prompt를 받는다(ADR-034 2026-10-17 note). client는 시작이
+`accepted`(code 없음·`AGENT_NOT_READY`·`AGENT_START_UNCONFIRMED`)면 receipt의 `created.pane_id`로 목록에서 그
+session을 찾아 바로 Chat으로 들어가고, session 화면의 상태가 준비 여부를 보여 준다. 신뢰 확인 같은 시작 화면에서는
+Claude가 `sessions/<pid>.json`을 아직 쓰지 않아 binding이 없고 `pane:<pane-id>`·`unbound`로 보이며, PC에서 수락하면
+`claude:` item이 그 pane을 supersede한다(격리 실측). 준비 대기는 `agent.get`을 이름으로, 이름이 풀리지 않으면
+pane으로 조회한다. Herdr는 새 pane의 shell 초기화 중 다른 agent CLI(예: completion 생성)를 잠깐 감지하면 managed
+name을 지우므로, pane의 `claude`가 `idle`/`done`이면 이름 없이도 준비로, `blocked`면 `AGENT_NOT_READY`로, 다른
+이름이나 terminal이면 `AGENT_START_UNCONFIRMED`로 본다.
 
 ### Context
 
