@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { dividerLabel, relativeTime } from './time'
+import { dividerLabel, durationLabel, relativeTime } from './time'
+
+describe('duration label', () => {
+  it('reads seconds, minutes and hours without zero parts', () => {
+    expect(durationLabel(400)).toBe('1초 미만')
+    expect(durationLabel(12_000)).toBe('12초')
+    expect(durationLabel(156_000)).toBe('2분 36초')
+    expect(durationLabel(120_000)).toBe('2분')
+    expect(durationLabel(3_900_000)).toBe('1시간 5분')
+    expect(durationLabel(7_200_000)).toBe('2시간')
+  })
+})
 
 const zone = 'Asia/Seoul'
 describe('relative time', () => {

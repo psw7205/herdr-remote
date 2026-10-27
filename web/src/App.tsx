@@ -8,6 +8,7 @@ import { SessionList } from './SessionList'
 import { StartSession } from './StartSession'
 import { TerminalView } from './TerminalView'
 import { useVisualViewportShell } from './viewport'
+import { useScreenWakeLock } from './wakeLock'
 
 const loadedBuild = loadedClientBuild(typeof document === 'undefined' ? null : document)
 
@@ -115,6 +116,9 @@ export function App() {
     navigate({ session: session.id, view: 'chat' }, true)
   }, [navigate])
   const startUnlisted = useCallback((text: string) => { setNotice(text); navigate(listRoute, true) }, [navigate])
+
+  // Scoped to watching a working agent rather than always on, to spare the battery.
+  useScreenWakeLock((route.view === 'chat' || route.view === 'terminal') && listed?.status === 'working')
 
   const chatSession = listed ?? (terminal?.id === route.session ? terminal : undefined)
   let screen

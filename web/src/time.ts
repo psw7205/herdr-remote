@@ -37,3 +37,14 @@ export function dividerLabel(previous: string | null, iso: string, timeZone?: st
   const date = new Intl.DateTimeFormat('ko-KR', { timeZone, month: 'long', day: 'numeric', weekday: 'short' }).format(at)
   return `${date} ${clock(at, timeZone)}`
 }
+
+export function durationLabel(ms: number): string {
+  const total = Math.round(ms / 1000)
+  if (total < 1) return '1초 미만'
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  if (hours > 0) return minutes > 0 ? `${hours}시간 ${minutes}분` : `${hours}시간`
+  if (minutes > 0) return seconds > 0 ? `${minutes}분 ${seconds}초` : `${minutes}분`
+  return `${seconds}초`
+}

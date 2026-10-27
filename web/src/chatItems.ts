@@ -61,3 +61,43 @@ export function toolsLive(session: Pick<Session, 'status' | 'active'> & Partial<
 export function toolState(tool: ToolActivity, live: boolean): ToolState {
   return tool.state === 'running' && !live ? 'unknown' : tool.state
 }
+
+export function entryKey(entry: ChatEntry): string {
+  return entry.kind === 'tools' ? entry.id : entry.message.id
+}
+
+export function entryEnd(entry: ChatEntry): string {
+  return entry.kind === 'tools' ? entry.tools.at(-1)!.timestamp : entry.message.timestamp
+}
+
+const isPrompt = (entry: ChatEntry): entry is { kind: 'message'; message: TextMessage } => entry.kind === 'message' && entry.message.role === 'user'
+
+export type TurnSummary = { duration?: number; answer?: TextMessage }
+
+// turnSummaries maps the key of each finished turn's last entry to its
+// summary. A turn runs from a user prompt through the agent's last item before
+// the next prompt; the final turn is finished only once the agent is not live.
+// The duration spans native transcript timestamps from the prompt to that
+// last item; the answer is the turn's last assistant text.
+export function turnSummaries(entries: ChatEntry[], live: boolean): Map<string, TurnSummary> {
+  const out = new Map<string, TurnSummary>()
+  let start = 0
+  while (start < entries.length) {
+    let end = start + 1
+    while (end < entries.length && !isPrompt(entries[end])) end += 1
+    const first = entries[start]
+    const last = entries[end - 1]
+    if (end < entries.length || !live) {
+      const summary: TurnSummary = {}
+      const duration = isPrompt(first) && last !== first ? Date.parse(entryEnd(last)) - Date.parse(first.message.timestamp) : Number.NaN
+      if (Number.isFinite(duration) && duration >= 0) summary.duration = duration
+      for (let index = end - 1; index >= start && !summary.answer; index -= 1) {
+        const entry = entries[index]
+        if (entry.kind === 'message' && entry.message.role === 'assistant' && entry.message.text.trim()) summary.answer = entry.message
+      }
+      if (summary.duration !== undefined || summary.answer) out.set(entryKey(last), summary)
+    }
+    start = end
+  }
+  return out
+}

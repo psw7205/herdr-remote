@@ -1,16 +1,17 @@
 import { Fragment, memo, useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowDown, FileDiff, RefreshCw, SquareTerminal, WifiOff } from 'lucide-react'
-import { MessageMarkdown } from './MessageMarkdown'
-import { applyMessageEvent, chatEntries, textCount, toolsLive } from './chatItems'
+import { ArrowDown, FileDiff, RefreshCw, SquareTerminal, TextQuote, WifiOff } from 'lucide-react'
+import { chatSelection } from './chatSelection'
+import { CopyButton, MessageMarkdown, renderedText } from './MessageMarkdown'
+import { applyMessageEvent, chatEntries, entryEnd, entryKey, textCount, toolsLive, turnSummaries, type TurnSummary } from './chatItems'
 import { chooseCommand, pendingCommandCopy, readPending, rejectedMessage, type PendingCommand } from './commandDelivery'
-import { chatUnavailableNotice, composerHint, eventURL, getSession, lifecycleNotice, sendCommand, sessionLifecycle, type Cursor, type Event, type Message, type Session } from './api'
+import { chatUnavailableNotice, composerHint, eventURL, getChanges, getSession, lifecycleNotice, sendCommand, sessionLifecycle, type Cursor, type Event, type Message, type Session } from './api'
 import { Composer, type ComposerStatus } from './Composer'
-import { readDraft, writeDraft } from './draftStore'
+import { appendQuote, readDraft, writeDraft } from './draftStore'
 import { Notice, type NoticeAction } from './Notice'
 import { agentName, projectName, statusPresentation } from './presentation'
 import { CLOSE_RETRY_MS, createReconnector } from './reconnect'
 import { StatusBadge } from './StatusBadge'
-import { dividerLabel } from './time'
+import { dividerLabel, durationLabel } from './time'
 import { ToolGroup } from './ToolActivity'
 import { TimeoutError, withTimeout } from './withTimeout'
 import { TopBar } from './TopBar'
@@ -27,30 +28,54 @@ const ACCEPTED_NOTICE_MS = 8000
 // snapshot on a slow link still completes instead of restarting forever.
 const SNAPSHOT_TIMEOUT_MS = 15000
 const SNAPSHOT_TIMEOUT_MAX_MS = 120000
+const BRANCH_REFRESH_MS = 30000
+const SELECTION_SETTLE_MS = 250
 
 // Memoized so typing in the composer or a metadata poll does not re-render
 // (and re-parse the Markdown of) a long conversation. Tool calls belong to the
 // agent's side of a turn.
 const MessageList = memo(function MessageList({ messages, agent, live }: { messages: Message[]; agent: string; live: boolean }) {
   const entries = chatEntries(messages)
+  const summaries = turnSummaries(entries, live)
   return entries.map((entry, index) => {
     const previous = entries[index - 1]
     const timestamp = entry.kind === 'tools' ? entry.tools[0].timestamp : entry.message.timestamp
-    const label = dividerLabel(previous ? (previous.kind === 'tools' ? previous.tools.at(-1)!.timestamp : previous.message.timestamp) : null, timestamp)
+    const label = dividerLabel(previous ? entryEnd(previous) : null, timestamp)
     const role = entry.kind === 'tools' ? 'assistant' : entry.message.role
     const turn = previous && (previous.kind === 'tools' ? 'assistant' : previous.message.role) !== role ? '' : undefined
     const divider = label && <div className={styles.divider} role="separator"><time dateTime={timestamp}>{label}</time></div>
-    if (entry.kind === 'tools') return <Fragment key={entry.id}>{divider}<div className={styles.tools} data-turn={turn}><ToolGroup tools={entry.tools} live={live} /></div></Fragment>
+    const summary = summaries.get(entryKey(entry))
+    const footer = summary && <TurnFooter summary={summary} />
+    if (entry.kind === 'tools') return <Fragment key={entry.id}>{divider}<div className={styles.tools} data-turn={turn}><ToolGroup tools={entry.tools} live={live} /></div>{footer}</Fragment>
     const { message } = entry
     return <Fragment key={message.id}>
       {divider}
       <article className={message.role === 'user' ? styles.user : styles.assistant} data-turn={turn}>
         <span className="visually-hidden">{message.role === 'user' ? '나' : agent}</span>
-        {message.role === 'user' ? <div className={styles.bubble}><MessageMarkdown text={message.text} /></div> : <MessageMarkdown text={message.text} />}
+        {message.role === 'user' ? <div className={styles.bubble}><MessageMarkdown text={message.text} /></div> : <MessageMarkdown text={message.text} id={answerID(message.id)} />}
       </article>
+      {footer}
     </Fragment>
   })
 })
+
+const answerID = (id: string) => `answer-${id}`
+
+export function TurnFooter({ summary }: { summary: TurnSummary }) {
+  const { answer, duration } = summary
+  const plain = () => {
+    if (!answer) return ''
+    const prose = document.getElementById(answerID(answer.id))
+    return (prose && renderedText(prose)) || answer.text
+  }
+  return <div className={styles.turnEnd}>
+    {answer && <span className={styles.turnActions}>
+      <CopyButton label="Markdown" description="답변을 Markdown으로 복사" read={() => answer.text} />
+      <CopyButton label="텍스트" description="답변을 텍스트로 복사" read={plain} />
+    </span>}
+    {duration !== undefined && <span className={styles.duration}>작업 시간 {durationLabel(duration)}</span>}
+  </div>
+}
 
 export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initial: Session; onBack: () => void; onTerminal: (session: Session) => void; onChanges?: (session: Session) => void }) {
   const [session, setSession] = useState(initial)
@@ -62,6 +87,8 @@ export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initia
   const [delivery, setDelivery] = useState<DeliveryStatus | null>(() => readPending(`command:${initial.id}`) ? { tone: 'warning', text: `이전 입력이 전달됐는지 확인하지 못했습니다. ${UNCERTAIN}`, kind: 'pending' } : null)
   const [sending, setSending] = useState(false)
   const [unsupported, setUnsupported] = useState(false)
+  const [branch, setBranch] = useState<string | undefined>(undefined)
+  const [selected, setSelected] = useState<string | null>(null)
   const cursor = useRef<Cursor | null>(null)
   const scroller = useRef<HTMLElement>(null)
   const content = useRef<HTMLDivElement>(null)
@@ -180,6 +207,48 @@ export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initia
     }
   }, [initial.id])
 
+  // Each listing runs git on the host, so the branch is read when the chat
+  // opens and on a later return to the page, never on the status poll.
+  const hasProject = Boolean(session.project)
+  useEffect(() => {
+    if (!hasProject) return
+    let request: AbortController | null = null
+    let last = 0
+    const load = () => {
+      if (request) return
+      const current = new AbortController()
+      request = current
+      last = Date.now()
+      getChanges(initial.id, current.signal)
+        .then(changes => { if (!current.signal.aborted) setBranch(changes.repository ? changes.branch : undefined) })
+        .catch(() => { if (!current.signal.aborted) setBranch(undefined) })
+        .finally(() => { if (request === current) request = null })
+    }
+    const visible = () => { if (document.visibilityState === 'visible' && Date.now() - last >= BRANCH_REFRESH_MS) load() }
+    load()
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      document.removeEventListener('visibilitychange', visible)
+      request?.abort()
+    }
+  }, [initial.id, hasProject])
+
+  // iOS fires selectionchange continuously while a handle is dragged, and a tap
+  // on the quote button collapses the selection before its click lands; the
+  // delay keeps the button and its text until the click has run.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const read = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => setSelected(chatSelection(document.getSelection(), content.current)), SELECTION_SETTLE_MS)
+    }
+    document.addEventListener('selectionchange', read)
+    return () => {
+      document.removeEventListener('selectionchange', read)
+      clearTimeout(timer)
+    }
+  }, [])
+
   const clearPending = () => {
     sessionStorage.removeItem(`command:${session.id}`)
     setPending(null)
@@ -225,6 +294,14 @@ export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initia
   const lifecycle = sessionLifecycle(session)
   const controllable = lifecycle === 'active' && session.active && session.chat && Boolean(session.runtime_binding)
   const canPrompt = controllable && ['idle', 'completed'].includes(session.status)
+  // While delivery is uncertain the draft is the pending command's text.
+  const quote = controllable && !pending && !sending ? selected : null
+  const quoteSelection = () => {
+    if (!quote) return
+    setDraft(current => appendQuote(current, quote))
+    document.getSelection()?.removeAllRanges()
+    setSelected(null)
+  }
   // Stop stays available beside whichever status line is showing.
   const stopAction: NoticeAction[] = controllable && session.status === 'working' ? [{ label: '작업 중단', onClick: () => void interrupt() }] : []
   const pendingActions: NoticeAction[] = pending && !sending ? [...terminalAction, { label: pendingCopy.action, onClick: () => { clearPending(); setDraft(''); setDelivery({ tone: 'neutral', text: pendingCopy.cleared }) } }] : []
@@ -260,8 +337,10 @@ export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initia
           {loaded && messages.length === 0 && session.chat && <p className={styles.empty}>아직 대화가 없습니다.</p>}
         </div>
       </main>
-      {away && <button type="button" className={styles.jump} onClick={() => toBottom(true)}><ArrowDown aria-hidden size={16} />{unseen > 0 ? `새 메시지 ${unseen}개` : '최신으로'}</button>}
+      {quote
+        ? <button type="button" className={styles.jump} onPointerDown={event => event.preventDefault()} onClick={quoteSelection}><TextQuote aria-hidden size={16} />선택한 글 인용</button>
+        : away && <button type="button" className={styles.jump} onClick={() => toBottom(true)}><ArrowDown aria-hidden size={16} />{unseen > 0 ? `새 메시지 ${unseen}개` : '최신으로'}</button>}
     </div>
-    <Composer draft={draft} onDraft={setDraft} canType={controllable} canSend={canPrompt} sending={sending} onSend={() => void send()} status={status} />
+    <Composer draft={draft} onDraft={setDraft} canType={controllable} canSend={canPrompt} sending={sending} onSend={() => void send()} status={status} place={session.project ? { folder: projectName(session.project), branch } : null} />
   </div>
 }

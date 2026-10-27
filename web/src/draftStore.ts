@@ -45,3 +45,15 @@ function evict(store: DraftStorage, keep: string) {
   drafts.sort((a, b) => a.updated - b.updated)
   for (const { key } of drafts.slice(0, excess)) store.removeItem(key)
 }
+
+export function appendQuote(draft: string, selection: string): string {
+  const lines = selection.replace(/\s+$/, '').split(/\r?\n/)
+  if (lines.every(line => line.trim() === '')) return draft
+  const quote = lines.map(line => line ? `> ${line}` : '>').join('\n') + '\n\n'
+  const head = draft.replace(/\s+$/, '')
+  return head ? `${head}\n\n${quote}` : quote
+}
+
+export function appendQuoteToDraft(id: string, selection: string, storage?: DraftStorage) {
+  writeDraft(id, appendQuote(readDraft(id, storage), selection), storage)
+}

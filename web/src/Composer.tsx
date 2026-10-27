@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from 'react'
-import { ArrowUp, Check, CircleAlert, Info, LoaderCircle, TriangleAlert } from 'lucide-react'
+import { ArrowUp, Check, CircleAlert, Folder, GitBranch, Info, LoaderCircle, TriangleAlert } from 'lucide-react'
 import type { NoticeAction } from './Notice'
 import styles from './Composer.module.css'
 import ui from './ui.module.css'
@@ -13,7 +13,7 @@ const MAX_HEIGHT = 168
 // The send button never turns into Stop: a status poll can change the agent's
 // state under a finger, and a mistaken interrupt ends a turn. Stop is offered
 // as a status action instead.
-export function Composer({ draft, onDraft, canType, canSend: sendable, sending, onSend, status }: {
+export function Composer({ draft, onDraft, canType, canSend: sendable, sending, onSend, status, place }: {
   draft: string
   onDraft: (text: string) => void
   canType: boolean
@@ -21,6 +21,7 @@ export function Composer({ draft, onDraft, canType, canSend: sendable, sending, 
   sending: boolean
   onSend: () => void
   status: ComposerStatus | null
+  place?: { folder: string; branch?: string } | null
 }) {
   const field = useRef<HTMLTextAreaElement>(null)
   useLayoutEffect(() => {
@@ -53,5 +54,9 @@ export function Composer({ draft, onDraft, canType, canSend: sendable, sending, 
       />
       <button type="submit" className={styles.primary} aria-label={sending ? '전달하는 중' : '보내기'} disabled={!canSend}>{sending ? <LoaderCircle className={styles.spin} aria-hidden size={20} /> : <ArrowUp aria-hidden size={20} strokeWidth={2.5} />}</button>
     </div>
+    {place && <p className={styles.place}>
+      <span className={styles.placeItem} title={place.folder}><Folder aria-hidden size={13} /><span className="visually-hidden">작업 폴더 </span><span className={styles.placeText}>{place.folder}</span></span>
+      {place.branch && <span className={styles.placeItem} title={place.branch}><GitBranch aria-hidden size={13} /><span className="visually-hidden">branch </span><span className={styles.placeText} translate="no">{place.branch}</span></span>}
+    </p>}
   </form>
 }

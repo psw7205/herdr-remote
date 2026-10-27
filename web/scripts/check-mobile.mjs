@@ -73,6 +73,9 @@ async function inputChecks(page) {
   const checks = []
   const check = (name, observed, pass) => checks.push({ name, ...observed, pass })
 
+  const attributes = await page.evaluate(`(() => { const ta = ${textarea}; return { autocomplete: ta.getAttribute('autocomplete'), autocorrect: ta.getAttribute('autocorrect'), spellcheck: ta.getAttribute('spellcheck') } })()`)
+  check('the terminal input asks the keyboard for no suggestions', attributes, attributes.autocomplete === 'off' && attributes.autocorrect === 'off' && attributes.spellcheck === 'false')
+
   await page.send('Input.insertText', { text: 'ab' })
   await sleep(150)
   let got = await page.evaluate(state)

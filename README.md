@@ -34,7 +34,7 @@ repo와 Go module 이름은 `herdr-remote`다.
 | Claude Code / macOS | 기존 session 발견, Chat, prompt, interrupt, Terminal fallback |
 | 대화 복구 | incremental JSONL, snapshot/replay/live, Bridge 재시작 뒤 복구 |
 | 입력 보호 | Bridge의 binding 재확인(text 전·Enter 전), durable command receipt, 같은 command 재전송 방지 |
-| 모바일 UI | 상태별 session 목록, Chat, light/dark theme, code 복사, 특수 키가 있는 Terminal, PWA. 실기기 keyboard와 설치형 PWA는 미검증 |
+| 모바일 UI | 상태별 session 목록, Chat, light/dark theme, code·답변 복사, turn 작업 시간, 선택한 글 인용, 입력창 아래 폴더·branch, 특수 키가 있는 Terminal, 작업 중 화면 꺼짐 방지, PWA. Terminal 선택 인용은 mouse·trackpad만. 실기기 keyboard와 설치형 PWA는 미검증 |
 | Tailnet | Serve 경유 소유자 phone에서 Chat·prompt·Terminal 확인. 화면 잠금·네트워크 전환 뒤 reconnect와 다른 사용자 거부의 실측은 미검증 |
 | Codex CLI | Herdr Codex hook이 보고한 session의 rollout을 read-only Chat으로 표시(ADR-038). prompt·interrupt·Terminal은 미지원. 실제 Herdr Codex pane에서는 미실측 |
 | 새 session 생성 | `-project-root` 아래 Git repo의 새 workspace나 열린 workspace의 새 tab에서 Herdr로 Claude를 시작(ADR-037). 격리 Herdr에서 실측, 실기기는 사용 중 확인 |

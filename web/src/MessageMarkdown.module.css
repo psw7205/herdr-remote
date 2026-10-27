@@ -66,6 +66,7 @@
   font-size: var(--text-label);
   color: var(--muted);
 }
+.codeHeader[hidden] { display: none; }
 .copy {
   display: inline-flex;
   align-items: center;

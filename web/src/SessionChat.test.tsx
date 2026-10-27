@@ -55,4 +55,8 @@ describe('composer controls', () => {
     expect(render({ ...session, status: 'idle' })).not.toContain('작업 중단')
     expect(render({ ...session, status: 'needs_attention' })).not.toContain('작업 중단')
   })
+  it('names the project folder under the composer before the branch is read, and nothing without a project', () => {
+    expect(render(session)).toMatch(/작업 폴더 <\/span><span[^>]*>a<\/span>/)
+    expect(render({ ...session, project: '' })).not.toContain('작업 폴더')
+  })
 })

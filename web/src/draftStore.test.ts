@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DRAFT_LIMIT, readDraft, writeDraft } from './draftStore'
+import { DRAFT_LIMIT, appendQuote, appendQuoteToDraft, readDraft, writeDraft } from './draftStore'
 
 class MemoryStorage {
   private items = new Map<string, string>()
@@ -86,5 +86,26 @@ describe('draft store', () => {
   it('falls back silently when the platform has no localStorage', () => {
     expect(() => writeDraft('a', 'text')).not.toThrow()
     expect(readDraft('a')).toBe('')
+  })
+})
+
+describe('quote', () => {
+  it('quotes each line and leaves the cursor on a fresh line', () => {
+    expect(appendQuote('', '첫 줄\n\n셋째 줄\n')).toBe('> 첫 줄\n>\n> 셋째 줄\n\n')
+  })
+
+  it('separates the quote from existing text by one blank line', () => {
+    expect(appendQuote('이전 초안\n', 'a')).toBe('이전 초안\n\n> a\n\n')
+  })
+
+  it('ignores a selection with no text', () => {
+    expect(appendQuote('초안', ' \n\t')).toBe('초안')
+  })
+
+  it('appends to the stored draft of a session that is not open', () => {
+    const storage = new MemoryStorage()
+    writeDraft('claude:a', '초안', storage)
+    appendQuoteToDraft('claude:a', 'terminal line', storage)
+    expect(readDraft('claude:a', storage)).toBe('초안\n\n> terminal line\n\n')
   })
 })

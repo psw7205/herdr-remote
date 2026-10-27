@@ -254,6 +254,11 @@ frame이나 raw output history를 보장하지 않는다
   이전 전송이 끝난 뒤에 보낸다. 손을 떼거나 결과가 `accepted`가 아니면 멈춘다. key bar를 가로로 밀어 browser가
   pointer를 취소(`pointercancel`)하거나 손가락이 key 밖(12px 여유)으로 나가거나 화면이 hidden이 되거나
   `runtime_binding`이 바뀌면 그 뒤로 보내지 않고, 400ms 전이면 아무것도 보내지 않는다(`web/src/holdRepeat.ts`).
+- xterm 선택이 있는 동안에는 받은 frame을 그리지 않는다. 다음 frame의 reset이 선택을 지우기 때문이다. 선택 bar가
+  멈춤을 알리고, 선택 해제·입력 뒤 다시 그린다. 선택한 text는 같은 session의 Chat 초안 끝에 Markdown 인용으로
+  붙일 수 있다(`appendQuoteToDraft`). 전달 미확정 command가 있으면 Chat이 그 text로 초안을 덮으므로 인용을 막는다.
+  xterm 6에는 터치 drag 선택이 없어 mouse·trackpad 선택에서만 쓸 수 있다.
+- xterm 입력 textarea에 `autocomplete="off"`를 더한다. Android Chrome은 이 속성만 keyboard의 추천 끄기 flag로 바꾼다.
 - `pane.read`와 `pane.layout`은 별도 호출이라 그 사이의 resize를 구분하지 못한다.
 
 ### 4.5 새 session 시작
@@ -322,7 +327,8 @@ Chat의 변경된 파일 버튼 → #session=<id>&view=changes
 - filter를 비우므로 Git LFS처럼 clean filter가 있는 파일은 index의 stat이 낡은 동안(commit 직후 같은 racy
   상태, 파일 시각만 바뀐 경우) `modified`로 보이고 diff는 pointer가 실제 내용으로 바뀐 모양이다. 사용자의
   `git status` 등이 index를 갱신하면 사라진다. Bridge는 index를 쓰지 않는다.
-- server polling, watcher, WS event, 저장은 없다. client가 화면을 열거나 새로 고칠 때만 읽는다.
+- server polling, watcher, WS event, 저장은 없다. client가 화면을 열거나 새로 고칠 때만 읽는다. Chat은 입력창 아래
+  branch 표시를 위해 열 때 한 번, 다시 보일 때 마지막 조회 뒤 30초가 지났으면 한 번 같은 API를 부른다.
 - 근거: [ADR-016](adr.md#adr-016--changed-files는-git을-read-only-source로-사용한다),
   [ADR-014](adr.md#adr-014--file-editing은-제공하지-않고-review까지만-지원한다).
 

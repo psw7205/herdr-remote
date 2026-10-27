@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { repaint, stepAway } from './TerminalView'
+import { quoteBlocked, repaint, stepAway } from './TerminalView'
 
 describe('repaint', () => {
   it('carries the reset in the same write as the frame', () => {
@@ -21,5 +21,17 @@ describe('stepAway', () => {
   })
   it('moves below on the first row', () => {
     expect(stepAway(0)).toBe('\x1b[2;1H')
+  })
+})
+
+describe('quoteBlocked', () => {
+  it('allows a quote into a Chat with no pending command', () => {
+    expect(quoteBlocked({ chat: true }, false)).toBeNull()
+  })
+  it('blocks while a command waits on delivery, since the Chat would drop the draft', () => {
+    expect(quoteBlocked({ chat: true }, true)).toMatch(/확인한 뒤/)
+  })
+  it('blocks a session without a Chat', () => {
+    expect(quoteBlocked({ chat: false }, false)).toMatch(/Chat이 없어/)
   })
 })

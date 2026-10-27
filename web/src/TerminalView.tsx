@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
-import { ArrowDown, ArrowUp, CornerDownLeft, ZoomIn, ZoomOut } from 'lucide-react'
+import { ArrowDown, ArrowUp, CornerDownLeft, Quote, ZoomIn, ZoomOut } from 'lucide-react'
 import { sendCommand, terminalFrame, type Session } from './api'
+import { readPending } from './commandDelivery'
+import { appendQuoteToDraft } from './draftStore'
 import { startHold, type Hold } from './holdRepeat'
 import { Notice } from './Notice'
 import { agentName } from './presentation'
@@ -59,6 +61,14 @@ export function stepAway(cursorY: number): string {
   return `\x1b[${cursorY === 0 ? 2 : cursorY};1H`
 }
 
+// SessionChat restores a pending command over the stored draft and empties
+// the draft while it waits, so a quote added then would be dropped unseen.
+export function quoteBlocked(session: Pick<Session, 'chat'>, pending: boolean): string | null {
+  if (!session.chat) return '이 세션은 Chat이 없어 인용할 수 없습니다.'
+  if (pending) return '이전 입력이 전달됐는지 Chat에서 확인한 뒤 인용할 수 있습니다.'
+  return null
+}
+
 export function TerminalView({ session, onBack }: { session: Session; onBack: () => void }) {
   const root = useRef<HTMLDivElement>(null)
   const container = useRef<HTMLDivElement>(null)
@@ -70,11 +80,25 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
   const refit = useRef<() => void>(() => {})
   const follow = useRef<() => void>(() => {})
   const ime = useRef<{ reset(): void; dispose(): void } | null>(null)
+  // An object, so every read re-renders and checks the pending command again.
+  const [{ text: selection }, setSelection] = useState({ text: '' })
+  const [quoted, setQuoted] = useState(false)
+  const unselect = useRef<() => void>(() => {})
+  const pendingKey = `command:${session.id}`
+  const blocked = selection ? quoteBlocked(session, readPending(pendingKey) !== null) : null
+  const quote = () => {
+    if (!selection || quoteBlocked(session, readPending(pendingKey) !== null)) return
+    appendQuoteToDraft(session.id, selection)
+    unselect.current()
+    setQuoted(true)
+  }
   // A finger on the screen is reading or pinching; input must not pull the view away from it.
   const touching = useRef(false)
   const sender = useRef<Promise<unknown>>(Promise.resolve())
   const emit = (type: 'terminal_input' | 'interrupt', text: string): Promise<boolean> => {
     if (!touching.current) follow.current()
+    setQuoted(false)
+    unselect.current()
     const sent = sender.current.then(async () => {
       const response = await sendCommand(session, type, text, crypto.randomUUID())
       if (response.status === 'accepted') return true
@@ -123,6 +147,16 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
     let term: import('@xterm/xterm').Terminal | undefined
     let timer: ReturnType<typeof setInterval> | undefined
     let input: { dispose(): void } | undefined
+    let selecting: { dispose(): void } | undefined
+    const readSelection = () => {
+      const text = term?.getSelection() ?? ''
+      setSelection({ text })
+      if (text) setQuoted(false)
+    }
+    // xterm fires no selection change for a drag over the same cells as the
+    // selection it last reported, even after clearSelection(), so a drag's end
+    // is read too. Its own drag listeners sit on the document, ahead of window.
+    window.addEventListener('mouseup', readSelection)
     let observer: ResizeObserver | undefined
     let recent: GridSize[] = []
     let painted: string | null = null
@@ -255,8 +289,14 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
       if (!active || !container.current) return
       term = new Terminal({ cols: 120, rows: 40, convertEol: true, scrollback: 0, fontSize: 12, fontFamily: FONT_FAMILY, theme: { background: '#0a0c10', foreground: '#cdd1d6' } })
       term.open(container.current)
+      // xterm turns off autocorrect and spellcheck but not autocomplete, and
+      // Chrome on Android sets the keyboard's no-suggestions flag only from
+      // autocomplete="off", so Gboard kept suggesting and rewriting words.
+      term.textarea?.setAttribute('autocomplete', 'off')
       input = term.onData(text => emit('terminal_input', text))
       ime.current = attachImeInput(term, text => { void emit('terminal_input', text) })
+      selecting = term.onSelectionChange(readSelection)
+      unselect.current = () => term?.clearSelection()
       let height = container.current.clientHeight
       // Growing cannot hide the cursor, and closing the keyboard keeps the input
       // focused, so only a shrink follows it; a reader stays put.
@@ -275,6 +315,9 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
         try {
           const frame = await withTimeout(signal => terminalFrame(session, signal), FRAME_TIMEOUT_MS, unmount.signal)
           if (!active || !term) return
+          // A redraw starts with RIS, which clears the selection, so the frame
+          // holds while one is open.
+          if (term.hasSelection()) { setError(''); return }
           const sized = gridSize({ cols: frame.cols, rows: frame.rows }, frameDimensions(frame.text), recent)
           const next = sized.grid
           recent = sized.recent
@@ -291,7 +334,7 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
       timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 1000)
     })
     return () => {
-      active = false; unmount.abort(); refit.current = () => {}; follow.current = () => {}; if (timer) clearInterval(timer); observer?.disconnect(); input?.dispose(); ime.current?.dispose(); ime.current = null; term?.dispose()
+      active = false; unmount.abort(); refit.current = () => {}; follow.current = () => {}; unselect.current = () => {}; if (timer) clearInterval(timer); observer?.disconnect(); input?.dispose(); selecting?.dispose(); ime.current?.dispose(); ime.current = null; term?.dispose()
       touching.current = false
       host.removeEventListener('touchstart', onTouch)
       host.removeEventListener('touchend', onTouch)
@@ -301,6 +344,7 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
       host.removeEventListener('touchend', onTouchEnd)
       host.removeEventListener('touchcancel', onTouchEnd)
       host.removeEventListener('contextmenu', onContextMenu)
+      window.removeEventListener('mouseup', readSelection)
     }
   }, [session.id, session.runtime_binding])
   // The Terminal stays dark in both themes, like the pane it mirrors.
@@ -317,7 +361,22 @@ export function TerminalView({ session, onBack }: { session: Session; onBack: ()
       </div>}
     />
     {error && <div className={styles.notice}><Notice tone="warning">{error}</Notice></div>}
-    <div className={styles.shell} ref={container} />
+    <div className={styles.stage}>
+      <div className={styles.shell} ref={container} />
+      {(selection || quoted) && <div className={styles.selection} role="status" onMouseDown={event => event.preventDefault()}>
+        {selection
+          ? <>
+            <span className={styles.selectionText}>{blocked ?? `${selection.split(/\r?\n/).length}줄 선택됨 · 새로고침 멈춤`}</span>
+            <button type="button" className={ui.button} onClick={() => unselect.current()}>선택 해제</button>
+            <button type="button" className={ui.button} onClick={quote} disabled={blocked !== null}><Quote aria-hidden size={16} />Chat에 인용</button>
+          </>
+          : <>
+            <span className={styles.selectionText}>Chat 초안에 인용했습니다.</span>
+            <button type="button" className={ui.button} onClick={() => setQuoted(false)}>닫기</button>
+            <button type="button" className={ui.button} onClick={onBack}>Chat 열기</button>
+          </>}
+      </div>}
+    </div>
     {/* A tap would move focus to the button and close the soft keyboard the xterm input opened. */}
     <div className={styles.keys} role="group" aria-label="Terminal 특수 키" onMouseDown={event => event.preventDefault()}>
       <button type="button" className={styles.key} onClick={() => emit('terminal_input', '\x1b')}>Esc</button>
