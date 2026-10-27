@@ -11,7 +11,7 @@ pane 입력으로 전달한다([ADR-040](adr.md#adr-040--입력-검증을-bridge
 Bridge는 agent를 직접 실행하거나 resume하지 않고 conversation을 저장하지 않는다. 새 session은
 사용자 요청이 있을 때 Herdr 공개 API로만 요청한다. session 폴더의 Git 변경은 `git` CLI로 읽기만 한다. 결정의 근거는
 각 ADR을, 검증 절차는 [CONTRIBUTING](../CONTRIBUTING.md#변경별-검증)을,
-남은 작업과 검증 요약은 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)를 따른다.
+남은 개발 작업은 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)를 따른다.
 
 ### 용어
 
@@ -406,7 +406,7 @@ continuity, supersession, `ended` 판정 규칙은
   실패하면 localhost 전용으로 동작한다. Funnel과 wildcard CORS는 지원하지 않는다.
 
 근거와 위협 모델은 [ADR-024](adr.md#adr-024--tailnet을-primary-security-boundary로-사용한다)를 따른다.
-network 계층 ACL은 [P0-03](https://github.com/psw7205/herdr-remote/issues/2)이다.
+network 계층 ACL은 Bridge 범위 밖이며 tailnet 소유자가 관리한다. 다른 tailnet 사용자 identity 거부는 unit test로만 확인했다.
 
 ## 8. Invariants
 
@@ -427,8 +427,8 @@ network 계층 ACL은 [P0-03](https://github.com/psw7205/herdr-remote/issues/2)�
 | I13 | Terminal은 Herdr PTY 크기를 바꾸지 않는다 | Terminal 경로는 read-only `pane.read`·`pane.layout`만 호출. `internal/herdr`에 resize·attach·takeover 호출 없음 |
 | I14 | Changed Files는 Git repository를 바꾸지 않고 repo config의 명령을 실행하지 않는다 | `internal/gitstate`의 고정 인자·환경, `--no-optional-locks`·`diff-index`, filter·fsmonitor·hook·외부 diff 차단. `TestRepoConfigRunsNothing`이 marker와 index 불변으로 확인 |
 
-실제 검증 범위와 미검증 scenario는 관련 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)의
-결과 요약과 code·test 근거를 따른다. 조사·실측 상세는 공개 문서의 필수 근거가 아니다.
+각 invariant의 근거는 강제 위치의 code·test다. 실측하지 않은 경계는 [§10](#10-미구현-경계)에 둔다.
+조사·실측 상세는 공개 문서의 필수 근거가 아니다.
 
 ## 9. 기술 선택
 
@@ -442,19 +442,21 @@ network 계층 ACL은 [P0-03](https://github.com/psw7205/herdr-remote/issues/2)�
 | Transport | semantic event는 WebSocket, Terminal frame은 HTTP polling으로 물리적으로 분리([ADR-028](adr.md#adr-028--terminal-stream과-semantic-event-stream을-논리적으로-분리한다)) |
 | Transcript watch | transcript 파일 `fsnotify` + 1s polling reconciliation, offset 이후 incremental read |
 
-receipt 보존 기간과 buffer 운영은 [P2-06](https://github.com/psw7205/herdr-remote/issues/19), 장기 실행
-resource 상한은 [P1-13](https://github.com/psw7205/herdr-remote/issues/12)에서 다룬다.
+완성 receipt는 보존 기간 없이 남긴다. 지우면 오래된 `command_id`를 다시 수락하게 되기 때문이다. ring에서
+밀려난 payload와 오래된 receipt temp는 정리하고, 종료된 session item은 32개까지만 유지한다.
 
 ## 10. 미구현 경계
 
-| 영역 | 현재 | Issue |
-| --- | --- | --- |
-| Codex 입력 | Chat은 read-only다. Codex binding이 없어 prompt·interrupt·Terminal 없음. 실제 Herdr Codex pane의 hook 보고→Chat 표시는 미실측 | [P1-01](https://github.com/psw7205/herdr-remote/issues/4), [P1-02](https://github.com/psw7205/herdr-remote/issues/5) |
-| Structured permission/question | Terminal fallback만 있다 | [P2-02](https://github.com/psw7205/herdr-remote/issues/15) |
-| Attachment | route와 host file 처리 없음 | [P2-04](https://github.com/psw7205/herdr-remote/issues/17) |
-| Notification | Web Push 없음 | [P2-05](https://github.com/psw7205/herdr-remote/issues/18) |
-| Streaming delta | 완성된 JSONL text record만 전송하고, 그 사이는 `agent.status`의 `working`으로 표시한다. Claude transcript는 API message가 끝난 뒤 content block마다 완성된 record를 써서 delta source가 없다([표현 범위 결정](https://github.com/psw7205/herdr-remote/issues/9)). Codex는 미측정 | [P1-07](https://github.com/psw7205/herdr-remote/issues/9) |
-| 새 session의 다른 kind·worktree | `claude`만 허용. worktree 생성 없음 | [P1-01](https://github.com/psw7205/herdr-remote/issues/4), [P1-02](https://github.com/psw7205/herdr-remote/issues/5), [P2-09](https://github.com/psw7205/herdr-remote/issues/22) |
+| 영역 | 현재 |
+| --- | --- |
+| Codex 입력 | Chat은 read-only다. Codex binding이 없어 prompt·interrupt·Terminal 없음. 실제 Herdr Codex pane의 hook 보고→Chat 표시는 미실측 |
+| Structured permission/question | Terminal fallback만 있다 |
+| Attachment | route와 host file 처리 없음 |
+| Notification | Web Push 없음 |
+| Streaming delta | 완성된 JSONL text record만 전송하고, 그 사이는 `agent.status`의 `working`으로 표시한다. Claude transcript는 API message가 끝난 뒤 content block마다 완성된 record를 써서 delta source가 없다. Codex는 미측정 |
+| 새 session의 다른 kind·worktree | `claude`만 허용. worktree 생성 없음 |
+| 작업 중 전송 | working 중 prompt는 `AGENT_NOT_READY`로 거부하고 typing만 연다([#32](https://github.com/psw7205/herdr-remote/issues/32)) |
+| Desktop 입력 줄 draft | binding은 입력 줄 내용을 보지 않는다. desktop 입력 줄에 draft가 있으면 mobile prompt와 합쳐져 한 message로 제출된다([#31](https://github.com/psw7205/herdr-remote/issues/31)) |
 
 ## Decision Priority
 

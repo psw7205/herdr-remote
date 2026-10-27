@@ -3,8 +3,7 @@
 ## 시작 전
 
 - 응답과 새 문서는 한국어로 작성한다. code, identifiers, API 이름은 English를 유지한다.
-- `README.md`로 실행 조건을, GitHub Issues(`gh issue list`)로 남은 작업을 확인한다. label `P0`~`P2`는 우선순위,
-  `in-use`·`blocked`·`optional`은 상태다.
+- `README.md`로 실행 조건을, GitHub Issues(`gh issue list`)로 남은 개발 작업을 확인한다. label `P0`~`P2`는 우선순위다.
 - 요구와 architecture 결정은 `docs/prd.md`, `docs/adr.md`를 기준으로 한다. PRD는 결정 snapshot이며 현재 구조는
   `docs/architecture.md`가 설명한다. 구현 사실은 code와 runtime에서 검증한다.
 - 문서 배치와 갱신 규칙은 `docs/README.md`를 따른다.
@@ -65,13 +64,17 @@ Package manager는 pnpm, toolchain 기준은 `mise.toml`이다.
 
 검증 수준은 실패 형태로 정한다. 잘못된 process 입력, 중복 dispatch, agent가 모르게 멈추는 경우,
 identity·Origin 경계처럼 조용히 실패하거나 되돌릴 수 없는 변경은 unit test와 격리 Herdr 실측을
-완료 조건으로 둔다. 화면에 드러나고 새로고침·재시도로 복구되는 UI·실기기 동작은 test와 fixture
-확인 뒤 issue에 `in-use` label을 두고 사용하면서 고친다. 실기기 확인이 없다는 이유로 다른 작업을 막지 않는다.
+완료 조건으로 둔다. 화면에 드러나고 새로고침·재시도로 복구되는 UI·실기기 동작은 test·fixture와
+emulator 확인으로 완료하고, 사용하다 발견한 문제는 새 issue로 연다. 실기기 확인이 없다는 이유로 다른 작업을 막지 않는다.
 
 Architecture 책임, persistence, identity, security, protocol 의미가 바뀌면 ADR을 추가하거나
-Status를 바꾸고 `docs/architecture.md`를 현재 상태로 고친다. PRD는 제품 범위가 바뀔 때만 고친다. 남은 작업은 GitHub issue로 관리한다. 기존 항목은 제목의 ID(`P1-02` 등)를 유지하고, 의존 관계는 본문에
+Status를 바꾸고 `docs/architecture.md`를 현재 상태로 고친다. PRD는 제품 범위가 바뀔 때만 고친다.
+
+Issue는 할 일과 완료 기준이 있는 개발 todo만 둔다. 검증 요약은 commit·PR 본문에, 현재 한계는
+`docs/architecture.md` §10과 `README.md` 지원 범위에 쓰고 issue 본문에 쌓지 않는다. 지금 할 계획이 없는
+항목은 열어 두지 않는다. 기존 항목은 제목의 ID(`P1-02` 등)를 유지하고, 의존 관계는 본문에
 `#N`으로 적는다. 완료는 commit이나 PR의 `Closes #N`으로 닫는다. 조사·실측 상세는 Git에서 제외한
-로컬 `docs/records/`에 보관하고, 공개 commit·issue에는 식별 정보 없는 결과 요약과 code·test 근거만 쓴다.
+로컬 `docs/records/`에 보관하고, 공개 commit·PR에는 식별 정보 없는 결과 요약과 code·test 근거만 쓴다.
 issue 생성·수정·닫기는 외부 게시이므로 사용자의 해당 요청에 따라 한다.
 
 Tracked 문서에는 개인 절대 경로를 쓰지 않는다. 현재 repo의 파일은 repo-relative 경로로,

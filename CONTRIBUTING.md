@@ -94,8 +94,7 @@ GitHub Actions(`.github/workflows/ci.yml`)는 push와 pull request마다 Ubuntu 
 4. WS/Bridge를 끊었다가 복구해 agent 지속, cursor epoch, replay 또는 새 snapshot을 확인한다.
 5. unsupported interaction은 같은 Terminal에서 처리하고, mobile 화면 전환 전후 PTY geometry를 비교한다.
 
-실행한 항목과 unit test로만 확인한 항목을 구분해 기록한다. 더 상세한 미완료 acceptance는
-[`P0` issue](https://github.com/psw7205/herdr-remote/issues?q=is%3Aissue+is%3Aopen+label%3AP0)를 따른다.
+실행한 항목과 unit test로만 확인한 항목을 구분해 기록한다.
 
 ## 격리 Herdr 환경
 
@@ -141,11 +140,11 @@ mise exec -- go run ./cmd/bridge -herdr-socket <e2e socket> -receipts-dir "$E2E/
   Claude 사용자 설정 `~/.claude.json`의 `projects`에서 임시 directory 경로 항목 삭제(신뢰 확인 수락이 남긴
   기록이다. 실행 중인 Claude도 이 파일을 쓰므로 백업 후 바꾸고 다시 확인한다) → default pane·PID 비교.
 - 조사·실측 상세는 Git에서 제외한 로컬 `docs/records/`에 날짜 section으로 보관한다. native ID·binding은
-  placeholder로 쓰고, 공개 commit·issue에는 식별 정보 없는 결과 요약과 code·test 근거만 남긴다.
+  placeholder로 쓰고, 공개 commit·PR에는 식별 정보 없는 결과 요약과 code·test 근거만 남긴다.
 
 ## Android emulator 확인
 
-issue가 "실기기"로 미룬 touch·keyboard·잠금·연결 끊김·PWA 동작은 Android emulator로 먼저 확인한다.
+touch·keyboard·잠금·연결 끊김·PWA 동작은 실기기 대신 Android emulator로 먼저 확인한다.
 `scripts/mobile-e2e/`가 그 환경을 만든다. 격리 Herdr 환경(위 절)을 script로 묶은 것이라 같은 규칙이 적용된다.
 
 ```sh

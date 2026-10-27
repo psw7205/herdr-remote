@@ -155,7 +155,7 @@ export function SessionChat({ initial, onBack, onTerminal, onChanges }: { initia
     // A socket that was open or still shaking hands when the device slept or
     // changed networks may be dead without the browser noticing for minutes, so
     // the foreground return closes it and reconnects at once. A network return
-    // closes only a pending handshake; an open socket is left alone (#26).
+    // closes only a pending handshake; an open socket is left alone.
     const closeStale = (openToo: boolean) => {
       const stale = ws && (ws.readyState === WebSocket.CONNECTING || (openToo && ws.readyState === WebSocket.OPEN))
       if (stale) { resuming = true; ws?.close() } else reconnect.wake()

@@ -43,7 +43,7 @@ repo와 Go module 이름은 `herdr-remote`다.
 | Attachment·notification | 미구현 |
 
 Claude의 localhost handoff와 Bridge 재시작 복구는 실제 process에서 검증했다.
-미검증 scenario와 우선순위는 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)에 있다.
+남은 개발 작업은 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)에 있다.
 
 ## 기술 스택
 
@@ -238,8 +238,8 @@ HERDR_REMOTE_HEALTH_URL = "http://127.0.0.1:8788/api/sessions"
 
 Herdr live handoff는 테스트에서 agent PID·native session을 보존했지만 terminal ID를
 재발급했고 desktop client가 끊긴 동안 geometry를 기본 120×40으로 변경했다. 이 동작은
-mobile Terminal의 resize와 별개다. 검증 절차는 [CONTRIBUTING](CONTRIBUTING.md#실제-handoff-검증),
-남은 조건은 [handoff issue](https://github.com/psw7205/herdr-remote/issues/10)를 따른다.
+mobile Terminal의 resize와 별개다. 검증 절차는 [CONTRIBUTING](CONTRIBUTING.md#실제-handoff-검증)을
+따른다.
 
 ### 진단 출력 공유
 
@@ -257,10 +257,10 @@ prompt와 transcript 본문은 log에 쓰지 않는다.
 | [PRD](docs/prd.md) | 제품 요구와 범위 |
 | [ADR](docs/adr.md) | architecture 결정 |
 | [Architecture](docs/architecture.md) | 결정을 조합한 runtime 구조, data flow, invariant |
-| [Issues](https://github.com/psw7205/herdr-remote/issues) | 남은 작업과 완료 기준. label `P0`~`P2`는 우선순위, `in-use`·`blocked`·`optional`은 상태 |
+| [Issues](https://github.com/psw7205/herdr-remote/issues) | 남은 개발 작업과 완료 기준. label `P0`~`P2`는 우선순위 |
 
 로컬 조사·실측 상세는 Git에서 제외한 `docs/records/`에 보관한다. 공개 문서에는 현재 동작과
-재사용할 결론을, commit·issue에는 식별 정보 없는 검증 요약을 남긴다.
+재사용할 결론을, commit·PR에는 식별 정보 없는 검증 요약을 남긴다.
 
 ## License
 

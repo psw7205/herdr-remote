@@ -4,7 +4,7 @@
 끝난 계획은 archive로 옮기지 않고 삭제한다. 이전 내용은 Git history에서 찾는다.
 
 한 사실은 한 문서가 소유하고 다른 문서는 link한다. 동작 invariant는 [architecture.md §8](architecture.md#8-invariants),
-agent 작업 규칙은 `AGENTS.md`, 남은 작업과 상태는 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)가 소유한다.
+agent 작업 규칙은 `AGENTS.md`, 남은 개발 작업은 [GitHub Issues](https://github.com/psw7205/herdr-remote/issues)가 소유한다.
 
 | 문서 | 성격 | 갱신 규칙 |
 | --- | --- | --- |
@@ -17,6 +17,6 @@ agent 작업 규칙은 `AGENTS.md`, 남은 작업과 상태는 [GitHub Issues](h
 로컬 기록은 commit·push 대상이 아니며 다른 checkout에 존재한다고 가정하지 않는다. 기록은 날짜별로
 추가하고 실측·unit test·미확인을 구분한다. 현재 설치 버전의 지원 여부는 code와 runtime에서 다시 확인한다.
 
-공개할 결론은 code·test, ADR 또는 architecture에 반영한다. Commit·issue의 검증 요약에는
+공개할 결론은 code·test, ADR 또는 architecture에 반영한다. Commit·PR의 검증 요약에는
 실행한 명령과 결과만 남기고 개인 경로, 계정, host의 실제 설정과 보안 상태를 복사하지 않는다.
 공개 문서는 로컬 기록을 필수 근거나 링크 대상으로 삼지 않는다.
